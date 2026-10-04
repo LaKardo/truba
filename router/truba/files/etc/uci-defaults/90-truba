@@ -1,0 +1,80 @@
+#!/bin/sh
+# Первичная настройка при установке пакета truba. Всё откатывается /usr/share/truba/uninstall.sh.
+
+STATE=/etc/truba/state
+mkdir -p "$STATE"
+
+# Исходные значения межсетевого экрана — чтобы вернуть их при удалении.
+if [ ! -f "$STATE/firewall.orig" ]; then
+	{
+		echo "fullcone=$(uci -q get firewall.@defaults[0].fullcone)"
+		echo "flow_offloading=$(uci -q get firewall.@defaults[0].flow_offloading)"
+		echo "flow_offloading_hw=$(uci -q get firewall.@defaults[0].flow_offloading_hw)"
+	} > "$STATE/firewall.orig"
+fi
+
+# Full cone NAT и программное ускорение; аппаратное выключено (PLAN §4.2).
+uci -q set firewall.@defaults[0].fullcone='1'
+uci -q set firewall.@defaults[0].flow_offloading='1'
+uci -q set firewall.@defaults[0].flow_offloading_hw='0'
+
+IFACE="$(uci -q get truba.main.iface)"
+IFACE="${IFACE:-awg0}"
+
+# Зона Туннеля: masq + fullcone, вход на сам Роутер закрыт.
+if [ -z "$(uci -q get firewall.truba)" ]; then
+	uci -q batch <<-EOF
+		set firewall.truba=zone
+		set firewall.truba.name='truba'
+		add_list firewall.truba.network='$IFACE'
+		set firewall.truba.input='REJECT'
+		set firewall.truba.output='ACCEPT'
+		set firewall.truba.forward='REJECT'
+		set firewall.truba.masq='1'
+		set firewall.truba.mtu_fix='1'
+	EOF
+fi
+
+if [ -z "$(uci -q get firewall.lan_truba)" ]; then
+	uci -q batch <<-EOF
+		set firewall.lan_truba=forwarding
+		set firewall.lan_truba.src='lan'
+		set firewall.lan_truba.dest='truba'
+	EOF
+fi
+
+# IPv6 домашней сети не трогаем (нужен roamd, ADR 0005); закрываем только выход в интернет по IPv6.
+if [ -z "$(uci -q get firewall.truba_no_ipv6_inet)" ]; then
+	uci -q batch <<-EOF
+		set firewall.truba_no_ipv6_inet=rule
+		set firewall.truba_no_ipv6_inet.name='Truba: no IPv6 internet from LAN'
+		set firewall.truba_no_ipv6_inet.src='lan'
+		set firewall.truba_no_ipv6_inet.dest='wan'
+		set firewall.truba_no_ipv6_inet.family='ipv6'
+		set firewall.truba_no_ipv6_inet.proto='all'
+		set firewall.truba_no_ipv6_inet.target='REJECT'
+	EOF
+fi
+
+uci -q commit firewall
+
+# Стартовые настройки Категорий — только при первой установке.
+if [ -z "$(uci -q show truba | grep '=rule$')" ]; then
+	/usr/sbin/truba reset-rules all >/dev/null 2>&1
+	/usr/sbin/truba reset-rules selective >/dev/null 2>&1
+fi
+
+# mosdns запускает служба truba со своим конфигом.
+[ -x /etc/init.d/mosdns ] && {
+	/etc/init.d/mosdns stop >/dev/null 2>&1
+	/etc/init.d/mosdns disable >/dev/null 2>&1
+}
+
+# Переустановка пакетов после sysupgrade (ADR 0004).
+if [ -f /etc/rc.local ] && ! grep -q '/etc/truba/reinstall.sh' /etc/rc.local; then
+	sed -i 's#^exit 0$#[ -x /etc/truba/reinstall.sh ] \&\& /etc/truba/reinstall.sh \&\nexit 0#' /etc/rc.local
+	grep -q '/etc/truba/reinstall.sh' /etc/rc.local || \
+		echo '[ -x /etc/truba/reinstall.sh ] && /etc/truba/reinstall.sh &' >> /etc/rc.local
+fi
+
+exit 0

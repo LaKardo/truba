@@ -1,0 +1,773 @@
+# План реализации «Труба»
+
+Своя сеть через свой VPS: **Труба** (VPS, Ubuntu 24.04) → **Туннель** (AmneziaWG) → **Роутер** (Netcraze NC-1812, ImmortalWrt 25.12) с Full cone NAT, маршрутизацией по Наборам правил kirilllavrov и управлением из LuCI.
+
+Термины — в [CONTEXT.md](CONTEXT.md). Ключевые решения и их причины — в [docs/adr/](docs/adr/):
+
+| ADR | Решение |
+|---|---|
+| [0001](docs/adr/0001-full-cone-on-router-vps-as-pipe.md) | Full cone делает Роутер; VPS только транслирует 1:1 |
+| [0002](docs/adr/0002-kernel-datapath-no-userspace-proxy.md) | Трафик Туннеля идёт через ядро (метки + nftables), без Xray/sing-box |
+| [0003](docs/adr/0003-mosdns-with-own-dat-unpacker.md) | Домены классифицирует mosdns, `.dat` распаковывает свой ucode-скрипт |
+| [0004](docs/adr/0004-own-apk-feed-over-stock-firmware.md) | Свой apk-фид поверх стоковой ImmortalWrt |
+| [0005](docs/adr/0005-routing-ipv4-only-lan-ipv6-untouched.md) | Маршрутизация только IPv4; IPv6 домашней сети (нужен roamd) не трогаем, IPv6-интернет закрыт |
+
+### Статус реализации (2026-10-04)
+
+| Этап | Состояние | Как проверено |
+|---|---|---|
+| 0. Репозиторий, CI | Код готов: [build.yml](.github/workflows/build.yml), [watch-releases.yml](.github/workflows/watch-releases.yml) | Не запускался: нужен репозиторий на GitHub и секреты `APK_SIGN_KEY`/`APK_SIGN_PUB` |
+| 1. `install-vps.sh` | Готов | `tests/vps`: shellcheck, пределы параметров AWG 1.x/2.x, `nft -c` и загрузка правил в ядро. На настоящем VPS не запускался |
+| 2. AmneziaWG под ImmortalWrt | Сборка описана в CI (awg-openwrt на зафиксированном коммите + свой `amneziawg-go`) | Не собиралось: первый прогон CI |
+| 3–6. Пакет `truba` | Готов | `tests/router`: ImmortalWrt 25.12.2 под настоящим procd/netifd/fw4 в Docker, Туннель — dummy-интерфейс. 50+ проверок: nftables, ip rule, таблица 77, mosdns 5.3.3 (Блок → NXDOMAIN, AAAA → пусто), `full:`/`regexp:`, Аварийная блокировка, оба Режима, teardown, uninstall |
+| 4. Распаковщик | Готов | `tests/dat` на реальных `.dat`: записи один в один, 2–3 с на оба файла |
+| 7. `luci-app-truba` | Готов, 8 вкладок, перевод RU (222 строки) | Headless Chromium: все вкладки без ошибок JS; «Сохранить и применить» → служба перестраивает правила (смена Действия, Политика устройства, выключение Маршрутизации) |
+| 8. Переустановка после sysupgrade | Скрипт готов | Не проверялся реальным sysupgrade |
+| 9. Приёмка §8 | — | Нужна живая сеть: VPS + NC-1812 |
+
+Отличия реализации от первоначального текста плана внесены прямо в разделы ниже:
+- проверка Туннеля пингует Трубу внутри Туннеля, а не 1.1.1.1;
+- служебные хосты Роутера резолвятся Напрямую;
+- входящие с `wan` помечаются для ответов Напрямую;
+- fw4 не трогает таблицу Трубы, поэтому include для межсетевого экрана не понадобился;
+- на VPS проверяется «не контейнер» вместо строго KVM;
+- DHCP-клиент VPS исключён из DNAT.
+
+---
+
+## 1. Общая схема
+
+```
+                         ИНТЕРНЕТ
+                            │
+              ┌─────────────┴───────────────────────────────────────────┐
+              │ ТРУБА  VPS Ubuntu 24.04 (KVM)    eth0 = <VPS_IP>        │
+              │                                                         │
+              │  вход <VPS_IP>:                                         │
+              │    tcp/<SSH_PORT>  ──► sshd (только ключ, fail2ban)     │
+              │    udp/<AWG_PORT>  ──► AmneziaWG awg0                   │
+              │    всё остальное   ──► DNAT → 10.77.77.2 (Роутер)       │
+              │  выход от 10.77.77.2 ──► SNAT → <VPS_IP>, порт сохраняется│
+              └─────────────┬───────────────────────────────────────────┘
+                            │  udp <VPS_IP>:<AWG_PORT>
+                 ═══════════╪═══ Туннель AmneziaWG ≥2.0, MTU 1380 ═══
+                            │  10.77.77.1 ◄──► 10.77.77.2, keepalive 25 с
+              ┌─────────────┴───────────────────────────────────────────┐
+              │ РОУТЕР  NC-1812 · ImmortalWrt 25.12 · 1 ГБ RAM          │
+              │                                                         │
+              │  зона wan   (провайдер) masq + fullcone                 │
+              │  зона truba (awg0)      masq + fullcone, input REJECT   │
+              │  зона lan   (br-lan)    ──► wan, ──► truba              │
+              │                                                         │
+              │  dnsmasq :53 (DHCP, без кэша) ─► mosdns :5335           │
+              │     mosdns: Категории geosite → DNS-сервер + nftset     │
+              │  nft table inet truba: наборы geoip/geosite/устройства  │
+              │     → метка TUNNEL / DIRECT, ct mark (липкость)         │
+              │  ip rule fwmark TUNNEL → table 77: default dev awg0     │
+              │                      (или blackhole = Авар. блокировка) │
+              │  truba-watchdog · обновление .dat · luci-app-truba      │
+              │  roamd (mesh-контроллер): IPv6 link-local на br-lan     │
+              └─────────────┬───────────────────────────────────────────┘
+                            │  IPv4: Маршрутизация Трубы
+                            │  IPv6: только внутри сети (link-local/ULA), в интернет — REJECT
+                   Устройства домашней сети · узлы roamd (WDS, MAC клиентов сохраняются)
+```
+
+### Адресный план и параметры
+
+| Параметр | Значение | Где задаётся |
+|---|---|---|
+| Подсеть Туннеля | `10.77.77.0/30`: `.1` — Труба, `.2` — Роутер | `install-vps.sh`, импорт `.conf` |
+| UDP-порт Туннеля | случайный 40000–59999 | `install-vps.sh` |
+| SSH-порт Трубы | случайный 40000–59999 (≠ порту Туннеля) | `install-vps.sh` |
+| MTU Туннеля | 1380 (обе стороны) + MSS clamping | конфиги AWG, зона `truba` `mtu_fix` |
+| Таблица маршрутов Туннеля | `77` | служба `truba` |
+| Метка TUNNEL / DIRECT | `0x00010000` / `0x00020000` (маска `0x00ff0000`) | служба `truba` |
+| ct mark INBOUND | `0x00040000` (ct mark целиком принадлежит Трубе) | служба `truba` |
+| Порт mosdns | `127.0.0.1:5335` | `/etc/config/truba` |
+
+---
+
+## 2. Потоки трафика
+
+### 2.1 Исходящий, Действие «Туннель»
+
+```
+ПК 192.168.1.10:51000 → youtube.com
+  1. DNS: dnsmasq → mosdns. Домен в Категории с Действием «Туннель»
+     (или «По режиму» в Режиме «Всё в туннель») → DoH 1.1.1.1 через
+     Туннель (so_mark TUNNEL); IP ответа → набор gs_tunnel4 (если Категория явная).
+  2. Пакет SYN: prerouting/mangle (table inet truba)
+       iif br-lan, новый, не bypass → classify → meta mark = TUNNEL
+       ct mark = TUNNEL (все следующие пакеты соединения — без классификации)
+  3. ip rule fwmark TUNNEL → table 77 → default dev awg0
+  4. fw4 srcnat, зона truba: masq + fullcone → 10.77.77.2:51000 (порт сохраняется, если свободен)
+  5. Труба: SNAT 10.77.77.2 → <VPS_IP>:51000 → интернет
+```
+
+### 2.2 Исходящий, Действие «Напрямую»
+
+```
+ПК → gosuslugi.ru (category-ru) или любой IP из geoip:ru
+  mosdns → Яндекс DNS напрямую, IP → gs_direct4
+  classify → meta mark = DIRECT → основная таблица → wan (masq + fullcone)
+```
+
+### 2.3 Входящий через IP Трубы (проброс / UPnP / fullcone-отображение)
+
+```
+Внешний узел → <VPS_IP>:27015
+  1. Труба: DNAT → 10.77.77.2:27015 (источник не меняется)
+  2. Роутер, iif awg0, ct new → ct mark |= INBOUND
+  3. fw4 dstnat: проброс порта / UPnP / fullcone-отображение → 192.168.1.20:27015
+  4. Ответ от 192.168.1.20 (iif br-lan): ct mark INBOUND → meta mark = TUNNEL
+     → table 77 → awg0 → Труба → внешнему узлу.
+     Без этого шага ответ российскому клиенту ушёл бы в wan (geoip:ru), и соединение
+     развалилось бы. Это обязательная часть схемы.
+```
+
+### 2.4 Туннель упал
+
+```
+truba-watchdog: 3 неудачи подряд (handshake > 180 с или нет ping через awg0)
+  → перезапуск интерфейса awg0
+  → пока не восстановился, table 77:
+       Аварийная блокировка ВКЛ  → blackhole default  (трафик «Туннель» отбрасывается)
+       Аварийная блокировка ВЫКЛ → таблица пуста → ip rule проваливается в main → wan
+  → после восстановления: default dev awg0 возвращается автоматически
+```
+
+---
+
+## 3. Часть A — Труба (VPS)
+
+Всё делает один повторяемый скрипт `vps/install-vps.sh`, запуск от root.
+
+### 3.1 Подкоманды
+
+| Команда | Что делает |
+|---|---|
+| `install` | Полная установка. При повторном запуске ключи и порты берутся из `/etc/truba/pipe.env` и не меняются |
+| `show-config` | Печатает `.conf` для импорта в Роутер |
+| `rotate-keys` | Новые ключи и параметры AWG; после этого конфиг Роутера нужно импортировать заново |
+| `status` | Туннель, handshake, правила nft, счётчики conntrack |
+| `uninstall` | Снимает правила, останавливает Туннель, возвращает SSH на прежний порт |
+
+### 3.2 Шаги `install`
+
+1. **Предусловия** (иначе выход с объяснением):
+   - Ubuntu 24.04;
+   - VPS — полноценная ВМ, а не контейнер (`systemd-detect-virt --container`): KVM, VMware, Xen, Hyper-V подходят, OpenVZ/LXC — нет;
+   - в `/root/.ssh/authorized_keys` есть ключ: после переноса SSH вход по паролю закрывается;
+   - IPv4 на интерфейсе маршрута по умолчанию совпадает с внешним IP (`curl -4 https://api.ipify.org`): значит, Труба не за NAT провайдера.
+2. **Пакеты:** `nftables fail2ban unattended-upgrades linux-headers-$(uname -r) software-properties-common`. ufw выключается: он мешает нашим правилам nftables.
+3. **AmneziaWG:** `add-apt-repository ppa:amnezia/ppa`, `apt install amneziawg` (DKMS + tools), `modprobe amneziawg`. Версия протокола (`awg --version` / версия пакета) записывается в `/etc/truba/pipe.env`: по ней CI собирает модуль для Роутера из того же тега.
+4. **SSH на высокий порт.** В Ubuntu 24.04 SSH запускается через сокет-активацию, поэтому нужно:
+   - `/etc/ssh/sshd_config.d/10-truba.conf`: `Port <SSH_PORT>`, `PasswordAuthentication no`, `PermitRootLogin prohibit-password`;
+   - `systemctl daemon-reload && systemctl restart ssh.socket`.
+5. **sysctl** `/etc/sysctl.d/90-truba.conf`:
+   ```
+   net.ipv4.ip_forward = 1
+   net.core.default_qdisc = fq
+   net.ipv4.tcp_congestion_control = bbr
+   net.netfilter.nf_conntrack_max = 262144
+   net.ipv6.conf.all.forwarding = 0
+   ```
+6. **Ключи и параметры AWG.**
+   - Генерируются пары ключей Трубы и Роутера и PSK.
+   - Параметры маскировки (`Jc/Jmin/Jmax`, `S1–S4`, `H1–H4`, `I1–I5`) генерируются по правилам Amnezia для установленной версии: например, `Jmax ≤ 1280`, `S1 + 56 ≠ S2`, диапазоны `H` не пересекаются.
+7. **`/etc/amnezia/amneziawg/awg0.conf`**, unit `awg-quick@awg0`:
+   ```ini
+   [Interface]
+   PrivateKey = <vps_priv>
+   Address    = 10.77.77.1/30
+   ListenPort = <AWG_PORT>
+   MTU        = 1380
+   Jc = … ; Jmin = … ; Jmax = … ; S1..S4 = … ; H1..H4 = … ; I1..I5 = …
+
+   [Peer]                      # Роутер — единственный пир
+   PublicKey    = <router_pub>
+   PresharedKey = <psk>
+   AllowedIPs   = 10.77.77.2/32
+   ```
+8. **Правила nft** `/etc/truba/pipe.nft` + unit `truba-pipe.service` (`Before=awg-quick@awg0`):
+   ```nft
+   #!/usr/sbin/nft -f
+   define WAN      = "eth0"          # подставляется по ip route get 1.1.1.1
+   define AWG      = "awg0"
+   define PUB      = 203.0.113.10    # <VPS_IP>
+   define RTR      = 10.77.77.2
+   define SSH_PORT = 52222
+   define AWG_PORT = 51820
+
+   table ip truba_nat
+   delete table ip truba_nat
+   table ip truba_nat {
+     chain prerouting {
+       type nat hook prerouting priority dstnat; policy accept;
+       iifname $WAN udp dport 68 return                                       # DHCP-клиент самого VPS
+       iifname $WAN ip daddr $PUB tcp dport != $SSH_PORT dnat to $RTR
+       iifname $WAN ip daddr $PUB udp dport != $AWG_PORT dnat to $RTR
+       iifname $WAN ip daddr $PUB meta l4proto != { tcp, udp } dnat to $RTR   # ICMP echo и прочее → Роутер
+     }
+     chain postrouting {
+       type nat hook postrouting priority srcnat; policy accept;
+       oifname $WAN ip saddr $RTR snat to $PUB        # порт сохраняется, если свободен
+     }
+   }
+
+   table inet truba_filter
+   delete table inet truba_filter
+   table inet truba_filter {
+     chain input {
+       type filter hook input priority filter; policy drop;
+       iif lo accept
+       ct state established,related accept
+       ct state invalid drop
+       iifname $WAN tcp dport $SSH_PORT accept
+       iifname $WAN udp dport $AWG_PORT accept
+       iifname $AWG ip saddr $RTR accept              # ping Роутера до 10.77.77.1
+     }
+     chain forward {
+       type filter hook forward priority filter; policy drop;
+       ct state established,related accept
+       ct state invalid drop
+       iifname $WAN oifname $AWG ct status dnat accept
+       iifname $AWG oifname $WAN ip saddr $RTR accept
+     }
+     chain mss {
+       type filter hook forward priority mangle; policy accept;
+       tcp flags syn tcp option maxseg size set rt mtu
+     }
+   }
+   ```
+   Применение безопасное: скрипт загружает правила и ждёт 120 с, пока пользователь подтвердит вход по SSH на новом порту. Без подтверждения правила и SSH откатываются.
+9. **fail2ban:** jail `sshd` на `<SSH_PORT>`, `banaction = nftables-multiport`.
+10. **unattended-upgrades:** включён. DKMS сам пересобирает модуль AWG при обновлении ядра Ubuntu.
+11. **Итог:** `/root/truba/router.conf` — стандартный AWG-`.conf` для Роутера (`Address = 10.77.77.2/30`, `Endpoint = <VPS_IP>:<AWG_PORT>`, `AllowedIPs = 0.0.0.0/0`, `PersistentKeepalive = 25`, все параметры маскировки).
+
+---
+
+## 4. Часть B — Роутер: каркас данных
+
+### 4.1 Пакеты
+
+| Пакет | Откуда | Назначение |
+|---|---|---|
+| `kmod-amneziawg`, `amneziawg-tools`, `luci-proto-amneziawg` | наш фид (сборка из `amnezia-vpn/amneziawg-openwrt` того же тега, что на VPS) | Туннель как стандартный интерфейс netifd |
+| `amneziawg-go` | наш фид | запасной вариант, если под текущую версию ImmortalWrt ещё нет модуля ядра |
+| `truba` | наш фид | ядро: init, ucode-скрипты, rpcd-плагин, контроль туннеля, обновление списков |
+| `luci-app-truba` | наш фид | интерфейс (8 вкладок, RU/EN) |
+| `mosdns` (5.3.3), `ca-bundle`, `curl` | фид ImmortalWrt | DNS-классификатор, скачивание списков |
+| `luci-app-upnp` (`miniupnpd-nftables`) | фид ImmortalWrt | UPnP/NAT-PMP на Туннеле (по переключателю) |
+
+### 4.2 Что пакет `truba` настраивает при установке (uci-defaults, откатывается при удалении)
+
+```sh
+# Full cone и ускорение
+uci set firewall.@defaults[0].fullcone='1'          # опция fw4 из патча ImmortalWrt
+uci set firewall.@defaults[0].fullcone6='0'
+uci set firewall.@defaults[0].flow_offloading='1'
+uci set firewall.@defaults[0].flow_offloading_hw='0'
+
+# Зона Туннеля
+uci set firewall.truba=zone
+uci set firewall.truba.name='truba'
+uci add_list firewall.truba.network='awg0'
+uci set firewall.truba.input='REJECT'               # LuCI/SSH Роутера не видны из Туннеля
+uci set firewall.truba.output='ACCEPT'
+uci set firewall.truba.forward='REJECT'
+uci set firewall.truba.masq='1'
+uci set firewall.truba.mtu_fix='1'
+uci set firewall.lan_truba=forwarding
+uci set firewall.lan_truba.src='lan'
+uci set firewall.lan_truba.dest='truba'
+
+# IPv6 домашней сети не трогаем (нужен roamd, ADR 0005): ra/dhcpv6/ip6assign/ULA остаются как есть.
+# Закрываем только выход в интернет по IPv6 — страховка на случай, если провайдер включит IPv6.
+uci set firewall.truba_no_ipv6_inet=rule
+uci set firewall.truba_no_ipv6_inet.name='Truba: no IPv6 internet from LAN'
+uci set firewall.truba_no_ipv6_inet.src='lan'
+uci set firewall.truba_no_ipv6_inet.dest='wan'
+uci set firewall.truba_no_ipv6_inet.family='ipv6'
+uci set firewall.truba_no_ipv6_inet.target='REJECT'   # REJECT, а не DROP: Happy Eyeballs сразу уходит на IPv4
+
+# Стоковый init mosdns не используется — mosdns запускает служба truba
+/etc/init.d/mosdns disable
+```
+
+### 4.3 Маршрутизация по меткам
+
+```sh
+ip rule add fwmark 0x00010000/0x00ff0000 lookup 77 priority 1000   # трафик Действия «Туннель» и mosdns so_mark
+ip rule add oif awg0 lookup 77 priority 1001                       # сокеты, привязанные к awg0 (watchdog, curl --interface)
+sysctl -w net.ipv4.conf.awg0.rp_filter=0                           # входящие из Туннеля с любыми источниками
+# table 77 ведёт служба по состоянию Туннеля:
+#   здоров                               → ip route replace default dev awg0 table 77
+#   упал + Аварийная блокировка          → ip route replace blackhole default table 77
+#   упал + без Аварийной блокировки      → ip route flush table 77
+```
+
+### 4.4 Таблица `inet truba` (генерируется целиком и применяется атомарно `nft -f`)
+
+```nft
+table inet truba
+delete table inet truba
+table inet truba {
+  set lan_if     { type ifname; elements = { "br-lan" } }               # из выбранных зон
+  set bypass4    { type ipv4_addr; flags interval; elements = {
+                     192.168.1.0/24, 10.77.77.0/30, <VPS_IP>, 224.0.0.0/4, 255.255.255.255 } }
+  set gi_block4  { type ipv4_addr; flags interval; auto-merge; }         # Категории geoip с Действием «Блок»
+  set gi_tunnel4 { type ipv4_addr; flags interval; auto-merge; }         # … «Туннель»
+  set gi_direct4 { type ipv4_addr; flags interval; auto-merge; }         # … «Напрямую»
+  set gs_tunnel4 { type ipv4_addr; }                                     # наполняет mosdns
+  set gs_direct4 { type ipv4_addr; }                                     # наполняет mosdns
+  set dev_tunnel { type ether_addr; }                                    # Политика «Всё в туннель»
+  set dev_direct { type ether_addr; }                                    # Политика «Всё напрямую»
+
+  counter c_tunnel {}
+  counter c_direct {}
+  counter c_block {}
+  counter c_inbound {}
+
+  chain prerouting {
+    type filter hook prerouting priority mangle; policy accept;
+
+    meta nfproto != ipv4 return                                         # IPv6 (roamd, link-local, ULA) не трогаем
+
+    # входящие через IP Трубы — запомнить, чтобы ответы вернулись в Туннель
+    iifname "awg0" ct state new ct mark set 0x00040000 counter name c_inbound return
+    # входящие с других внешних интерфейсов (fullcone-отображение на wan) — ответы Напрямую
+    iifname != @lan_if ct state new ct mark set 0x00020000 return
+
+    iifname != @lan_if return
+    ct mark 0x00040000 meta mark set 0x00010000 return                  # ответы на входящие
+    ct mark & 0x00030000 != 0 meta mark set ct mark return              # липкость: решение принято при открытии соединения
+    ip daddr @bypass4 return
+
+    jump classify
+    ct mark set meta mark
+    meta mark 0x00010000 counter name c_tunnel
+    meta mark 0x00020000 counter name c_direct
+  }
+
+  # Приоритет: Блок → Политика устройства → geosite (Туннель > Напрямую) → geoip → Режим
+  chain classify {
+    ip daddr @gi_block4  counter name c_block drop
+    ether saddr @dev_direct meta mark set 0x00020000 return
+    ether saddr @dev_tunnel meta mark set 0x00010000 return
+    ip daddr @gs_tunnel4 meta mark set 0x00010000 return
+    ip daddr @gs_direct4 meta mark set 0x00020000 return
+    ip daddr @gi_tunnel4 meta mark set 0x00010000 return
+    ip daddr @gi_direct4 meta mark set 0x00020000 return
+    meta mark set 0x00010000          # Режим «Всё в туннель»  (в «Выборочном» — 0x00020000)
+  }
+
+  # Перехват DNS: устройства с захардкоженным 8.8.8.8 всё равно идут через Роутер
+  chain dns_hijack {
+    type nat hook prerouting priority dstnat - 5; policy accept;
+    meta nfproto ipv4 iifname @lan_if meta l4proto { tcp, udp } th dport 53 redirect to :53
+  }
+}
+```
+
+**Почему так:**
+- **Только IPv4.** Первое правило пропускает весь IPv6 без изменений: на нём работает обнаружение узлов roamd (`ff02::1` на `br-lan`). Без этого IPv6-пакеты попадали бы под действие Режима по умолчанию, и счётчики врали бы. Перехват DNS тоже только для IPv4 (ADR 0005).
+- **Блок для geosite** выполняется на уровне DNS (mosdns отвечает NXDOMAIN), а не по IP. Блокировка по IP задела бы общие CDN.
+- **Блок для geoip** — отбрасывание пакетов по IP.
+- **Наборы `gi_*`** — объединение Категорий geoip с одинаковым Действием. Обычно в Режиме «Всё в туннель» `ru` и `private` → `gi_direct4`.
+- **Липкость через ct mark:** изменение наборов (обновление списков, новые ответы DNS) не переводит уже открытые соединения на другой путь. Отсюда тест 6 — «без обрыва».
+- **Наборы `gs_*` без таймаута.** Они полностью сбрасываются при изменении Действий или Режима и при обновлении geosite. Ответы классифицированных доменов mosdns отдаёт с TTL не больше 300 с, чтобы после сброса устройства быстро перерезолвили адреса.
+
+### 4.5 DNS: dnsmasq → mosdns
+
+**dnsmasq** — через UCI, служба сохраняет исходные значения и восстанавливает их при выключении:
+- `noresolv=1`;
+- `server=127.0.0.1#5335`;
+- `cachesize=0`;
+- фильтр AAAA выполняет mosdns, и только для интернет-доменов: имена из домашней сети (DHCP-хосты, `.lan`), включая их AAAA, dnsmasq отвечает сам, не пересылая в mosdns.
+
+**mosdns** — конфиг `/var/etc/truba/mosdns.yaml` генерируется из UCI. Эскиз под Режим «Всё в туннель»; точный синтаксис проверяется на mosdns 5.3.3 на этапе 5:
+
+```yaml
+log: { level: info }
+plugins:
+  # по одному domain_set на каждую Категорию с явным Действием; файлы — результат распаковщика
+  - { tag: c_category_ads,       type: domain_set, args: { files: [/var/lib/truba/geosite/category-ads.txt] } }
+  - { tag: c_category_ru,        type: domain_set, args: { files: [/var/lib/truba/geosite/category-ru.txt] } }
+  - { tag: c_category_cdn_ru,    type: domain_set, args: { files: [/var/lib/truba/geosite/category-cdn-ru.txt] } }
+  - { tag: c_private,            type: domain_set, args: { files: [/var/lib/truba/geosite/private.txt] } }
+
+  - tag: up_tunnel
+    type: forward
+    args:
+      concurrent: 2
+      upstreams:
+        - { addr: "https://1.1.1.1/dns-query", so_mark: 0x00010000 }
+        - { addr: "https://8.8.8.8/dns-query", so_mark: 0x00010000 }
+  - tag: up_direct
+    type: forward
+    args:
+      upstreams:
+        - { addr: "tls://common.dot.dns.yandex.net", dial_addr: "77.88.8.8" }
+
+  - { tag: cache, type: cache, args: { size: 65536 } }
+
+  # nftset в mosdns 5 — только встроенное действие «семейство,таблица,набор,тип,маска», не тип плагина.
+  # Ответ из кэша тоже проходит через nftset: после пересборки наборов IP возвращаются сами.
+  - tag: flow_tunnel
+    type: sequence
+    args:
+      - { matches: [ "!has_resp" ], exec: $up_tunnel }
+      - { exec: ttl 0-300 }
+      - { exec: "nftset inet,truba,gs_tunnel4,ipv4_addr,32" }
+  - tag: flow_direct
+    type: sequence
+    args:
+      - { matches: [ "!has_resp" ], exec: $up_direct }
+      - { exec: ttl 0-300 }
+      - { exec: "nftset inet,truba,gs_direct4,ipv4_addr,32" }
+  - tag: flow_router                      # NTP, зеркала списков, endpoint Трубы — всегда Напрямую, без nftset
+    type: sequence
+    args: [ { matches: [ "!has_resp" ], exec: $up_direct } ]
+  - tag: flow_default                     # Режим «Всё в туннель»: DNS через Туннель, без nftset
+    type: sequence
+    args: [ { matches: [ "!has_resp" ], exec: $up_tunnel } ]
+
+  - tag: main
+    type: sequence
+    args:
+      - { matches: [ qtype 28 ], exec: reject 0 }        # AAAA → пустой ответ: Маршрутизация только IPv4, IPv6-интернет закрыт (ADR 0005)
+      - { exec: $cache }
+      - { matches: [ qname $c_router ], exec: goto flow_router }
+      # порядок генерируется: от узких Категорий к широким; при равенстве Блок → Туннель → Напрямую
+      - { matches: [ qname $c_0 ], exec: goto flow_direct }   # category-cdn-ru (14)
+      - { matches: [ qname $c_1 ], exec: goto flow_direct }   # private (131)
+      - { matches: [ qname $c_2 ], exec: goto flow_direct }   # category-ru (429)
+      - { matches: [ qname $c_3 ], exec: reject 3 }           # category-ads (42 535): Блок → NXDOMAIN
+      - { exec: goto flow_default }
+
+  - { tag: udp_in, type: udp_server, args: { entry: main, listen: "127.0.0.1:5335" } }
+  - { tag: tcp_in, type: tcp_server, args: { entry: main, listen: "127.0.0.1:5335" } }
+```
+
+Настоящий конфиг генерирует [render.uc](router/truba/files/usr/share/ucode/truba/render.uc) в виде JSON (подмножество YAML). Он проверен на mosdns 5.3.3 в тесте `router`.
+
+**Порядок проверки Категорий («узость»).** Категории сортируются по числу записей: вложенная всегда меньше объемлющей, поэтому вложенность соблюдается сама. При равенстве — Блок → Туннель → Напрямую. Вложенность (A ⊂ B, если все записи A есть в B) распаковщик вычисляет для колонки «Вложена в» в интерфейсе.
+
+**Служебные хосты Роутера резолвятся Напрямую.** Это NTP-серверы из `system`, хосты зеркал списков и endpoint Трубы, если он задан именем. Иначе при Аварийной блокировке получается тупик: после перезагрузки без верного времени AmneziaWG-сервер отвергает handshake (защита от повтора по метке времени), а NTP не может отрезолвить свой сервер через неработающий Туннель.
+
+**Политики устройств действуют только на маршрутизацию.** DNS общий: mosdns видит запросы от dnsmasq, а не от устройств.
+
+### 4.6 Распаковщик `.dat` (ucode, `/usr/share/truba/dat.uc`)
+
+- **Вход:** `geoip.dat` и `geosite.dat` без изменений.
+- **Разбор:** protobuf `GeoIPList` / `GeoSiteList` разбирается побайтово, внешних бинарников нет.
+- **Выход** в tmpfs `/var/lib/truba/`:
+  - `geosite/<tag>.txt` — строки `domain:` / `full:` / `regexp:` / `keyword:` **ровно** как в файле. Атрибуты не используются; регулярные выражения Go RE2 одинаково понимают и v2ray, и mosdns.
+  - `geoip/<tag>.v4` — IPv4-подсети (IPv6-записи пропускаются: Маршрутизация только IPv4, ADR 0005).
+  - `categories.json` — для интерфейса и порядка проверки: `[{set, tag, count, types:{domain,full,regexp,keyword}, subset_of:[…]}]`.
+- **Регистр тегов.** В файле теги в верхнем регистре (`CATEGORY-RU`), в интерфейсе и именах файлов — в нижнем. Сопоставление без учёта регистра, как в v2ray.
+- **Кэш:** распаковка выполняется только если изменился sha256 `.dat`.
+- **Тесты на реальных файлах от 2026-10-04** — проверка, что распаковка ничего не теряет:
+  - geosite — 61 Категория, `category-ru` = 429 записей, `category-ads` = 42 535, уникальных `regexp` 5 (4 в `netflix`, 1 в `private`; сборная `category-streaming` повторяет 4 из `netflix`);
+  - geoip — `ru` = 35 696 записей (IPv4 + IPv6), `private` = 17.
+
+### 4.7 Обновление Наборов правил (`/usr/libexec/truba/update-lists`)
+
+1. **Расписание.** Блок cron между маркерами `# truba-begin` / `# truba-end`. Время хранится в UTC (по умолчанию 04:00) и переводится в часовой пояс Роутера.
+2. **Скачивание.** Для каждого файла:
+   - основной путь — `curl --interface awg0 --fail --max-time 120` с `raw.githubusercontent.com/kirilllavrov/<repo>/release/<file>`;
+   - при ошибке — `curl` напрямую с `cdn.jsdelivr.net/gh/kirilllavrov/<repo>@release/<file>`;
+   - так же скачивается `<file>.sha256sum`.
+3. **Проверка.** `sha256sum -c`. При несовпадении — отказ, запись в журнал, текущие файлы не трогаются.
+4. **Без изменений.** Если sha256 совпадает с текущим, выход без перезагрузки.
+5. **Атомарная замена.** Текущий файл переносится в `/etc/truba/lists/prev/`, новый — в `/etc/truba/lists/`.
+6. **Применение.** `truba reload`: распаковка → атомарная замена наборов `gi_*` → перезапуск mosdns и сброс `gs_*`. Открытые соединения сохраняют путь благодаря ct mark.
+7. **Откат.** Обратная перестановка `prev` ↔ текущий и `truba reload`.
+
+### 4.8 Контроль туннеля (`truba-watchdog`, procd-инстанс)
+
+- **Цикл.** Каждые `interval` секунд (30) проверяются:
+  - возраст handshake из `awg show awg0 latest-handshakes` (не больше 180 с);
+  - `ping -I awg0 -c1 -W2 <probe>`. По умолчанию это адрес Трубы внутри Туннеля (`10.77.77.1`): адрес в интернете не ответил бы, пока в таблице 77 стоит blackhole, и Туннель никогда не признался бы восстановленным. Поэтому подсеть Туннеля держится в таблице 77 всегда.
+- **Перезапуск.** После `fails` (3) неудач подряд — `ubus call network.interface.awg0 down` / `up`. Состояние «упал» → `table 77` по правилу из §4.3.
+- **Восстановление.** Первая успешная проверка возвращает `default dev awg0`.
+- **События.** Пишутся в журнал (`logger -t truba`). Отправляется `ubus send truba.tunnel {state}` — точка расширения для будущих уведомлений, например в Telegram.
+
+### 4.9 UPnP / NAT-PMP
+
+Переключатель «UPnP» на вкладке «Входящие» (по умолчанию выключен). При включении выставляется:
+
+```
+upnpd.config.enabled='1'
+upnpd.config.external_iface='truba'        # зона/интерфейс awg0
+upnpd.config.external_ip='<VPS_IP>'        # у awg0 частный адрес; устройствам сообщается IP Трубы
+```
+
+Ручные пробросы портов работают всегда: стандартный LuCI «Межсетевой экран → Перенаправления портов», источник — зона `truba`.
+
+---
+
+## 5. Часть C — `luci-app-truba`: интерфейс и автоматика
+
+### 5.1 UCI-схема `/etc/config/truba`
+
+```
+config main 'main'
+	option routing    '1'          # переключатель «Маршрутизация»
+	option mode       'all'        # all = «Всё в туннель» | selective = «Выборочный»
+	option killswitch '1'          # Аварийная блокировка
+	option iface      'awg0'       # интерфейс netifd Туннеля (переключатель «Туннель» = network.awg0.disabled)
+	list   zone       'lan'        # на какие зоны действует Маршрутизация
+	option dns_hijack '1'
+	option upnp       '0'
+
+config rule                        # Действие Категории в конкретном Режиме; «По режиму» не хранится
+	option mode   'all'
+	option set    'geoip'          # geoip | geosite
+	option tag    'ru'
+	option action 'direct'         # direct | tunnel | block
+
+config device                      # Политика устройства
+	option name   'PS5'
+	option mac    'AA:BB:CC:DD:EE:FF'
+	option policy 'tunnel'         # tunnel | direct | rules
+
+config dns 'dns'
+	list   tunnel_upstream 'https://1.1.1.1/dns-query'
+	list   tunnel_upstream 'https://8.8.8.8/dns-query'
+	list   direct_upstream 'tls://common.dot.dns.yandex.net@77.88.8.8'
+	option port            '5335'
+	option ttl_max         '300'
+
+config lists 'lists'
+	option geoip_url      'https://raw.githubusercontent.com/kirilllavrov/geoip-builder/release/geoip.dat'
+	option geoip_mirror   'https://cdn.jsdelivr.net/gh/kirilllavrov/geoip-builder@release/geoip.dat'
+	option geosite_url    'https://raw.githubusercontent.com/kirilllavrov/geosite-builder/release/geosite.dat'
+	option geosite_mirror 'https://cdn.jsdelivr.net/gh/kirilllavrov/geosite-builder@release/geosite.dat'
+	option update_utc     '04:00'
+	option via_tunnel     '1'
+
+config watchdog 'watchdog'
+	option enabled       '1'
+	option interval      '30'
+	option handshake_max '180'
+	option fails         '3'
+	option probe         ''          # пусто — адрес Трубы внутри Туннеля
+```
+
+**Стартовые настройки** — секции `rule`, которые создаются при установке и по кнопке «Сбросить»:
+
+| Режим | Набор | Категория | Действие |
+|---|---|---|---|
+| all | geoip | `ru`, `private` | Напрямую |
+| all | geosite | `category-ru`, `category-cdn-ru`, `private` | Напрямую |
+| all | geosite | `category-ads` | Блок |
+| selective | geosite | `category-streaming` | Туннель |
+| selective | geosite | `category-ads` | Блок |
+
+Все остальные Категории — «По режиму».
+
+**Категория пропала из файла.** Если она есть в UCI, но отсутствует в текущем `.dat`, правило пропускается, а в интерфейсе висит предупреждение. Новая Категория в файле появляется в таблице с Действием «По режиму».
+
+### 5.2 Вкладки («Службы → Труба», RU/EN)
+
+| Вкладка | Содержимое |
+|---|---|
+| **Обзор** | Переключатели «Туннель» и «Маршрутизация»; состояние Туннеля (handshake, rx/tx, endpoint); IP Трубы; состояние контроля туннеля; счётчики `c_tunnel/c_direct/c_block/c_inbound`; кнопка «Проверить NAT» |
+| **Туннель** | Импорт `.conf` (файл или вставка) → запись в `network.awg0` и пир; параметры AWG; MTU; keepalive. Те же данные видны и в стандартном luci-proto-amneziawg |
+| **Маршрутизация** | Режим; Аварийная блокировка; зоны; таблица Категорий (Набор · Категория · Записей · Типы · Вложена в · Действие) с поиском и фильтром; «Сбросить к Стартовым настройкам» |
+| **Устройства** | Список Политик устройств; добавление из DHCP-клиентов (имя, MAC); «Всё в туннель / Всё напрямую / По правилам» |
+| **DNS** | Серверы для «Туннель» и «Напрямую»; перехват DNS; максимальный TTL |
+| **Списки** | Источники и зеркала; время обновления (UTC); «Обновить сейчас»; текущая и предыдущая версии (sha256, дата); «Откатить» |
+| **Входящие** | Переключатель UPnP/NAT-PMP; текущие UPnP-отображения; ссылка на перенаправления портов из зоны `truba` |
+| **Диагностика** | «Проверить домен/IP» → отрезолвленные IP, совпавшие Категории (geosite/geoip), итоговое Действие и правило Приоритета, которое сработало; журнал `logread -e truba` |
+
+«Проверить NAT» в интерфейсе проверяет только слой Трубы: внешний IP равен IP Трубы и порт сохраняется (два STUN-сервера через Туннель). Полный тест по RFC 5780 запускается с ПК в домашней сети — см. приёмочный тест 1.
+
+### 5.3 rpcd / ubus API (`/usr/share/rpcd/ucode/truba.uc`)
+
+| Метод | Ответ / действие |
+|---|---|
+| `truba.status` | Туннель, здоровье, счётчики nft, версии списков, IP Трубы |
+| `truba.categories` | содержимое `categories.json` + Действия из UCI для текущего Режима |
+| `truba.check {target}` | разбор домена или IP по Приоритету. Домен резолвится через Роутер, как это сделало бы устройство, поэтому его IP попадает в набор своей Категории — итог совпадает с тем, что увидит nftables |
+| `truba.lists_update` / `truba.lists_rollback` | запуск обновления / отката |
+| `truba.nat_test` | STUN-проверка слоя Трубы |
+| `truba.log` | последние строки журнала |
+
+**Права:** ACL `/usr/share/rpcd/acl.d/luci-app-truba.json` — чтение и запись `uci: truba, network, firewall, upnpd`, вызов `truba.*`.
+**Меню:** `/usr/share/luci/menu.d/luci-app-truba.json`.
+**Применение:** `/usr/share/ucitrack/luci-app-truba.json` → `{"config":"truba","init":"truba"}`.
+
+### 5.4 Автоматика: «Сохранить и применить» → что включается и выключается
+
+Служба `/etc/init.d/truba` (procd, `START=99`) построена на одной операции `reconcile`: вычислить желаемое состояние из UCI и привести систему к нему. Дорогие шаги (распаковка, перезапуск mosdns) выполняются, только если изменились их входные данные (хеши).
+
+```sh
+service_triggers() {
+	procd_add_reload_trigger "truba" "network" "firewall"
+	procd_add_interface_trigger "interface.*" "awg0" /etc/init.d/truba reload
+}
+```
+
+| Изменение в интерфейсе | Что делает служба |
+|---|---|
+| Маршрутизация ВКЛ | Распаковка (если нужно) → таблица `inet truba` → ip rule/table 77 → mosdns + перенаправление dnsmasq → cron → watchdog → UPnP (если включён) |
+| Маршрутизация ВЫКЛ | Снимает всё перечисленное, восстанавливает dnsmasq, убирает блок cron. Туннель и входящие через IP Трубы продолжают работать: правило INBOUND и ip rule для ответов остаются в «минимальном» наборе |
+| Туннель ВКЛ/ВЫКЛ | `network.awg0.disabled` → netifd поднимает/опускает интерфейс → hotplug → пересчёт table 77 |
+| Режим / Действия Категорий | Перегенерация domain_set и наборов `gi_*`, сброс `gs_*`, перезапуск mosdns |
+| Политики устройств | Атомарная замена наборов `dev_*` (без перезапуска mosdns) |
+| Аварийная блокировка | Пересчёт table 77 |
+| Серверы DNS / TTL | Перегенерация mosdns.yaml и перезапуск |
+| Время обновления | Перезапись блока cron |
+| Контроль туннеля вкл/выкл | procd-инстанс `watchdog` запускается или удаляется |
+| UPnP | `upnpd.config.*` и перезапуск miniupnpd |
+| Зоны | Перегенерация `lan_if` и `bypass4` |
+| Перезапуск fw4 | Ничего: fw4 очищает только свою таблицу `inet fw4` (проверено на ImmortalWrt 25.12), таблица `inet truba` переживает его перезагрузки |
+
+**Матрица двух главных переключателей:**
+
+| | Маршрутизация ВКЛ | Маршрутизация ВЫКЛ |
+|---|---|---|
+| **Туннель ВКЛ** | Рабочий режим | Всё напрямую; входящие через IP Трубы и пробросы работают |
+| **Туннель ВЫКЛ** | Аварийная блокировка (или обход напрямую — по её переключателю) | Обычный роутер |
+
+### 5.5 Где что хранится
+
+| Путь | Что | Переживает sysupgrade |
+|---|---|---|
+| `/etc/config/truba` | настройки | да (conffile + keep.d) |
+| `/etc/truba/lists/`, `/etc/truba/lists/prev/` | `.dat` и `.sha256sum` (≈ 5 МБ всего) | да (keep.d) |
+| `/etc/truba/reinstall.sh` | переустановка пакетов после sysupgrade | да (keep.d) |
+| `/etc/apk/keys/truba.pem`, `/etc/apk/repositories.d/truba.list` | ключ и адрес фида | да (keep.d) |
+| `/var/lib/truba/` | распакованные списки, `categories.json`, хеши | нет (tmpfs, восстанавливается) |
+| `/var/etc/truba/` | `mosdns.yaml`, `truba.nft` | нет (генерируется) |
+
+---
+
+## 6. Часть D — сборка и доставка
+
+### 6.1 Репозиторий (публичный, в вашем аккаунте GitHub)
+
+```
+truba/
+├─ CONTEXT.md  PLAN.md  docs/adr/
+├─ vps/
+│  └─ install-vps.sh
+├─ router/
+│  ├─ truba/                  # OpenWrt-пакет: Makefile, files/etc/init.d/truba, files/usr/share/truba/*.uc,
+│  │                          #   files/usr/libexec/truba/*, rpcd-плагин, uci-defaults, keep.d, hotplug
+│  └─ luci-app-truba/         # luci.mk: htdocs/luci-static/resources/view/truba/*.js, root/, po/{ru,templates}
+├─ tests/
+│  ├─ dat/                    # проверки распаковщика на реальных .dat (счётчики из §4.6)
+│  └─ vps/                    # shellcheck + прогон install в контейнере/ВМ
+└─ .github/workflows/
+   ├─ build.yml               # матрица версий ImmortalWrt 25.12.x × mediatek/filogic
+   └─ watch-releases.yml      # ежедневно: появилась новая 25.12.x? → build.yml
+```
+
+В репозитории никогда не бывает приватных ключей AWG, `router.conf`, IP Трубы и ключа подписи.
+
+### 6.2 `build.yml`
+
+1. Скачать ImmortalWrt SDK `25.12.x` для `mediatek/filogic` с `downloads.immortalwrt.org`.
+2. Подключить фид `amnezia-vpn/amneziawg-openwrt` на теге, совпадающем с версией AWG на Трубе (тег зафиксирован в репозитории), и локальный фид `router/`.
+3. `make package/{kmod-amneziawg,amneziawg-tools,luci-proto-amneziawg,amneziawg-go,truba,luci-app-truba}/compile`.
+4. Подписать индекс apk ключом из `secrets.APK_SIGN_KEY`.
+5. Опубликовать в GitHub Pages: `/<версия>/mediatek/filogic/` (`packages.adb` + `.apk`), публичный ключ — `/truba.pem`.
+
+### 6.3 Установка на Роутер (первый раз)
+
+```sh
+wget -O /etc/apk/keys/truba.pem https://<user>.github.io/truba/truba.pem
+. /etc/os-release
+echo "https://<user>.github.io/truba/${VERSION}/mediatek/filogic/packages.adb" > /etc/apk/repositories.d/truba.list
+apk update
+apk add kmod-amneziawg amneziawg-tools luci-proto-amneziawg truba luci-app-truba luci-app-upnp
+```
+
+Дальше всё делается в интерфейсе: «Службы → Труба → Туннель → Импорт `.conf`» → «Сохранить и применить» → «Обзор».
+
+### 6.4 После sysupgrade (вариант (a) из ADR 0004)
+
+- Строка в `/etc/rc.local` (стандартный conffile, переживает обновление): `[ -x /etc/truba/reinstall.sh ] && /etc/truba/reinstall.sh &`.
+- `reinstall.sh` ничего не делает, если `truba` уже установлен. Иначе:
+  1. ждёт интернет;
+  2. подставляет `VERSION` из `/etc/os-release` в адрес фида;
+  3. `apk update`;
+  4. ставит модуль ядра, если он собран под эту версию. Если нет — ставит `amneziawg-go` и пишет предупреждение в журнал;
+  5. ставит `truba` и `luci-app-truba` → служба поднимается с сохранёнными настройками.
+- **Правило эксплуатации:** обновлять ImmortalWrt только после того, как `watch-releases.yml` собрал пакеты под новую версию (отметка в README фида).
+
+---
+
+## 7. Этапы работ
+
+| № | Этап | Результат / критерий выхода |
+|---|---|---|
+| 0 | Репозиторий, CI-каркас, ключ подписи | `build.yml` собирает пустые пакеты `truba` под 25.12.x |
+| 1 | `install-vps.sh` | С тестового клиента AWG: внешний IP = IP Трубы; `nc` на любой порт IP Трубы доходит до клиента; SSH только на новом порту; откат через 120 с работает |
+| 2 | AmneziaWG под ImmortalWrt | Пакеты из фида ставятся на NC-1812, Туннель поднят через luci-proto-amneziawg, handshake есть |
+| 3 | Каркас данных без интерфейса | Зона `truba`, fullcone, таблица `inet truba` с geoip, ip rule/table 77, ct mark INBOUND (скриптом вручную) → приёмочные тесты 1 и 2 |
+| 4 | Распаковщик ucode | Тесты §4.6 зелёные; распаковка `geosite.dat` на NC-1812 укладывается в разумное время (ориентир < 10 с) |
+| 5 | mosdns-классификатор | Генерация `mosdns.yaml`, dnsmasq → mosdns, nftset, Блок через NXDOMAIN, AAAA → пусто, перехват DNS → тесты 3 и 4 |
+| 6 | Служба `truba` | `reconcile`, обновление списков, откат, watchdog, Аварийная блокировка, cron → тесты 5 и 6 |
+| 7 | `luci-app-truba` | 8 вкладок, rpcd API, ACL, меню, переводы RU/EN; каждое изменение применяется по «Сохранить и применить» без SSH |
+| 8 | Жизненный цикл | `reinstall.sh` проверен реальным sysupgrade, `watch-releases.yml`, запасной `amneziawg-go` |
+| 9 | Приёмка | Все 7 тестов §8 на реальной сети, включая совместимость с roamd; затем отдельно — опыт с аппаратным ускорением |
+
+---
+
+## 8. Приёмочные тесты
+
+| № | Что | Как проверить | Ожидание |
+|---|---|---|---|
+| 1 | Full cone | ПК в `lan` с Политикой «Всё в туннель»; NatTypeTester (RFC 5780) с двумя STUN-серверами | Mapping и Filtering: *Endpoint Independent*; публичный IP = IP Трубы |
+| 2 | Входящие | Проброс `truba:8080 → ПК:8080`; с мобильного интернета РФ `curl http://<VPS_IP>:8080`; `tcpdump -i awg0` на Роутере | Ответ приходит; ответные пакеты уходят в `awg0`, а не в `wan` |
+| 3 | Маршрутизация | «Проверить домен/IP» и `traceroute` для домена `category-ru`, домена «По режиму», IP из `geoip:ru`, записи `full:` (её поддомен **не** должен совпасть), записи `regexp:` из `netflix`, домена `category-ads` | Действия и Приоритет совпадают с ожидаемыми; первый хоп — провайдер или `10.77.77.1` соответственно; Блок → NXDOMAIN |
+| 4 | Утечки и IPv6 | ipleak.net, dnsleaktest.com, test-ipv6.com с устройства; на Роутере `ping -6 -c3 ff02::1%br-lan` | IP = IP Трубы; DNS — Cloudflare/Google; IPv6-интернета нет; при этом узлы roamd отвечают по link-local |
+| 5 | Аварийная блокировка | На Трубе `systemctl stop awg-quick@awg0` | Через ≤ 2 мин зарубежные сайты недоступны, российские работают; при выключенном переключателе зарубежные идут через провайдера; после `start` всё восстанавливается само |
+| 6 | Обновление списков | Долгая загрузка или SSH-сессия через Туннель; «Обновить сейчас» и «Откатить» | Сессия не рвётся; размеры наборов в `nft list set` меняются; версии в интерфейсе обновляются |
+| 7 | Совместимость с roamd | Интерфейс roamd; клиент с Политикой устройства подключён к узлу roamd → «Проверить домен/IP» и счётчики; затем клиент переходит между узлами во время загрузки через Туннель | roamd видит все узлы; Политика срабатывает по MAC клиента за узлом; переход между узлами не рвёт соединение |
+
+---
+
+## 9. Риски и ограничения
+
+| Риск | Последствие | Что делаем |
+|---|---|---|
+| Версии AWG на Трубе и Роутере разошлись | Туннель не поднимается | Тег сборки Роутера = версия из `/etc/truba/pipe.env`; `install-vps.sh` предупреждает при обновлении PPA |
+| ImmortalWrt обновили раньше, чем CI собрал модуль | Туннеля нет до сборки | Правило эксплуатации §6.4; запасной `amneziawg-go` |
+| Браузеры с собственным DoH | Доменные Категории не срабатывают для этих устройств | В «Всё в туннель» безопасно (трафик уходит в Туннель, `geoip:ru` всё равно работает). В «Выборочном» такие домены идут напрямую — ограничение ADR 0002 |
+| Общие CDN-адреса | Домены с разными Действиями на одном IP | Туннель побеждает Напрямую (ADR 0002) |
+| Категории ограничены 61 тегом | В «Выборочном» нет Telegram/Meta/Discord/X/OpenAI | Осознанно: новых Категорий не добавляем; основной Режим — «Всё в туннель» |
+| В README geosite указан тег `ru`, а в файле его нет | Ошибка при ручной настройке | Интерфейс показывает только реальные теги из файла (`category-ru`) |
+| Весь входящий трафик идёт на IP Трубы | Жалобы на абузы хостеру (торренты, открытые сервисы) | Учитывать при выборе хостера; UPnP по умолчанию выключен |
+| SNAT на Трубе совпал с собственным соединением VPS | Отдельный порт не сохранится | Редко; при необходимости сузить `ip_local_port_range` на VPS |
+| `raw.githubusercontent.com` медленный или заблокирован | Списки не обновились | Загрузка через Туннель + зеркало jsDelivr; старые списки продолжают работать |
+| Новая ревизия NC-1812 с NAND FM25G02B ([openwrt#23855](https://github.com/openwrt/openwrt/issues/23855)) | Возможен bootloop при перепрошивке | Касается только перепрошивки, не установки пакетов; перед sysupgrade проверить ревизию |
+| fullcone в ImmortalWrt включается глобально | Fullcone действует и на `wan` | Ожидаемо и безвредно |
+| Провайдер включит IPv6 | Устройства получат «белые» IPv6, трафик мог бы пойти мимо Туннеля | Правило `lan → wan` IPv6 REJECT и фильтр AAAA уже стоят; полная поддержка IPv6 — отдельное расширение (ADR 0005) |
+| roamd скачивает пакеты для узлов с GitHub напрямую | Подключение нового узла может не пройти, если GitHub тормозит | Осознанно оставлено как есть: операция разовая, у roamd есть запасные пути (кэш контроллера, фиды узла) |
+| Кто-то выключит IPv6 на `br-lan` (например, `network.lan.ipv6='0'`) | roamd перестанет находить узлы | Труба IPv6 домашней сети не меняет; в README — предупреждение не выключать IPv6 на `br-lan` |
+
+---
+
+## 10. Решения, принятые по умолчанию (на ваш просмотр)
+
+Эти параметры не обсуждались отдельно. Я выбрал их как разумные значения по умолчанию, любое можно поменять:
+
+1. Подсеть Туннеля `10.77.77.0/30`, таблица `77`, метки `0x00010000` / `0x00020000` / `0x00040000` под маской `0x00ff0000`; ct mark целиком принадлежит Трубе (fw4 его не использует).
+2. Блок для geosite — на уровне DNS (NXDOMAIN), для geoip — отбрасывание по IP.
+3. «Узость» Категории: вложенность, а если её нет — меньшее число записей.
+4. Наборы `gs_*` без таймаута, сбрасываются при изменении правил или geosite; TTL классифицированных ответов ≤ 300 с.
+5. Перехват DNS (порт 53 из `lan`) включён, переключатель — на вкладке «DNS».
+6. Политики устройств действуют на маршрутизацию, DNS общий.
+7. `PersistentKeepalive = 25`, MTU 1380.
+8. Время обновления хранится в UTC и переводится в часовой пояс Роутера.
+9. «Проверить NAT» в интерфейсе — только слой Трубы; полный тест RFC 5780 — с ПК.
+10. Пакет `truba` при установке сам включает fullcone и программное ускорение, создаёт зону `truba`, добавляет правило `lan → wan` IPv6 REJECT и выключает стоковый init mosdns. IPv6-настройки домашней сети не трогает. Всё откатывается при удалении.
+11. Теги показываются в нижнем регистре (в файле — верхний; v2ray сравнивает без учёта регистра).
+12. SSH и порт Туннеля — случайные порты 40000–59999; правила на VPS применяются с автооткатом через 120 с.

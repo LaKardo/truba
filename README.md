@@ -1,0 +1,123 @@
+# Труба
+
+Домашняя сеть через собственный VPS: **Труба** (VPS на Ubuntu 24.04) отдаёт **Роутеру** (ImmortalWrt 25.12) весь свой публичный IP по **Туннелю** AmneziaWG, а Роутер сам решает, какой трафик пускать через Туннель, и делает Full cone NAT. Трафик распределяется по Категориям из [geoip.dat](https://github.com/kirilllavrov/geoip-builder) и [geosite.dat](https://github.com/kirilllavrov/geosite-builder), которые используются без изменений. Всё управляется из LuCI: «Службы → Труба».
+
+Термины — в [CONTEXT.md](CONTEXT.md), архитектура и решения — в [PLAN.md](PLAN.md) и [docs/adr/](docs/adr/).
+
+## Что в репозитории
+
+| Путь | Что это |
+|---|---|
+| [vps/install-vps.sh](vps/install-vps.sh) | Настройка VPS как Трубы: AmneziaWG, проброс всех портов на Роутер (nftables 1:1), SSH на высоком порту, fail2ban |
+| [router/truba/](router/truba/) | Пакет `truba`: служба procd, ucode-модули, распаковщик `.dat`, mosdns, nftables, контроль Туннеля |
+| [router/luci-app-truba/](router/luci-app-truba/) | Интерфейс LuCI (8 вкладок, русский перевод) |
+| [router/awg/](router/awg/) | Источники AmneziaWG для фида (модуль ядра, утилиты, `amneziawg-go`) |
+| [.github/workflows/](.github/workflows/) | CI: тесты, сборка под ImmortalWrt SDK, подписанный apk-фид в GitHub Pages, отслеживание новых релизов |
+| [tests/](tests/) | Проверки в Docker: распаковщик, служба под настоящим procd, скрипт VPS, интерфейс |
+
+## Установка
+
+### 1. Фид пакетов (один раз)
+
+AmneziaWG нет в фидах ImmortalWrt, а сторонние сборки модуля ядра не совпадают с ядром ImmortalWrt, поэтому пакеты собирает свой CI ([ADR 0004](docs/adr/0004-own-apk-feed-over-stock-firmware.md)).
+
+1. Репозиторий: [github.com/LaKardo/truba](https://github.com/LaKardo/truba).
+2. Создайте ключ подписи фида и добавьте его в **Settings → Secrets and variables → Actions**:
+   ```bash
+   openssl ecparam -name prime256v1 -genkey -noout -out truba-feed.pem
+   ```
+   ```bash
+   openssl ec -in truba-feed.pem -pubout > truba-feed.pub.pem
+   ```
+   `APK_SIGN_KEY` — содержимое `truba-feed.pem`, `APK_SIGN_PUB` — содержимое `truba-feed.pub.pem`. Закрытый ключ в репозиторий не кладите.
+3. **Actions → build → Run workflow**. После сборки включите **Settings → Pages → ветка `gh-pages`**.
+4. Фид появится по адресу `https://lakardo.github.io/truba/<версия>/mediatek/filogic/packages.adb`.
+
+`watch-releases` каждый день проверяет новые ImmortalWrt 25.12.x и сам собирает под них пакеты.
+
+### 2. VPS
+
+Нужны: Ubuntu 24.04, полноценная ВМ (KVM и т.п., не контейнер), публичный IPv4 прямо на интерфейсе, SSH-ключ в `/root/.ssh/authorized_keys`.
+
+```bash
+curl -fsSLO https://raw.githubusercontent.com/LaKardo/truba/main/vps/install-vps.sh
+```
+```bash
+sudo bash install-vps.sh install
+```
+
+Скрипт временно оставит SSH и на 22-м, и на новом порту и попросит войти по новому порту из другого окна. Без подтверждения за 120 с всё откатится. После установки:
+
+- порт 22 и все остальные порты IP VPS уходят на Роутер, SSH самого VPS — только на новом порту;
+- `/root/truba/router.conf` — конфиг для Роутера. Заберите его:
+  ```bash
+  scp -P <SSH-порт> root@<IP VPS>:/root/truba/router.conf .
+  ```
+
+Команды: `install-vps.sh status | show-config | rotate-keys | uninstall [--purge]`.
+
+### 3. Роутер (ImmortalWrt 25.12, Netcraze NC-1812)
+
+```bash
+wget -O /etc/apk/keys/truba.pem https://lakardo.github.io/truba/keys/truba.pem
+```
+```bash
+. /etc/os-release; echo "https://lakardo.github.io/truba/${VERSION}/mediatek/filogic/packages.adb" > /etc/apk/repositories.d/truba.list
+```
+```bash
+apk update && apk add kmod-amneziawg amneziawg-tools luci-proto-amneziawg truba luci-app-truba luci-i18n-truba-ru luci-app-upnp
+```
+
+Затем в LuCI:
+
+1. **Службы → Труба → Туннель → Импорт .conf** — вставьте `router.conf` → **Сохранить и применить**.
+2. **Обзор** — Туннель «работает», handshake свежий, IP Трубы виден.
+3. **Маршрутизация** — Режим и Действия Категорий (Стартовые настройки уже выставлены).
+
+При установке пакет сам создаёт зону `truba`, включает fullcone и программное ускорение, выключает аппаратное и закрывает выход в интернет по IPv6 из `lan`. IPv6 внутри сети (нужен roamd) он не трогает. При удалении пакета всё это откатывается.
+
+## Как пользоваться
+
+| Вкладка | Что там |
+|---|---|
+| Обзор | Переключатели «Туннель» и «Маршрутизация», состояние, счётчики трафика, проверка NAT |
+| Туннель | Импорт `.conf`, ключи и параметры маскировки AWG, контроль Туннеля |
+| Маршрутизация | Режим, Аварийная блокировка, зоны, таблица всех Категорий с Действиями для каждого Режима |
+| Устройства | Политики устройств по MAC: «Всё в туннель», «Всё напрямую», «По правилам» |
+| DNS | DNS-серверы для «Туннель» и «Напрямую», перехват DNS |
+| Списки | Источники, расписание, «Обновить сейчас», версии и откат |
+| Входящие | UPnP/NAT-PMP на Туннеле, пробросы портов из зоны `truba` |
+| Диагностика | «Проверить домен/IP» — какая Категория и какое Действие сработают и почему; журнал |
+
+Любое изменение применяется кнопкой **«Сохранить и применить»**: служба `truba` сама включает или снимает правила nftables, маршруты, mosdns, перенаправление dnsmasq, cron и контроль Туннеля.
+
+Из командной строки:
+
+```bash
+truba status
+```
+```bash
+truba check gosuslugi.ru
+```
+```bash
+logread -e truba
+```
+
+## Обновление ImmortalWrt
+
+Обновляйте Роутер только после того, как в фиде появился каталог новой версии (`watch-releases` собирает его автоматически). После sysupgrade настройки и ключ фида сохраняются, а `/etc/truba/reinstall.sh` из `rc.local` сам ставит пакеты заново. Если модуля ядра под новую версию ещё нет, скрипт ставит `amneziawg-go` и пишет об этом в журнал.
+
+## Проверки
+
+Все проверки идут в Docker:
+
+```bash
+bash tests/run.sh
+```
+
+- `dat` — распаковщик на свежих `.dat`: записи переносятся один в один, `full:` и `regexp:` на месте, вложенность Категорий;
+- `router` — пакет под настоящим procd/netifd/fw4: таблица nftables, правила, mosdns, Блок, Аварийная блокировка, режимы, teardown и uninstall;
+- `vps` — shellcheck, пределы параметров AWG, правила nftables с загрузкой в ядро;
+- `luci` — синтаксис интерфейса и полнота русского перевода.
+
+Приёмочные тесты на живой сети (Full cone по RFC 5780, входящие, утечки, roamd) — в [PLAN.md §8](PLAN.md).

@@ -1,0 +1,53 @@
+{
+	"admin/services/truba": {
+		"title": "Truba",
+		"order": 30,
+		"action": {
+			"type": "firstchild"
+		},
+		"depends": {
+			"acl": [ "luci-app-truba" ],
+			"uci": { "truba": true }
+		}
+	},
+	"admin/services/truba/overview": {
+		"title": "Overview",
+		"order": 10,
+		"action": { "type": "view", "path": "truba/overview" }
+	},
+	"admin/services/truba/tunnel": {
+		"title": "Tunnel",
+		"order": 20,
+		"action": { "type": "view", "path": "truba/tunnel" }
+	},
+	"admin/services/truba/routing": {
+		"title": "Routing",
+		"order": 30,
+		"action": { "type": "view", "path": "truba/routing" }
+	},
+	"admin/services/truba/devices": {
+		"title": "Devices",
+		"order": 40,
+		"action": { "type": "view", "path": "truba/devices" }
+	},
+	"admin/services/truba/dns": {
+		"title": "DNS",
+		"order": 50,
+		"action": { "type": "view", "path": "truba/dns" }
+	},
+	"admin/services/truba/lists": {
+		"title": "Lists",
+		"order": 60,
+		"action": { "type": "view", "path": "truba/lists" }
+	},
+	"admin/services/truba/inbound": {
+		"title": "Inbound",
+		"order": 70,
+		"action": { "type": "view", "path": "truba/inbound" }
+	},
+	"admin/services/truba/diagnostics": {
+		"title": "Diagnostics",
+		"order": 80,
+		"action": { "type": "view", "path": "truba/diagnostics" }
+	}
+}

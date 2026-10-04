@@ -1,0 +1,88 @@
+#!/usr/bin/ucode -S
+// Труба: командная строка. Вызывается init-скриптом, hotplug, cron и rpcd.
+'use strict';
+
+import * as K from 'truba.core';
+import * as CHK from 'truba.check';
+import * as NAT from 'truba.nattest';
+import * as WD from 'truba.watchdog';
+
+const cmd = ARGV[0];
+const args = slice(ARGV, 1);
+
+function out(obj) {
+	print(sprintf('%.J\n', obj));
+}
+
+function usage() {
+	warn('Использование: truba <команда>\n' +
+		'  apply              применить настройки из /etc/config/truba\n' +
+		'  teardown           снять все правила Трубы\n' +
+		'  routes             пересчитать таблицу Туннеля по его состоянию\n' +
+		'  refresh-bypass     обновить набор локальных подсетей\n' +
+		'  update-lists [-f]  скачать Наборы правил (-f — применить даже без изменений)\n' +
+		'  rollback-lists     вернуть предыдущие Наборы правил\n' +
+		'  check <домен|IP> [MAC]  какая Категория и Действие сработают\n' +
+		'  status             состояние в JSON\n' +
+		'  categories         Категории и Действия в JSON\n' +
+		'  reset-rules <all|selective>  Стартовые настройки Режима\n' +
+		'  nat-test           проверка внешнего IP и сохранения порта через Трубу\n' +
+		'  watchdog           цикл контроля Туннеля (запускает procd)\n');
+	exit(2);
+}
+
+switch (cmd) {
+case 'apply':
+	let r = K.apply();
+	out(r);
+	exit(r.error ? 1 : 0);
+
+case 'teardown':
+	K.teardown();
+	break;
+
+case 'routes':
+	print(K.routes(), '\n');
+	break;
+
+case 'refresh-bypass':
+	K.refresh_bypass();
+	break;
+
+case 'update-lists':
+	out(K.update_lists(args[0] == '-f'));
+	break;
+
+case 'rollback-lists':
+	out(K.rollback_lists());
+	break;
+
+case 'check':
+	if (!args[0])
+		usage();
+	out(CHK.check(args[0], args[1]));
+	break;
+
+case 'status':
+	out(K.status());
+	break;
+
+case 'categories':
+	out(K.categories());
+	break;
+
+case 'reset-rules':
+	out(K.reset_rules(args[0]));
+	break;
+
+case 'nat-test':
+	out(NAT.run());
+	break;
+
+case 'watchdog':
+	WD.run();
+	break;
+
+default:
+	usage();
+}

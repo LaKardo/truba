@@ -1,0 +1,49 @@
+#!/bin/sh /etc/rc.common
+# Труба: применяет /etc/config/truba и держит mosdns и контроль Туннеля.
+# reload = повторный start: truba apply сверяет систему с настройками,
+# а procd перезапускает только те инстансы, у которых изменились параметры или файлы.
+
+START=99
+STOP=10
+USE_PROCD=1
+
+PROG=/usr/sbin/truba
+
+start_service() {
+	$PROG apply >/dev/null || return 1
+
+	config_load truba
+	local routing watchdog
+	config_get_bool routing main routing 1
+	config_get_bool watchdog watchdog enabled 1
+
+	if [ "$routing" -eq 1 ]; then
+		procd_open_instance mosdns
+		procd_set_param command /usr/bin/mosdns start -c /var/etc/truba/mosdns.json -d /var/lib/truba
+		procd_set_param file /var/etc/truba/mosdns.json /var/lib/truba/stamp
+		procd_set_param respawn 3600 5 0
+		procd_set_param stdout 1
+		procd_set_param stderr 1
+		procd_close_instance
+	fi
+
+	if [ "$watchdog" -eq 1 ]; then
+		procd_open_instance watchdog
+		procd_set_param command $PROG watchdog
+		procd_set_param file /etc/config/truba
+		procd_set_param respawn 3600 5 0
+		procd_set_param stderr 1
+		procd_close_instance
+	fi
+}
+
+stop_service() {
+	$PROG teardown
+}
+
+service_triggers() {
+	local iface
+	iface="$(uci -q get truba.main.iface)"
+	procd_add_reload_trigger "truba" "network"
+	procd_add_interface_trigger "interface.*" "${iface:-awg0}" /etc/init.d/truba reload
+}

@@ -1,0 +1,18 @@
+{
+	"luci-app-truba": {
+		"description": "Grant access to Truba",
+		"read": {
+			"ubus": {
+				"truba": [ "status", "categories", "check", "nat_test", "log" ],
+				"luci-rpc": [ "getDHCPLeases", "getHostHints" ]
+			},
+			"uci": [ "truba", "network", "firewall", "dhcp", "upnpd" ]
+		},
+		"write": {
+			"ubus": {
+				"truba": [ "update_lists", "rollback_lists" ]
+			},
+			"uci": [ "truba", "network", "firewall", "upnpd" ]
+		}
+	}
+}

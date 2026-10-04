@@ -1,0 +1,4 @@
+# Скрипты и конфиги исполняются на Linux (роутер, VPS, CI): только LF.
+* text=auto eol=lf
+*.png binary
+*.dat binary

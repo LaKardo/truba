@@ -1,0 +1,421 @@
+// Оркестрация: применить настройки, снять всё, состояние Туннеля, обновление списков.
+'use strict';
+
+import { readfile, writefile, stat, unlink, rename } from 'fs';
+import { cursor } from 'uci';
+import * as C from 'truba.const';
+import * as U from 'truba.util';
+import * as D from 'truba.dat';
+import * as F from 'truba.conf';
+import * as P from 'truba.plan';
+import * as R from 'truba.render';
+import * as N from 'truba.net';
+
+function ensure_dirs() {
+	for (let d in [ C.RUN_DIR, C.ETC_DIR, C.DATA_DIR, C.LISTS_DIR, C.PREV_DIR, C.STATE_DIR ])
+		U.mkdirp(d);
+}
+
+function bypass4(vps, tinfo) {
+	let b = F.connected_subnets();
+	if (vps)
+		push(b, vps + '/32');
+	if (tinfo.subnet)
+		push(b, tinfo.subnet);
+	push(b, '224.0.0.0/4', '255.255.255.255/32');
+	return uniq(b);
+}
+
+// Элементы динамического набора (наполненного mosdns) для переноса в новую таблицу.
+function set_elements(name) {
+	let r = U.run('nft -j list set inet ' + C.NFT_TABLE + ' ' + name);
+	if (r.code != 0)
+		return [];
+	let out = [];
+	try {
+		for (let o in json(r.out)?.nftables ?? []) {
+			for (let e in o?.set?.elem ?? []) {
+				let v = (type(e) == 'object') ? (e.elem?.val ?? e.val) : e;
+				if (type(v) == 'string' && U.is_ipv4(v))
+					push(out, v);
+			}
+		}
+	}
+	catch (e) { }
+	return out;
+}
+
+function health_state() {
+	return U.read_json(C.HEALTH_FILE, null);
+}
+
+// Состояние таблицы 77 по здоровью Туннеля.
+export function routes(cfg, tinfo) {
+	cfg ??= F.load();
+	tinfo ??= F.tunnel_info(cfg.iface);
+	let st = N.iface_up(cfg.iface);
+	let h = health_state();
+	let state;
+	if (tinfo.disabled || !st.up)
+		state = 'down';
+	else if (cfg.watchdog.enabled && h?.state == 'down')
+		state = 'down';
+	else
+		state = 'healthy';
+	// Аварийная блокировка имеет смысл только при включённой Маршрутизации.
+	return N.set_table(state, cfg.iface, tinfo, cfg.routing && cfg.killswitch);
+};
+
+export function apply() {
+	let lk = U.lock('truba');
+	ensure_dirs();
+
+	let cfg = F.load();
+	let tinfo = F.tunnel_info(cfg.iface);
+	let vps = F.vps_ip(tinfo);
+	let st = N.iface_up(cfg.iface);
+	let prev = U.read_json(C.APPLIED_FILE, {});
+	let warnings = [];
+	let ctx = { lan_if: F.zone_devices(cfg.zones), bypass4: bypass4(vps, tinfo) };
+
+	if (!length(ctx.lan_if))
+		push(warnings, 'zones_without_devices');
+	if (!tinfo.exists)
+		push(warnings, 'tunnel_not_configured');
+
+	let applied = { routing: cfg.routing, mode: cfg.mode, time: time(), vps, warnings, missing: [] };
+	let text;
+
+	if (cfg.routing) {
+		let dat = D.ensure();
+		if (!length(dat.cats)) {
+			push(warnings, 'lists_missing');
+			if (!stat(C.RUN_DIR + '/update.pid'))
+				system('( /usr/sbin/truba update-lists >/dev/null 2>&1 & )');
+		}
+		let plan = P.compute(cfg, dat.cats);
+		let gkey = P.geosite_key(plan, dat.hash);
+
+		ctx.gs_tunnel4 = [];
+		ctx.gs_direct4 = [];
+		if (prev.routing && prev.gkey == gkey) {
+			ctx.gs_tunnel4 = set_elements('gs_tunnel4');
+			ctx.gs_direct4 = set_elements('gs_direct4');
+		}
+		ctx.dev_tunnel = map(filter(cfg.devices, d => d.policy == 'tunnel'), d => d.mac);
+		ctx.dev_direct = map(filter(cfg.devices, d => d.policy == 'direct'), d => d.mac);
+
+		text = R.nft_full(cfg, plan, ctx);
+
+		let hosts = F.router_hosts(cfg, tinfo);
+		let mconf = sprintf('%J', R.mosdns(cfg, plan, hosts));
+		U.write_atomic(C.MOSDNS_CONF, mconf);
+		// Метка поколения: меняется вместе с данными — procd перезапустит mosdns.
+		let stamp = U.sha256_str(gkey + '\n' + mconf);
+		if (readfile(C.STAMP_FILE) != stamp)
+			writefile(C.STAMP_FILE, stamp);
+
+		applied.gkey = gkey;
+		applied.missing = plan.missing;
+		applied.geosite_order = map(plan.geosite, g => g.tag + '=' + g.action);
+	}
+	else {
+		text = R.nft_minimal(cfg, ctx);
+	}
+
+	U.write_atomic(C.NFT_FILE, text);
+	let r = U.run('nft -f ' + U.shq(C.NFT_FILE));
+	if (r.code != 0) {
+		U.err('nft: ' + r.out);
+		applied.error = 'nft: ' + trim(r.out);
+		U.write_json(C.APPLIED_FILE, applied);
+		lk?.close();
+		return applied;
+	}
+
+	if (cfg.routing)
+		N.dnsmasq_enable(cfg.dns.port);
+	else
+		N.dnsmasq_restore();
+
+	N.ensure_rules(st.device);
+	if (st.up)
+		N.set_rp_filter(st.device);
+	applied.table = routes(cfg, tinfo);
+	N.cron_set(cfg.routing && cfg.lists.auto_update, cfg.lists.update_utc);
+	N.upnp_set(cfg.upnp, cfg.iface, vps);
+
+	U.write_json(C.APPLIED_FILE, applied);
+	U.info(sprintf('применено: Маршрутизация %s, Режим %s, таблица Туннеля: %s',
+		cfg.routing ? 'вкл' : 'выкл', cfg.mode, applied.table));
+	lk?.close();
+	return applied;
+};
+
+export function teardown() {
+	let lk = U.lock('truba');
+	system([ 'nft', 'delete', 'table', 'inet', C.NFT_TABLE ]);
+	N.remove_rules();
+	N.dnsmasq_restore();
+	N.cron_set(false);
+	N.upnp_set(false);
+	unlink(C.APPLIED_FILE);
+	unlink(C.HEALTH_FILE);
+	U.info('Труба остановлена: правила сняты');
+	lk?.close();
+};
+
+// Обновить только набор bypass4 (смена адресов интерфейсов).
+export function refresh_bypass() {
+	if (system('nft list table inet ' + C.NFT_TABLE + ' >/dev/null 2>&1') != 0)
+		return;
+	let prev = U.read_json(C.APPLIED_FILE, {});
+	if (!prev.routing)
+		return;
+	let cfg = F.load();
+	let tinfo = F.tunnel_info(cfg.iface);
+	let b = bypass4(F.vps_ip(tinfo), tinfo);
+	let s = 'flush set inet ' + C.NFT_TABLE + ' bypass4\n';
+	if (length(b))
+		s += 'add element inet ' + C.NFT_TABLE + ' bypass4 { ' + join(', ', b) + ' }\n';
+	let tmp = C.RUN_DIR + '/bypass.nft';
+	writefile(tmp, s);
+	system('nft -f ' + U.shq(tmp) + ' >/dev/null 2>&1');
+	unlink(tmp);
+};
+
+// ---- Наборы правил ----
+
+function curl(url, out, dev) {
+	let cmd = [ 'curl', '-fsSL', '--connect-timeout', '15', '--max-time', '180', '-o', out ];
+	if (dev)
+		push(cmd, '--interface', dev);
+	push(cmd, url);
+	return system(cmd) == 0;
+}
+
+function sha_from_sumfile(path) {
+	let m = match(readfile(path) ?? '', /^([0-9a-fA-F]{64})/);
+	return m ? lc(m[1]) : null;
+}
+
+export function update_lists(force) {
+	let lk = U.lock('truba-lists');
+	if (!lk)
+		return { error: 'busy' };
+	ensure_dirs();
+	writefile(C.RUN_DIR + '/update.pid', '' + time());
+
+	let cfg = F.load();
+	let st = N.iface_up(cfg.iface);
+	let tmpdir = '/tmp/truba-dl';
+	U.mkdirp(tmpdir);
+
+	let result = { time: time(), sets: {} };
+	let changed = false;
+
+	for (let set in [ 'geoip', 'geosite' ]) {
+		let file = C.DAT_FILES[set];
+		let dst = C.LISTS_DIR + '/' + file;
+		let tmp = tmpdir + '/' + file;
+		let sources = [];
+		if (cfg.lists.via_tunnel && st.up)
+			push(sources, { url: cfg.lists[set + '_url'], dev: st.device, via: 'tunnel' });
+		else
+			push(sources, { url: cfg.lists[set + '_url'], dev: null, via: 'direct' });
+		push(sources, { url: cfg.lists[set + '_mirror'], dev: null, via: 'mirror' });
+
+		let got = null, errors = [];
+		for (let src in sources) {
+			unlink(tmp);
+			unlink(tmp + '.sha256sum');
+			if (!curl(src.url, tmp, src.dev) || !curl(src.url + '.sha256sum', tmp + '.sha256sum', src.dev)) {
+				push(errors, src.via + ': download failed');
+				continue;
+			}
+			let want = sha_from_sumfile(tmp + '.sha256sum');
+			let have = U.sha256_file(tmp);
+			if (!want || want != have) {
+				push(errors, src.via + ': sha256 mismatch');
+				continue;
+			}
+			got = { sha: have, via: src.via };
+			break;
+		}
+
+		if (!got) {
+			result.sets[set] = { ok: false, errors };
+			U.err(sprintf('списки: %s не обновлён (%s)', file, join('; ', errors)));
+			continue;
+		}
+
+		let cur = U.sha256_file(dst);
+		if (cur == got.sha && !force) {
+			result.sets[set] = { ok: true, changed: false, sha: got.sha, via: got.via };
+			unlink(tmp);
+			unlink(tmp + '.sha256sum');
+			continue;
+		}
+
+		if (cur) {
+			rename(dst, C.PREV_DIR + '/' + file);
+			if (stat(dst + '.sha256sum'))
+				rename(dst + '.sha256sum', C.PREV_DIR + '/' + file + '.sha256sum');
+		}
+		rename(tmp, dst);
+		rename(tmp + '.sha256sum', dst + '.sha256sum');
+		changed = true;
+		result.sets[set] = { ok: true, changed: true, sha: got.sha, via: got.via };
+		U.info(sprintf('списки: %s обновлён (%s, %s)', file, got.via, substr(got.sha, 0, 12)));
+	}
+
+	result.changed = changed;
+	U.write_json(C.LISTS_STATE, result);
+	unlink(C.RUN_DIR + '/update.pid');
+	lk.close();
+
+	if (changed)
+		system('/etc/init.d/truba reload >/dev/null 2>&1');
+	return result;
+};
+
+export function rollback_lists() {
+	let lk = U.lock('truba-lists');
+	if (!lk)
+		return { error: 'busy' };
+	let swapped = [];
+	for (let set in [ 'geoip', 'geosite' ]) {
+		let file = C.DAT_FILES[set];
+		let cur = C.LISTS_DIR + '/' + file, old = C.PREV_DIR + '/' + file;
+		if (!stat(old))
+			continue;
+		for (let ext in [ '', '.sha256sum' ]) {
+			let tmp = cur + ext + '.swap';
+			if (stat(cur + ext))
+				rename(cur + ext, tmp);
+			if (stat(old + ext))
+				rename(old + ext, cur + ext);
+			if (stat(tmp))
+				rename(tmp, old + ext);
+		}
+		push(swapped, file);
+	}
+	lk.close();
+	if (length(swapped)) {
+		U.info('списки: откат ' + join(', ', swapped));
+		system('/etc/init.d/truba reload >/dev/null 2>&1');
+	}
+	return { swapped };
+};
+
+function list_info(dir, file) {
+	let p = dir + '/' + file;
+	let st = stat(p);
+	if (!st)
+		return null;
+	return { sha256: sha_from_sumfile(p + '.sha256sum') ?? U.sha256_file(p), mtime: st.mtime, size: st.size };
+}
+
+// ---- Состояние ----
+
+function counters() {
+	let r = U.run('nft -j list counters table inet ' + C.NFT_TABLE);
+	let out = {};
+	if (r.code != 0)
+		return out;
+	try {
+		for (let o in json(r.out)?.nftables ?? [])
+			if (o.counter)
+				out[replace(o.counter.name, /^c_/, '')] = { packets: o.counter.packets, bytes: o.counter.bytes };
+	}
+	catch (e) { }
+	return out;
+}
+
+function awg_peer(dev) {
+	let r = U.run('awg show ' + U.shq(dev) + ' dump');
+	if (r.code != 0)
+		return null;
+	let lines = split(trim(r.out), '\n');
+	if (length(lines) < 2)
+		return null;
+	// Строка пира: pubkey psk endpoint allowed-ips latest-handshake rx tx keepalive
+	let f = split(lines[1], '\t');
+	let hs = int(f[4] ?? 0);
+	return {
+		endpoint: f[2],
+		handshake: hs,
+		handshake_age: hs ? (time() - hs) : null,
+		rx: int(f[5] ?? 0),
+		tx: int(f[6] ?? 0),
+	};
+}
+
+export function status() {
+	let cfg = F.load();
+	let tinfo = F.tunnel_info(cfg.iface);
+	let st = N.iface_up(cfg.iface);
+	let applied = U.read_json(C.APPLIED_FILE, null);
+	return {
+		routing: cfg.routing,
+		mode: cfg.mode,
+		killswitch: cfg.killswitch,
+		service: applied != null,
+		applied,
+		tunnel: {
+			iface: cfg.iface,
+			configured: tinfo.exists,
+			disabled: tinfo.disabled,
+			up: st.up,
+			device: st.device,
+			address: tinfo.address,
+			peer: tinfo.peer,
+			endpoint: tinfo.endpoint,
+			awg: st.up ? awg_peer(st.device) : null,
+		},
+		vps_ip: applied?.vps ?? F.vps_ip(tinfo),
+		health: health_state(),
+		table: U.run('ip -4 route show table ' + C.RT_TABLE).out,
+		counters: counters(),
+		mosdns: system('pidof mosdns >/dev/null 2>&1') == 0,
+		lists: {
+			geoip: list_info(C.LISTS_DIR, C.DAT_FILES.geoip),
+			geosite: list_info(C.LISTS_DIR, C.DAT_FILES.geosite),
+			prev_geoip: list_info(C.PREV_DIR, C.DAT_FILES.geoip),
+			prev_geosite: list_info(C.PREV_DIR, C.DAT_FILES.geosite),
+			last: U.read_json(C.LISTS_STATE, null),
+			updating: stat(C.RUN_DIR + '/update.pid') != null,
+		},
+	};
+};
+
+// Сбросить Действия Категорий Режима к Стартовым настройкам (без применения).
+export function reset_rules(mode) {
+	mode = (mode == 'selective') ? 'selective' : 'all';
+	let c = cursor();
+	c.load('truba');
+	let del = [];
+	c.foreach('truba', 'rule', (s) => {
+		if ((s.mode ?? 'all') == mode)
+			push(del, s['.name']);
+	});
+	for (let sid in del)
+		c.delete('truba', sid);
+	for (let r in P.STARTING) {
+		if (r.mode != mode)
+			continue;
+		let sid = c.add('truba', 'rule');
+		c.set('truba', sid, 'mode', r.mode);
+		c.set('truba', sid, 'set', r.set);
+		c.set('truba', sid, 'tag', r.tag);
+		c.set('truba', sid, 'action', r.action);
+	}
+	c.commit('truba');
+	return { mode, rules: length(filter(P.STARTING, r => r.mode == mode)) };
+};
+
+export function categories() {
+	let cfg = F.load();
+	let dat = U.read_json(C.CATS_FILE, null) ?? D.ensure();
+	return { mode: cfg.mode, cats: dat?.cats ?? [], hash: dat?.hash, rules: cfg.rules, starting: P.STARTING };
+};

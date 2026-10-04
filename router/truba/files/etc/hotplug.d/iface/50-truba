@@ -1,0 +1,16 @@
+#!/bin/sh
+# Смена состояния интерфейсов: пересчитать таблицу Туннеля и набор локальных подсетей.
+
+[ "$ACTION" = ifup ] || [ "$ACTION" = ifdown ] || [ "$ACTION" = ifupdate ] || exit 0
+[ -f /var/run/truba/applied.json ] || exit 0
+
+IFACE="$(uci -q get truba.main.iface)"
+IFACE="${IFACE:-awg0}"
+
+if [ "$INTERFACE" = "$IFACE" ]; then
+	[ "$ACTION" = ifup ] && [ -n "$DEVICE" ] && sysctl -qw "net.ipv4.conf.$DEVICE.rp_filter=0"
+	/usr/sbin/truba routes >/dev/null 2>&1
+fi
+
+/usr/sbin/truba refresh-bypass >/dev/null 2>&1
+exit 0
