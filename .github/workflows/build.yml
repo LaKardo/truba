@@ -95,6 +95,10 @@ jobs:
           # amneziawg-tools не должен жёстко требовать модуль ядра: запасной вариант — amneziawg-go.
           sed -i '/+kmod-amneziawg/d' "$feed/amneziawg-tools/Makefile"
           sed -i 's/^\(\s*+!BUSYBOX_CONFIG_FEATURE_IP_LINK:ip\) \\$/\1/' "$feed/amneziawg-tools/Makefile"
+          # Версия перевода = версия пакета (иначе 0, см. router/luci-app-truba/Makefile).
+          sed -i 's|^include $(TOPDIR)/feeds/luci/luci.mk|PKG_PO_VERSION=$(PKG_VERSION)-r$(PKG_RELEASE)\n&|' \
+            "$feed/luci-proto-amneziawg/Makefile"
+          grep -q '^PKG_PO_VERSION=' "$feed/luci-proto-amneziawg/Makefile"
           cp -a router/awg/amneziawg-go router/truba router/luci-app-truba "$feed/"
 
           cd sdk
@@ -162,6 +166,10 @@ jobs:
               missing=1
             fi
           done
+          if ls "$out"/*-0.apk >/dev/null 2>&1; then
+            ls "$out"/*-0.apk | sed 's/^/::error::версия 0 у /'
+            missing=1
+          fi
           [ "$missing" = 0 ] || { find bin -name '*.apk' -newer .config; exit 1; }
 
           make package/index V=s PACKAGE_DIR="$out" >logs/index.log 2>&1 || { tail -50 logs/index.log; exit 1; }
