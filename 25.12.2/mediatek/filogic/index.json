@@ -1,0 +1,7 @@
+{
+  "version": 2,
+  "architecture": "aarch64_cortex-a53",
+  "packages": {
+    "kmod-amneziawg": "6.12.103.3.1.20260906-r1"
+  }
+}
