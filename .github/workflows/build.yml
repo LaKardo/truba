@@ -131,18 +131,40 @@ jobs:
           CONFIG_PACKAGE_luci-i18n-truba-ru=m
           CONFIG_SIGNED_PACKAGES=y
           EOF
-          make defconfig >/dev/null
-          out="$PWD/bin/truba-feed"
-          mkdir -p "$out"
+          # Предупреждения kconfig SDK (прошивки других плат, bool→tristate, рекурсия у curl) безвредны.
+          make defconfig >/dev/null 2>&1
+          mkdir -p logs
           for p in kmod-amneziawg amneziawg-tools amneziawg-go luci-proto-amneziawg truba luci-app-truba; do
-            make -j"$(nproc)" PACKAGE_DIR="$out" "package/feeds/truba/$p/compile" V=s >"build-$p.log" 2>&1 \
-              || { tail -100 "build-$p.log"; exit 1; }
+            t0=$(date +%s)
+            echo "::group::$p"
+            if ! make -j"$(nproc)" "package/feeds/truba/$p/compile" V=s >"logs/build-$p.log" 2>&1; then
+              tail -100 "logs/build-$p.log"
+              echo "::endgroup::"
+              echo "::error::$p не собрался — полный лог в артефакте build-logs"
+              exit 1
+            fi
+            echo "::endgroup::"
+            echo "$p собран за $(( ($(date +%s) - t0) / 60 )) мин"
           done
-          # В фид — только наши пакеты (зависимости сборки туда не попадают).
-          find "$out" -maxdepth 1 -name '*.apk' \
-            ! -name 'kmod-amneziawg*' ! -name 'amneziawg-*' ! -name 'luci-proto-amneziawg*' \
-            ! -name 'luci-i18n-amneziawg*' ! -name 'truba*' ! -name 'luci-app-truba*' ! -name 'luci-i18n-truba*' -delete
-          make package/index V=s PACKAGE_DIR="$out"
+
+          # SDK кладёт пакеты по разным каталогам (kmod — к цели, остальные — в подкаталог фида):
+          # собираем все наши .apk в один плоский каталог фида.
+          out="$PWD/bin/truba-feed"
+          rm -rf "$out" && mkdir -p "$out"
+          find bin -name '*.apk' -newer .config \( -name 'kmod-amneziawg-*' -o -name 'amneziawg-*' \
+            -o -name 'luci-proto-amneziawg-*' -o -name 'luci-i18n-amneziawg-*' -o -name 'truba-*' \
+            -o -name 'luci-app-truba-*' -o -name 'luci-i18n-truba-*' \) -not -path "$out/*" -print -exec cp -f {} "$out/" \;
+
+          missing=0
+          for want in kmod-amneziawg amneziawg-tools amneziawg-go luci-proto-amneziawg truba luci-app-truba luci-i18n-truba-ru; do
+            if ! ls "$out/$want"-[0-9]*.apk >/dev/null 2>&1; then
+              echo "::error::в фиде нет пакета $want"
+              missing=1
+            fi
+          done
+          [ "$missing" = 0 ] || { find bin -name '*.apk' -newer .config; exit 1; }
+
+          make package/index V=s PACKAGE_DIR="$out" >logs/index.log 2>&1 || { tail -50 logs/index.log; exit 1; }
           test -s "$out/packages.adb"
           ls -la "$out"
 
@@ -161,6 +183,14 @@ jobs:
           name: feed-${{ matrix.version }}
           path: publish/
           if-no-files-found: error
+
+      - name: Логи сборки
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs-${{ matrix.version }}
+          path: sdk/logs/
+          if-no-files-found: ignore
 
   deploy:
     needs: build
