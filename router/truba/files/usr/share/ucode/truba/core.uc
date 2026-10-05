@@ -84,7 +84,7 @@ export function apply() {
 	let st = N.iface_up(cfg.iface);
 	let prev = U.read_json(C.APPLIED_FILE, {});
 	let warnings = [];
-	let ctx = { lan_if: F.zone_devices(cfg.zones), bypass4: bypass4(vps, tinfo), socket_mark: socket_mark_ok() };
+	let ctx = { lan_if: F.zone_devices(cfg.zones), bypass4: bypass4(vps, tinfo), socket_mark: socket_mark_ok(), vps };
 	if (!ctx.socket_mark)
 		U.warn_log('nft: нет socket mark (kmod-nft-socket) — свои сокеты Роутера с меткой Туннеля не защищены от чужих цепочек output');
 
