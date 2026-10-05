@@ -1,9 +1,10 @@
 #!/bin/sh
 # Интеграционный тест пакета truba внутри контейнера ImmortalWrt с procd (/sbin/init).
-# Туннель имитируется dummy-интерфейсом: модуля amneziawg в ядре контейнера нет.
+# Туннель — настоящий WireGuard (модуля amneziawg в ядре контейнера нет).
 # Ожидает: /repo — корень репозитория, /dat — каталог с geoip.dat и geosite.dat.
 
 set -u
+exec 3>&1   # настоящий вывод теста: check прячет вывод команд в /dev/null
 FAILS=0
 ok()   { echo "ok    $*"; }
 fail() { echo "FAIL  $*"; FAILS=$((FAILS + 1)); }
@@ -18,6 +19,25 @@ idle() { [ -z "$(busy)" ]; }
 wait_idle() { wait_for "$1" idle; }
 # После провала — снять зависшие процессы, чтобы остальные проверки не повисли следом.
 unstick() { for p in $(busy) $(pgrep -f 'flock 1000'); do kill "$p" 2>/dev/null; done; return 0; }
+# bounded N cmd… — шаг не дольше N секунд. Если повис: кто чего ждёт, блокировки,
+# журнал — и снять, чтобы прогон дошёл до конца, а не обрывался по тайм-ауту CI.
+bounded() {
+	n=$1; shift
+	"$@" & bp=$!
+	while [ "$n" -gt 0 ] && kill -0 "$bp" 2>/dev/null; do sleep 1; n=$((n - 1)); done
+	kill -0 "$bp" 2>/dev/null || { wait "$bp"; return; }
+	{
+	echo "TIMEOUT: $*"
+	for d in /proc/[0-9]*; do
+		c=$(tr '\0' ' ' < "$d/cmdline" 2>/dev/null); [ -n "$c" ] || continue
+		echo "  ${d#/proc/} ppid=$(cut -d' ' -f4 "$d/stat") $(cut -d' ' -f3 "$d/stat") wchan=$(cat "$d/wchan" 2>/dev/null): $(echo "$c" | cut -c1-110)"
+	done | grep -E 'truba|mosdns|dnsmasq|cron|nft|ip |flock|rc.common|ucode|sleep' | grep -v 'grep -E'
+	echo "  locks:"; sed 's/^/    /' /proc/locks
+	echo "  log:"; logread | tail -25 | cut -c1-200 | sed 's/^/    /'
+	} >&3 2>&3
+	kill "$bp" 2>/dev/null; unstick
+	return 124
+}
 
 # Входящее из интернета через Туннель: 203.0.113.77 → 10.77.77.2:48080 → DNAT → lanhost:8080.
 # Ответ доходит, только если Труба отправила его обратно в Туннель, а не в WAN (eth0).
@@ -180,7 +200,7 @@ uci set firewall.@defaults[0].flow_offloading='0'; uci commit firewall
 echo "== apply (Маршрутизация вкл)"
 uci set truba.watchdog.enabled='0'; uci commit truba
 /etc/init.d/truba enable
-/etc/init.d/truba start; sleep 4
+check "служба запускается (не дольше 90 с)" bounded 90 /etc/init.d/truba start; sleep 4
 APPLIED="$(cat /var/run/truba/applied.json 2>/dev/null)"
 echo "$APPLIED" | head -c 600; echo
 check "applied.json без ошибки" sh -c "! grep -q '\"error\"' /var/run/truba/applied.json"
@@ -279,13 +299,13 @@ uci -q batch <<-'EOF'
 	set truba.@device[-1].policy='tunnel'
 	commit truba
 EOF
-/etc/init.d/truba reload; sleep 3
+check "reload (не дольше 90 с)" bounded 90 /etc/init.d/truba reload; sleep 3
 check "MAC в dev_tunnel" sh -c "nft list set inet truba dev_tunnel | grep -qi 'aa:bb:cc:dd:ee:ff'"
 if grep -q '^Name:' /tmp/ns.out; then
 	check "gs_direct4 сохранён при перезагрузке правил" sh -c "nft list set inet truba gs_direct4 | grep -qE '[0-9]+\.[0-9]+\.[0-9]+'"
 else
 	nft add element inet truba gs_direct4 '{ 198.51.100.7 }'
-	/etc/init.d/truba reload; sleep 3
+	check "reload (не дольше 90 с)" bounded 90 /etc/init.d/truba reload; sleep 3
 	check "gs_direct4 сохранён при перезагрузке правил" sh -c "nft list set inet truba gs_direct4 | grep -q 198.51.100.7"
 fi
 
@@ -304,7 +324,7 @@ check "healthy → default dev awg0" sh -c "ip route show table 77 | grep -q 'de
 
 echo "== Маршрутизация выкл (минимальный режим)"
 uci set truba.main.routing='0'; uci commit truba
-/etc/init.d/truba reload; sleep 3
+check "reload (не дольше 90 с)" bounded 90 /etc/init.d/truba reload; sleep 3
 check "минимальная таблица: нет classify" sh -c "! nft list table inet truba | grep -q classify"
 check "минимальная таблица: INBOUND остаётся" sh -c "nft list chain inet truba prerouting | grep -qE 'iifname \"awg0\" meta mark set meta mark & 0xff0[0-9a-f]ffff \| 0x00040000'"
 check "минимальная таблица: persist остаётся" sh -c "nft list chain inet truba persist | grep -q 0x00040000"
@@ -318,7 +338,7 @@ own_checks "Маршрутизация выкл"
 
 echo "== Режим «Выборочный»"
 uci set truba.main.routing='1'; uci set truba.main.mode='selective'; uci commit truba
-/etc/init.d/truba reload; sleep 3
+check "reload (не дольше 90 с)" bounded 90 /etc/init.d/truba reload; sleep 3
 check "Выборочный: по умолчанию Напрямую" sh -c "nft list chain inet truba classify | tail -3 | grep -qE 'meta mark set meta mark & 0xff0[0-9a-f]ffff \| 0x00020000'"
 /usr/sbin/truba check 8.8.8.8 > /tmp/chk4.json
 check "check 8.8.8.8 → direct (Режим)" grep -q '"reason": "mode"' /tmp/chk4.json
