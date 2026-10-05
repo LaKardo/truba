@@ -42,6 +42,55 @@ inbound_checks() {
 	qosmate_off
 }
 
+# Свои сокеты Роутера с меткой Туннеля (mosdns, nat-test) → сервер за Туннелем (netns vps).
+# UDP-ответ «vps» — дошло через Туннель, «clash» — перехватил «Clash» на самом Роутере.
+udp_out() { ucode /repo/tests/router/udp_probe.uc client 203.0.113.77 40001 "$@"; }
+tcp_out() { ucode /repo/tests/router/tcp_probe.uc client 0.0.0.0 203.0.113.77 48081 "$@"; }
+# Как OpenClash с router_self_proxy: цепочка output перезаписывает meta mark целиком,
+# правило 999 уводит 0x162 в таблицу 354 (local default dev lo → Clash). Трафик без метки
+# без OpenClash ушёл бы в «интернет» (default dev inet0).
+openclash_on() {
+	nft -f - <<-'EOF'
+		table inet t_openclash {
+			set localnetwork {
+				type ipv4_addr; flags interval;
+				elements = { 0.0.0.0/8, 10.0.0.0/8, 127.0.0.0/8, 169.254.0.0/16,
+				             172.16.0.0/12, 192.168.0.0/16, 224.0.0.0/4, 240.0.0.0/4 }
+			}
+			chain openclash_mangle_output {
+				type route hook output priority mangle; policy accept;
+				meta skgid 65534 return
+				ip daddr @localnetwork return
+				ct direction reply return
+				meta l4proto udp ip daddr 198.18.0.0/16 meta mark set 0x162 accept
+				meta mark set 0x162 accept
+			}
+		}
+	EOF
+	ip rule add fwmark 0x162 lookup 354 priority 999
+	ip route add local default dev lo table 354
+}
+openclash_off() {
+	nft delete table inet t_openclash 2>/dev/null
+	ip rule del priority 999 2>/dev/null
+	ip route flush table 354 2>/dev/null
+	return 0
+}
+own_checks() {
+	check "свой UDP с меткой Туннеля → Туннель ($1)" test "$(udp_out 0x10000)" = vps
+	check "свой TCP с меткой Туннеля → Туннель ($1)" tcp_out 0x10000
+	if ! grep -qE '"socket_mark": ?true' /var/run/truba/applied.json; then
+		echo "skip  в ядре нет nft_socket (kmod-nft-socket): свои сокеты при OpenClash не проверяются ($1)"
+		check "без nft_socket таблица загружена, цепочки output нет ($1)" sh -c "nft list table inet truba && ! nft list chain inet truba output"
+		return
+	fi
+	openclash_on
+	check "свой UDP с меткой Туннеля при OpenClash → Туннель ($1)" test "$(udp_out 0x10000)" = vps
+	check "свой TCP с меткой Туннеля при OpenClash → Туннель ($1)" tcp_out 0x10000
+	check "свой UDP без метки при OpenClash → OpenClash ($1)" test "$(udp_out)" = clash
+	openclash_off
+}
+
 echo "== зависимости (ставятся в образ заранее: под procd у контейнера нет сети)"
 for p in mosdns ucode-mod-socket curl ip-full; do
 	apk list -I "$p" 2>/dev/null | grep -q "^$p-" || { echo "нет пакета $p в образе"; exit 1; }
@@ -64,7 +113,6 @@ ip -n vps link set lo up; ip -n vps link set vps0 up
 ip -n vps addr add 10.77.77.1/30 dev vps0
 ip -n vps addr add 203.0.113.77/32 dev lo
 ip -n vps route add default via 10.77.77.2 src 203.0.113.77
-ip netns exec vps sysctl -qw net.ipv4.tcp_syn_retries=1   # проба без ответа падает за ~3 с
 ip link add lan0 type veth peer name lh0
 ip link set lh0 netns lanhost
 ip -n lanhost link set lo up; ip -n lanhost link set lh0 up
@@ -162,6 +210,19 @@ ip netns exec lanhost ucode /repo/tests/router/tcp_probe.uc server 8080 >/dev/nu
 sleep 1
 inbound_checks "Маршрутизация вкл"
 
+echo "== свои сокеты Роутера с меткой Туннеля при OpenClash (Маршрутизация вкл)"
+ip netns exec vps ucode /repo/tests/router/udp_probe.uc server 203.0.113.77 40001 vps >/dev/null 2>&1 &
+ip netns exec vps ucode /repo/tests/router/tcp_probe.uc server 48081 >/dev/null 2>&1 &
+ucode /repo/tests/router/udp_probe.uc server 0.0.0.0 40001 clash >/dev/null 2>&1 &
+sleep 1
+own_checks "Маршрутизация вкл"
+# Контроль: без цепочки output Трубы та же имитация уводит в Clash и меченый трафик.
+nft delete chain inet truba output 2>/dev/null
+openclash_on
+check "контроль: без цепочки output меченый UDP уходит в OpenClash" test "$(udp_out 0x10000)" = clash
+openclash_off
+nft -f /var/etc/truba/truba.nft
+
 echo "== порядок Категорий (узкие раньше широких)"
 grep -o '"geosite_order":[^]]*' /var/run/truba/applied.json
 check "category-cdn-ru раньше category-ru" sh -c "grep -o '\"geosite_order\":[^]]*' /var/run/truba/applied.json | grep -q 'category-cdn-ru=direct.*category-ru=direct'"
@@ -238,6 +299,7 @@ check "mosdns остановлен" sh -c "! pidof mosdns"
 check "cron: блок снят" sh -c "! grep -q 'truba update-lists' /etc/crontabs/root"
 check "ip rule остаются (ответы на входящие)" sh -c "ip rule show | grep -q 'lookup 77'"
 inbound_checks "Маршрутизация выкл"
+own_checks "Маршрутизация выкл"
 
 echo "== Режим «Выборочный»"
 uci set truba.main.routing='1'; uci set truba.main.mode='selective'; uci commit truba

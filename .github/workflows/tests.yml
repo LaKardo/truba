@@ -1,0 +1,23 @@
+name: tests
+
+# Проверки на pull request: только tests/run.sh, без сборки и публикации фида.
+# Сборка и фид — build.yml после слияния в main.
+
+on:
+  pull_request:
+    paths: [ 'router/**', 'tests/**', '.github/workflows/tests.yml' ]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Проверки (распаковщик, роутер под procd, VPS, LuCI)
+        run: bash tests/run.sh all
