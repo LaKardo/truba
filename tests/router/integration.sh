@@ -71,6 +71,11 @@ ip -n lanhost link set lo up; ip -n lanhost link set lh0 up
 ip -n lanhost addr add 192.168.1.50/24 dev lh0
 ip -n lanhost route add default via 192.168.1.1
 ip link set awg0 up
+# Маршрут «в интернет», как WAN на настоящем роутере. Без него нестрогий rp_filter
+# (контейнер наследует его от хоста: на Ubuntu в CI all.rp_filter=2) отбрасывает
+# клиентов из интернета ещё на входе. Ответы мимо Туннеля уходят сюда и теряются.
+ip link add inet0 type dummy; ip link set inet0 up
+ip route add default dev inet0 metric 1000
 uci -q batch <<-'EOF'
 	set network.brlan=device
 	set network.brlan.name='br-lan'
