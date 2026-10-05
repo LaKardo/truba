@@ -334,7 +334,8 @@ write_pipe_unit() {
 		WantedBy=multi-user.target
 	EOF
 	systemctl daemon-reload
-	systemctl enable truba-pipe.service >/dev/null 2>&1
+	# --now: без него служба до первой перезагрузки числится inactive, хотя правила уже загружены.
+	systemctl enable --now truba-pipe.service >/dev/null 2>&1
 }
 
 write_sysctl() {
@@ -426,7 +427,7 @@ rollback_ssh() {
 	systemctl restart ssh.socket 2>/dev/null || systemctl restart ssh.service
 	nft delete table ip truba_nat 2>/dev/null || true
 	nft delete table inet truba_filter 2>/dev/null || true
-	systemctl disable truba-pipe.service >/dev/null 2>&1 || true
+	systemctl disable --now truba-pipe.service >/dev/null 2>&1 || true
 	exit 1
 }
 
