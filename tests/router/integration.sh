@@ -8,6 +8,16 @@ FAILS=0
 ok()   { echo "ok    $*"; }
 fail() { echo "FAIL  $*"; FAILS=$((FAILS + 1)); }
 check() { name="$1"; shift; if "$@" >/dev/null 2>&1; then ok "$name"; else fail "$name"; fi; }
+# wait_for N cmd… — ждать до N секунд, пока команда не выполнится успешно.
+wait_for() { n=$1; shift; while [ "$n" -gt 0 ]; do "$@" >/dev/null 2>&1 && return 0; sleep 1; n=$((n - 1)); done; return 1; }
+# apply / update-lists / rollback-lists и rc.common Трубы. Скобки в шаблонах — чтобы
+# pgrep не находил собственную обёртку sh -c, в командной строке которой есть шаблон.
+busy() { pgrep -f '/usr/sbin/truba [aur]'; pgrep -f 'init[.]d/truba'; }
+# Нет ни одного такого процесса (взаимоблок оставил бы их висеть).
+idle() { [ -z "$(busy)" ]; }
+wait_idle() { wait_for "$1" idle; }
+# После провала — снять зависшие процессы, чтобы остальные проверки не повисли следом.
+unstick() { for p in $(busy) $(pgrep -f 'flock 1000'); do kill "$p" 2>/dev/null; done; return 0; }
 
 echo "== зависимости (ставятся в образ заранее: под procd у контейнера нет сети)"
 for p in mosdns ucode-mod-socket curl ip-full; do
@@ -167,6 +177,50 @@ check "Выборочный: по умолчанию Напрямую" sh -c "nf
 /usr/sbin/truba check 8.8.8.8 > /tmp/chk4.json
 check "check 8.8.8.8 → direct (Режим)" grep -q '"reason": "mode"' /tmp/chk4.json
 check "смена Режима сбрасывает gs_direct4" sh -c "! nft list set inet truba gs_direct4 | grep -q 198.51.100.7"
+
+echo "== update-lists: скачивание в /tmp (tmpfs) и перенос на /etc"
+# На роутере /tmp — tmpfs, а /etc — overlay: rename между ними не работает (EXDEV).
+mount | grep -q ' on /tmp type tmpfs' && echo "/tmp — tmpfs, как на роутере" || echo "внимание: /tmp не tmpfs, перенос между ФС не проверяется"
+mkdir -p /root/src
+for f in geoip.dat geosite.dat; do
+	cp "/dat/$f" "/root/src/$f"
+	(cd /root/src && sha256sum "$f" > "$f.sha256sum")
+done
+uci -q batch <<-'EOF'
+	set truba.lists.via_tunnel='0'
+	set truba.lists.geoip_url='file:///root/src/geoip.dat'
+	set truba.lists.geoip_mirror='file:///root/src/geoip.dat'
+	set truba.lists.geosite_url='file:///root/src/geosite.dat'
+	set truba.lists.geosite_mirror='file:///root/src/geosite.dat'
+	commit truba
+EOF
+/usr/sbin/truba update-lists -f > /tmp/ul.json 2>&1 &
+check "update-lists -f и его reload завершились" wait_idle 60
+unstick
+head -c 400 /tmp/ul.json; echo
+check "update-lists: оба набора ok" test "$(grep -o '"ok": true' /etc/truba/state/lists.json | wc -l)" -eq 2
+for f in geoip.dat geosite.dat; do
+	check "update-lists: $f записан в /etc/truba/lists" sh -c "[ \"\$(sha256sum < /etc/truba/lists/$f)\" = \"\$(sha256sum < /root/src/$f)\" ]"
+	check "update-lists: $f.sha256sum рядом" test -s "/etc/truba/lists/$f.sha256sum"
+	check "update-lists: прежний $f в prev" test -s "/etc/truba/lists/prev/$f"
+	check "update-lists: $f не остался в /tmp" test ! -e "/tmp/truba-dl/$f"
+done
+/usr/sbin/truba rollback-lists > /tmp/rb.json 2>&1 &
+check "rollback-lists и его reload завершились" wait_idle 60
+unstick
+check "rollback-lists: оба набора" grep -q 'geosite.dat' /tmp/rb.json
+check "rollback-lists: текущие на месте" test -s /etc/truba/lists/geoip.dat
+
+echo "== свежая установка без списков: apply сам скачивает их в фоне"
+# Так было на роутере: фоновый update-lists наследовал блокировки apply и rc.common,
+# а его собственный reload ждал их вечно.
+rm -f /etc/truba/lists/*.dat /etc/truba/lists/*.sha256sum /etc/truba/lists/prev/*
+/etc/init.d/truba reload
+check "фоновое скачивание: списки появились" wait_for 60 test -s /etc/truba/lists/geosite.dat
+check "фоновое скачивание: нет зависших apply/update-lists/reload" wait_idle 60
+unstick
+check "после фонового скачивания нет lists_missing" sh -c "! grep -q lists_missing /var/run/truba/applied.json"
+check "блокировки truba свободны" sh -c "! grep -q ' -> FLOCK' /proc/locks"
 
 echo "== status"
 /usr/sbin/truba status > /tmp/st.json; head -c 300 /tmp/st.json; echo

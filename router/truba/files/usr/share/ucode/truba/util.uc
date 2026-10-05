@@ -66,6 +66,18 @@ export function write_json(path, obj) {
 	return write_atomic(path, sprintf('%J', obj));
 };
 
+// Перенос файла. Между файловыми системами (tmpfs /tmp → overlay /etc) rename
+// не работает (EXDEV), тогда — копия рядом с целью и атомарный rename.
+export function move_file(src, dst) {
+	if (rename(src, dst))
+		return true;
+	let data = readfile(src);
+	if (data == null || !write_atomic(dst, data))
+		return false;
+	unlink(src);
+	return true;
+};
+
 export function sha256_file(path) {
 	if (!stat(path))
 		return null;
@@ -126,9 +138,11 @@ export function to_list(v) {
 };
 
 // Простая блокировка на файле: держится, пока открыт дескриптор.
+// 'e' (O_CLOEXEC): иначе дескриптор наследуют дочерние процессы (фоновый
+// update-lists), блокировка переживает apply, и следующий apply ждёт её вечно.
 export function lock(name) {
 	mkdirp('/var/lock');
-	let fd = open('/var/lock/' + name + '.lock', 'w');
+	let fd = open('/var/lock/' + name + '.lock', 'we');
 	if (!fd)
 		return null;
 	if (!fd.lock('x')) {

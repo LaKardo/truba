@@ -90,8 +90,10 @@ export function apply() {
 		let dat = D.ensure();
 		if (!length(dat.cats)) {
 			push(warnings, 'lists_missing');
+			// 1000>&- — блокировка procd из rc.common: фоновый процесс не должен её
+			// наследовать, иначе его собственный reload ждёт сам себя.
 			if (!stat(C.RUN_DIR + '/update.pid'))
-				system('( /usr/sbin/truba update-lists >/dev/null 2>&1 & )');
+				system('( /usr/sbin/truba update-lists >/dev/null 2>&1 1000>&- & )');
 		}
 		let plan = P.compute(cfg, dat.cats);
 		let gkey = P.geosite_key(plan, dat.hash);
@@ -257,13 +259,24 @@ export function update_lists(force) {
 			continue;
 		}
 
+		let prev = C.PREV_DIR + '/' + file;
 		if (cur) {
-			rename(dst, C.PREV_DIR + '/' + file);
+			rename(dst, prev);
 			if (stat(dst + '.sha256sum'))
-				rename(dst + '.sha256sum', C.PREV_DIR + '/' + file + '.sha256sum');
+				rename(dst + '.sha256sum', prev + '.sha256sum');
 		}
-		rename(tmp, dst);
-		rename(tmp + '.sha256sum', dst + '.sha256sum');
+		// tmp лежит в /tmp (tmpfs), dst — на флеше: простой rename здесь не работает.
+		if (!U.move_file(tmp, dst) || !U.move_file(tmp + '.sha256sum', dst + '.sha256sum')) {
+			unlink(dst);
+			unlink(dst + '.sha256sum');
+			if (cur) {
+				rename(prev, dst);
+				rename(prev + '.sha256sum', dst + '.sha256sum');
+			}
+			result.sets[set] = { ok: false, errors: [ 'не удалось записать ' + dst ] };
+			U.err(sprintf('списки: %s скачан, но не записан в %s', file, C.LISTS_DIR));
+			continue;
+		}
 		changed = true;
 		result.sets[set] = { ok: true, changed: true, sha: got.sha, via: got.via };
 		U.info(sprintf('списки: %s обновлён (%s, %s)', file, got.via, substr(got.sha, 0, 12)));
