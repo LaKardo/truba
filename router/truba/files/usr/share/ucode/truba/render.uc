@@ -44,12 +44,19 @@ function persist_chain() {
 // байт Трубы возвращается из метки сокета, и route-цепочка перемаршрутизирует пакет:
 // правило 1000 с маской срабатывает, а чужое правило с точной меткой — уже нет.
 // socket mark — модуль kmod-nft-socket; без него цепочки нет (ctx.socket_mark).
+//
+// Внешние (зашифрованные) пакеты самого Туннеля к VPS проходят output ещё раз и
+// несут сокет исходного пакета — вместе с его меткой «Туннель». Вернуть им эту
+// метку значит завернуть Туннель в самого себя: петля, awg0 отбрасывает пакет
+// (найдено на живом роутере). К VPS в Туннель не ходит ничего (bypass4), поэтому
+// пакеты к нему цепочка не трогает; без известного IP VPS цепочки нет вовсе.
 function output_chain(ctx) {
-	if (!ctx.socket_mark)
+	if (!ctx.socket_mark || !ctx.vps)
 		return '';
 	let s = '\n\tchain output {\n';
 	s += '\t\ttype route hook output priority mangle + 10; policy accept;\n';
 	s += '\t\tmeta nfproto != ipv4 return\n';
+	s += '\t\tip daddr ' + ctx.vps + ' return\n';
 	s += '\t\tsocket mark and ' + hex(C.MARK_MASK) + ' == ' + hex(C.MARK_TUNNEL) + ' ' + set_meta(C.MARK_TUNNEL) + '\n';
 	s += '\t}\n';
 	return s;
