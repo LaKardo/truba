@@ -38,6 +38,23 @@ function persist_chain() {
 	return s;
 }
 
+// Свои сокеты Роутера с SO_MARK «Туннель» (mosdns, nat-test). Чужая цепочка output
+// может перезаписать meta mark целиком и увести пакет в свою таблицу (OpenClash
+// с router_self_proxy: «meta mark set 0x162», правило 999 → Clash). После mangle
+// байт Трубы возвращается из метки сокета, и route-цепочка перемаршрутизирует пакет:
+// правило 1000 с маской срабатывает, а чужое правило с точной меткой — уже нет.
+// socket mark — модуль kmod-nft-socket; без него цепочки нет (ctx.socket_mark).
+function output_chain(ctx) {
+	if (!ctx.socket_mark)
+		return '';
+	let s = '\n\tchain output {\n';
+	s += '\t\ttype route hook output priority mangle + 10; policy accept;\n';
+	s += '\t\tmeta nfproto != ipv4 return\n';
+	s += '\t\tsocket mark and ' + hex(C.MARK_MASK) + ' == ' + hex(C.MARK_TUNNEL) + ' ' + set_meta(C.MARK_TUNNEL) + '\n';
+	s += '\t}\n';
+	return s;
+}
+
 // Пакеты из Туннеля: ответы на них — только в Туннель. Метка ставится на каждый
 // пакет, а не только на первый: persist восстанавливает её после чужих перезаписей.
 function inbound_rules(iface) {
@@ -58,7 +75,7 @@ function set_decl(name, typ, flags, elems) {
 	return s;
 }
 
-// ctx: { lan_if[], bypass4[], gs_tunnel4[], gs_direct4[], dev_tunnel[], dev_direct[] }
+// ctx: { lan_if[], bypass4[], gs_tunnel4[], gs_direct4[], dev_tunnel[], dev_direct[], socket_mark }
 export function nft_full(cfg, plan, ctx) {
 	let gi = { block: [], tunnel: [], direct: [] };
 	for (let a in [ 'block', 'tunnel', 'direct' ])
@@ -116,6 +133,7 @@ export function nft_full(cfg, plan, ctx) {
 	s += '\t\t' + set_meta(dflt) + '\n';
 	s += '\t}\n';
 	s += persist_chain();
+	s += output_chain(ctx);
 
 	if (cfg.dns_hijack) {
 		s += '\n\tchain dns_hijack {\n';
@@ -144,6 +162,7 @@ export function nft_minimal(cfg, ctx) {
 	s += '\t\tiifname @lan_if ' + ct_is(C.MARK_TUNNEL) + ' ' + set_meta(C.MARK_TUNNEL) + ' return\n';
 	s += '\t}\n';
 	s += persist_chain();
+	s += output_chain(ctx);
 	s += '}\n';
 	return s;
 };

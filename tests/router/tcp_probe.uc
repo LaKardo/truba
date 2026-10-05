@@ -1,6 +1,7 @@
-// TCP-проба для проверки входящих через Туннель (integration.sh).
-//   server PORT        — отвечать «truba-ok» каждому клиенту;
-//   client SRC HOST PORT — подключиться с адреса SRC и прочитать ответ (код 0 — ответ пришёл).
+// TCP-проба для проверки входящих и исходящих через Туннель (integration.sh).
+//   server PORT                 — отвечать «truba-ok» каждому клиенту;
+//   client SRC HOST PORT [MARK] — подключиться с адреса SRC (с SO_MARK, если задан)
+//                                 и прочитать ответ (код 0 — ответ пришёл).
 //   SRC нужен, чтобы клиент выглядел пришедшим из интернета, а не из подсети Туннеля.
 'use strict';
 
@@ -21,8 +22,11 @@ if (ARGV[0] == 'server') {
 	}
 }
 else if (ARGV[0] == 'client') {
-	// Тайм-аут соединения задаёт net.ipv4.tcp_syn_retries в netns клиента.
 	const s = socket.create(socket.AF_INET, socket.SOCK_STREAM);
+	if (s && ARGV[4])
+		s.setopt(socket.SOL_SOCKET, socket.SO_MARK, +ARGV[4]);
+	// Соединение без ответа обрывается через 3 с, а не после всех повторов SYN.
+	s?.setopt(socket.SOL_SOCKET, socket.SO_SNDTIMEO, { sec: 3, usec: 0 });
 	if (!s || !s.bind({ address: ARGV[1], port: 0 }) || !s.connect({ address: ARGV[2], port: +ARGV[3] })) {
 		print('нет соединения: ', socket.error(), '\n');
 		exit(1);
@@ -34,5 +38,5 @@ else if (ARGV[0] == 'client') {
 	exit(line == 'truba-ok\n' ? 0 : 1);
 }
 else {
-	die('usage: tcp_probe.uc server PORT | client SRC HOST PORT');
+	die('usage: tcp_probe.uc server PORT | client SRC HOST PORT [MARK]');
 }

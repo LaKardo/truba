@@ -2,7 +2,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=truba
 PKG_VERSION:=1.0.0
-PKG_RELEASE:=3
+PKG_RELEASE:=4
 PKG_LICENSE:=Apache-2.0
 
 include $(INCLUDE_DIR)/package.mk
@@ -19,6 +19,7 @@ define Package/truba
 	+curl \
 	+ip-full \
 	+kmod-nft-fullcone \
+	+kmod-nft-socket \
 	+ucode \
 	+ucode-mod-fs \
 	+ucode-mod-uci \

@@ -45,6 +45,14 @@ function set_elements(name) {
 	return out;
 }
 
+// Умеет ли ядро «socket mark» (kmod-nft-socket). nft -c проверяет правило в ядре,
+// ничего не создавая: без модуля таблица Трубы не загрузилась бы целиком.
+function socket_mark_ok() {
+	return U.run("nft -c 'add table inet truba_probe; " +
+	             "add chain inet truba_probe o { type filter hook output priority 0; }; " +
+	             "add rule inet truba_probe o socket mark 0'").code == 0;
+}
+
 function health_state() {
 	return U.read_json(C.HEALTH_FILE, null);
 }
@@ -76,14 +84,17 @@ export function apply() {
 	let st = N.iface_up(cfg.iface);
 	let prev = U.read_json(C.APPLIED_FILE, {});
 	let warnings = [];
-	let ctx = { lan_if: F.zone_devices(cfg.zones), bypass4: bypass4(vps, tinfo) };
+	let ctx = { lan_if: F.zone_devices(cfg.zones), bypass4: bypass4(vps, tinfo), socket_mark: socket_mark_ok() };
+	if (!ctx.socket_mark)
+		U.warn_log('nft: нет socket mark (kmod-nft-socket) — свои сокеты Роутера с меткой Туннеля не защищены от чужих цепочек output');
 
 	if (!length(ctx.lan_if))
 		push(warnings, 'zones_without_devices');
 	if (!tinfo.exists)
 		push(warnings, 'tunnel_not_configured');
 
-	let applied = { routing: cfg.routing, mode: cfg.mode, time: time(), vps, warnings, missing: [] };
+	let applied = { routing: cfg.routing, mode: cfg.mode, time: time(), vps, warnings, missing: [],
+	                socket_mark: ctx.socket_mark };
 	let text;
 
 	if (cfg.routing) {
