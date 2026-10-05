@@ -83,7 +83,7 @@
 | MTU Туннеля | 1380 (обе стороны) + MSS clamping | конфиги AWG, зона `truba` `mtu_fix` |
 | Таблица маршрутов Туннеля | `77` | служба `truba` |
 | Метка TUNNEL / DIRECT | `0x00010000` / `0x00020000` (маска `0x00ff0000`) | служба `truba` |
-| ct mark INBOUND | `0x00040000` (ct mark целиком принадлежит Трубе) | служба `truba` |
+| Метка INBOUND | `0x00040000`. Труба меняет в meta mark и ct mark только байт `0x00ff0000`: в остальных битах хранят своё другие (qosmate — DSCP в ct mark) | служба `truba` |
 | Порт mosdns | `127.0.0.1:5335` | `/etc/config/truba` |
 
 ---
@@ -99,7 +99,8 @@
      Туннель (so_mark TUNNEL); IP ответа → набор gs_tunnel4 (если Категория явная).
   2. Пакет SYN: prerouting/mangle (table inet truba)
        iif br-lan, новый, не bypass → classify → meta mark = TUNNEL
-       ct mark = TUNNEL (все следующие пакеты соединения — без классификации)
+       postrouting (persist, последним): ct mark = TUNNEL — все следующие пакеты
+       соединения берут решение из ct mark, без классификации
   3. ip rule fwmark TUNNEL → table 77 → default dev awg0
   4. fw4 srcnat, зона truba: masq + fullcone → 10.77.77.2:51000 (порт сохраняется, если свободен)
   5. Труба: SNAT 10.77.77.2 → <VPS_IP>:51000 → интернет
@@ -118,12 +119,14 @@
 ```
 Внешний узел → <VPS_IP>:27015
   1. Труба: DNAT → 10.77.77.2:27015 (источник не меняется)
-  2. Роутер, iif awg0, ct new → ct mark |= INBOUND
+  2. Роутер, iif awg0 (каждый пакет) → meta mark = INBOUND; persist → ct mark = INBOUND
   3. fw4 dstnat: проброс порта / UPnP / fullcone-отображение → 192.168.1.20:27015
   4. Ответ от 192.168.1.20 (iif br-lan): ct mark INBOUND → meta mark = TUNNEL
      → table 77 → awg0 → Труба → внешнему узлу.
-     Без этого шага ответ российскому клиенту ушёл бы в wan (geoip:ru), и соединение
-     развалилось бы. Это обязательная часть схемы.
+     Без этого шага ответ ушёл бы в wan, и соединение развалилось бы. Это обязательная
+     часть схемы. Решение пишется в ct mark последним в postrouting (priority 300) на
+     каждом пакете: qosmate в postrouting перезаписывает ct mark целиком, и без этого
+     метка INBOUND терялась уже на первом пакете (найдено на живом роутере).
 ```
 
 ### 2.4 Туннель упал
@@ -335,20 +338,28 @@ table inet truba {
 
     meta nfproto != ipv4 return                                         # IPv6 (roamd, link-local, ULA) не трогаем
 
-    # входящие через IP Трубы — запомнить, чтобы ответы вернулись в Туннель
-    iifname "awg0" ct state new ct mark set 0x00040000 counter name c_inbound return
-    # входящие с других внешних интерфейсов (fullcone-отображение на wan) — ответы Напрямую
-    iifname != @lan_if ct state new ct mark set 0x00020000 return
+    # «meta mark set X» ниже — сокращение: на деле meta mark & 0xff00ffff | X,
+    # чужие биты не трогаются
 
+    # входящие через IP Трубы: каждый пакет — чтобы ответы вернулись в Туннель
+    iifname "awg0" ct state new counter name c_inbound
+    iifname "awg0" meta mark set 0x00040000 return
+    # входящие с других внешних интерфейсов (fullcone-отображение на wan) — ответы Напрямую
+    iifname != @lan_if ct state new meta mark set 0x00020000 return
+
+    ct mark & 0x00ff0000 != 0 goto restore                              # липкость: решение уже принято
     iifname != @lan_if return
-    ct mark 0x00040000 meta mark set 0x00010000 return                  # ответы на входящие
-    ct mark & 0x00030000 != 0 meta mark set ct mark return              # липкость: решение принято при открытии соединения
     ip daddr @bypass4 return
 
     jump classify
-    ct mark set meta mark
-    meta mark 0x00010000 counter name c_tunnel
-    meta mark 0x00020000 counter name c_direct
+    meta mark & 0x00ff0000 == 0x00010000 counter name c_tunnel
+    meta mark & 0x00ff0000 == 0x00020000 counter name c_direct
+  }
+
+  chain restore {
+    ct mark & 0x00ff0000 == 0x00040000 meta mark set 0x00010000 return  # ответы на входящие
+    ct mark & 0x00ff0000 == 0x00010000 meta mark set 0x00010000 return
+    ct mark & 0x00ff0000 == 0x00020000 meta mark set 0x00020000 return
   }
 
   # Приоритет: Блок → Политика устройства → geosite (Туннель > Напрямую) → geoip → Режим
@@ -361,6 +372,15 @@ table inet truba {
     ip daddr @gi_tunnel4 meta mark set 0x00010000 return
     ip daddr @gi_direct4 meta mark set 0x00020000 return
     meta mark set 0x00010000          # Режим «Всё в туннель»  (в «Выборочном» — 0x00020000)
+  }
+
+  # Решение пакета → в соединение, последним: после всех, кто пишет ct mark целиком
+  chain persist {
+    type filter hook postrouting priority 300; policy accept;
+    meta nfproto != ipv4 return
+    meta mark & 0x00ff0000 == 0x00040000 ct mark set ct mark & 0xff00ffff | 0x00040000 return
+    meta mark & 0x00ff0000 == 0x00010000 ct mark set ct mark & 0xff00ffff | 0x00010000 return
+    meta mark & 0x00ff0000 == 0x00020000 ct mark set ct mark & 0xff00ffff | 0x00020000 return
   }
 
   # Перехват DNS: устройства с захардкоженным 8.8.8.8 всё равно идут через Роутер
@@ -759,7 +779,7 @@ apk add kmod-amneziawg amneziawg-tools luci-proto-amneziawg truba luci-app-truba
 
 Эти параметры не обсуждались отдельно. Я выбрал их как разумные значения по умолчанию, любое можно поменять:
 
-1. Подсеть Туннеля `10.77.77.0/30`, таблица `77`, метки `0x00010000` / `0x00020000` / `0x00040000` под маской `0x00ff0000`; ct mark целиком принадлежит Трубе (fw4 его не использует).
+1. Подсеть Туннеля `10.77.77.0/30`, таблица `77`, метки `0x00010000` / `0x00020000` / `0x00040000` под маской `0x00ff0000`. Труба меняет только этот байт meta mark и ct mark и записывает решение в ct mark последней в postrouting: так она уживается с qosmate и другими, кто пользуется ct mark.
 2. Блок для geosite — на уровне DNS (NXDOMAIN), для geoip — отбрасывание по IP.
 3. «Узость» Категории: вложенность, а если её нет — меньшее число записей.
 4. Наборы `gs_*` без таймаута, сбрасываются при изменении правил или geosite; TTL классифицированных ответов ≤ 300 с.

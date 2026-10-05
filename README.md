@@ -68,6 +68,12 @@ wget -O /etc/apk/keys/truba.pem https://lakardo.github.io/truba/keys/truba.pem
 apk update && apk add kmod-amneziawg amneziawg-tools luci-proto-amneziawg truba luci-app-truba luci-i18n-truba-ru luci-app-upnp
 ```
 
+netifd узнаёт о новом протоколе `amneziawg` только при запуске, поэтому перезапустите сеть (или роутер). Без этого интерфейс Туннеля не поднимется (`proto none`, `NO_DEVICE`). Связь пропадёт секунд на 20–30:
+
+```bash
+/etc/init.d/network restart
+```
+
 Затем в LuCI:
 
 1. **Службы → Труба → Туннель → Импорт .conf** — вставьте `router.conf` → **Сохранить и применить**.

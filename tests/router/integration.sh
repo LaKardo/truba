@@ -19,6 +19,29 @@ wait_idle() { wait_for "$1" idle; }
 # После провала — снять зависшие процессы, чтобы остальные проверки не повисли следом.
 unstick() { for p in $(busy) $(pgrep -f 'flock 1000'); do kill "$p" 2>/dev/null; done; return 0; }
 
+# Входящее из интернета через Туннель: 203.0.113.77 → 10.77.77.2:48080 → DNAT → lanhost:8080.
+# Ответ доходит, только если Труба отправила его обратно в Туннель, а не в WAN (eth0).
+probe() { ip netns exec vps ucode /repo/tests/router/tcp_probe.uc client 203.0.113.77 10.77.77.2 48080; }
+# Как qosmate: в postrouting перезаписывает ct mark целиком (DSCP | 0x80).
+qosmate_on() {
+	nft -f - <<-'EOF'
+		table inet t_qosmate {
+			chain dscptag {
+				type filter hook postrouting priority filter; policy accept;
+				iifname "eth0" accept
+				ct mark set ip dscp | 0x80
+			}
+		}
+	EOF
+}
+qosmate_off() { nft delete table inet t_qosmate 2>/dev/null; return 0; }
+inbound_checks() {
+	check "входящее через Туннель: ответ вернулся ($1)" probe
+	qosmate_on
+	check "входящее через Туннель при qosmate ($1)" probe
+	qosmate_off
+}
+
 echo "== зависимости (ставятся в образ заранее: под procd у контейнера нет сети)"
 for p in mosdns ucode-mod-socket curl ip-full; do
 	apk list -I "$p" 2>/dev/null | grep -q "^$p-" || { echo "нет пакета $p в образе"; exit 1; }
@@ -32,8 +55,21 @@ cp /dat/geoip.dat /dat/geosite.dat /etc/truba/lists/
 for f in geoip.dat geosite.dat; do sha256sum /etc/truba/lists/$f | awk '{print $1"  "FILENAME}' FILENAME=$f > /etc/truba/lists/$f.sha256sum; done
 
 echo "== домашняя сеть и имитация Туннеля"
-ip link add lan0 type dummy 2>/dev/null
-ip link add awg0 type dummy 2>/dev/null
+# veth в отдельные netns: «vps» — другой конец Туннеля, через него приходят клиенты
+# из интернета (203.0.113.77), «lanhost» — устройство в домашней сети.
+ip netns add vps; ip netns add lanhost
+ip link add awg0 type veth peer name vps0
+ip link set vps0 netns vps
+ip -n vps link set lo up; ip -n vps link set vps0 up
+ip -n vps addr add 10.77.77.1/30 dev vps0
+ip -n vps addr add 203.0.113.77/32 dev lo
+ip -n vps route add default via 10.77.77.2 src 203.0.113.77
+ip netns exec vps sysctl -qw net.ipv4.tcp_syn_retries=1   # проба без ответа падает за ~3 с
+ip link add lan0 type veth peer name lh0
+ip link set lh0 netns lanhost
+ip -n lanhost link set lo up; ip -n lanhost link set lh0 up
+ip -n lanhost addr add 192.168.1.50/24 dev lh0
+ip -n lanhost route add default via 192.168.1.1
 ip link set awg0 up
 uci -q batch <<-'EOF'
 	set network.brlan=device
@@ -68,6 +104,9 @@ check "аппаратное ускорение выключено" test "$(uci -
 check "IPv6 lan→wan REJECT" test "$(uci -q get firewall.truba_no_ipv6_inet.family)" = ipv6
 check "IPv6 lan не тронут (ra)" test "$(uci -q get dhcp.lan.ra)" != disabled
 check "Стартовые настройки: 8 правил" test "$(uci -q show truba | grep -c '=rule$')" -eq 8
+check "программное ускорение включено" test "$(uci -q get firewall.@defaults[0].flow_offloading)" = 1
+# В ядре Docker нет nf_flow_table: с flowtable fw4 не загружается целиком (без зон).
+uci set firewall.@defaults[0].flow_offloading='0'; uci commit firewall
 /etc/init.d/firewall reload >/dev/null 2>&1
 
 echo "== apply (Маршрутизация вкл)"
@@ -94,6 +133,29 @@ check "бэкап dnsmasq сохранён" test -f /etc/truba/state/dnsmasq.jso
 check "cron: блок обновления" grep -q 'truba update-lists' /etc/crontabs/root
 check "mosdns запущен" pidof mosdns
 check "mosdns слушает 5335" sh -c "netstat -lnu 2>/dev/null | grep -q ':5335' || ss -lnu | grep -q ':5335'"
+check "persist: решение пишется в ct mark после всех" sh -c "nft list chain inet truba persist | grep -q 'priority 300'"
+# nft печатает «& 0xff00ffff | 0x00040000» как «& 0xff04ffff | 0x00040000» — то же самое.
+check "persist: ct mark меняется только в байте Трубы" sh -c "nft list chain inet truba persist | grep -qE 'ct mark set ct mark & 0xff0[0-9a-f]ffff \| 0x00040000'"
+
+echo "== входящие через Туннель (Маршрутизация вкл)"
+# Обычный проброс порта из зоны truba, как его создаёт вкладка «Входящие».
+uci -q batch <<-'EOF'
+	set firewall.t_in=redirect
+	set firewall.t_in.name='test inbound'
+	set firewall.t_in.src='truba'
+	set firewall.t_in.src_dport='48080'
+	set firewall.t_in.dest='lan'
+	set firewall.t_in.dest_ip='192.168.1.50'
+	set firewall.t_in.dest_port='8080'
+	set firewall.t_in.proto='tcp'
+	set firewall.t_in.target='DNAT'
+	commit firewall
+EOF
+/etc/init.d/firewall reload >/dev/null 2>&1; sleep 2
+check "fw4: проброс из зоны truba загружен" sh -c "nft list chain inet fw4 dstnat_truba | grep -q 48080"
+ip netns exec lanhost ucode /repo/tests/router/tcp_probe.uc server 8080 >/dev/null 2>&1 &
+sleep 1
+inbound_checks "Маршрутизация вкл"
 
 echo "== порядок Категорий (узкие раньше широких)"
 grep -o '"geosite_order":[^]]*' /var/run/truba/applied.json
@@ -163,17 +225,19 @@ echo "== Маршрутизация выкл (минимальный режим)
 uci set truba.main.routing='0'; uci commit truba
 /etc/init.d/truba reload; sleep 3
 check "минимальная таблица: нет classify" sh -c "! nft list table inet truba | grep -q classify"
-check "минимальная таблица: INBOUND остаётся" sh -c "nft list chain inet truba prerouting | grep -q 'ct mark set 0x00040000'"
+check "минимальная таблица: INBOUND остаётся" sh -c "nft list chain inet truba prerouting | grep -qE 'iifname \"awg0\" meta mark set meta mark & 0xff0[0-9a-f]ffff \| 0x00040000'"
+check "минимальная таблица: persist остаётся" sh -c "nft list chain inet truba persist | grep -q 0x00040000"
 check "dnsmasq восстановлен" sh -c "! uci -q get dhcp.@dnsmasq[0].server | grep -q 5335"
 check "бэкап dnsmasq удалён" test ! -f /etc/truba/state/dnsmasq.json
 check "mosdns остановлен" sh -c "! pidof mosdns"
 check "cron: блок снят" sh -c "! grep -q 'truba update-lists' /etc/crontabs/root"
 check "ip rule остаются (ответы на входящие)" sh -c "ip rule show | grep -q 'lookup 77'"
+inbound_checks "Маршрутизация выкл"
 
 echo "== Режим «Выборочный»"
 uci set truba.main.routing='1'; uci set truba.main.mode='selective'; uci commit truba
 /etc/init.d/truba reload; sleep 3
-check "Выборочный: по умолчанию Напрямую" sh -c "nft list chain inet truba classify | tail -3 | grep -q 'meta mark set 0x00020000'"
+check "Выборочный: по умолчанию Напрямую" sh -c "nft list chain inet truba classify | tail -3 | grep -qE 'meta mark set meta mark & 0xff0[0-9a-f]ffff \| 0x00020000'"
 /usr/sbin/truba check 8.8.8.8 > /tmp/chk4.json
 check "check 8.8.8.8 → direct (Режим)" grep -q '"reason": "mode"' /tmp/chk4.json
 check "смена Режима сбрасывает gs_direct4" sh -c "! nft list set inet truba gs_direct4 | grep -q 198.51.100.7"
@@ -231,6 +295,8 @@ echo "== teardown"
 check "таблица удалена" sh -c "! nft list table inet truba"
 check "ip rule удалены" sh -c "! ip rule show | grep -q 'lookup 77'"
 check "table 77 пуста" sh -c "[ -z \"\$(ip route show table 77)\" ]"
+no_probe() { ! probe; }
+check "без Трубы ответ уходит мимо Туннеля (проба это видит)" no_probe
 
 echo "== uninstall"
 sh /usr/share/truba/uninstall.sh

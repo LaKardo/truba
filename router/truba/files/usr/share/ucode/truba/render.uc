@@ -12,6 +12,40 @@ function q(s) {
 	return '"' + replace(s, /"/g, '') + '"';
 }
 
+// Метки Трубы занимают только байт MARK_MASK: остальные биты meta mark и ct mark
+// принадлежат другим (qosmate хранит DSCP в младших битах ct mark, mwan3 — в meta mark).
+const KEEP = hex(~C.MARK_MASK & 0xffffffff);
+
+function set_meta(mark) {
+	return 'meta mark set meta mark and ' + KEEP + ' or ' + hex(mark);
+}
+
+function ct_is(mark) {
+	return 'ct mark and ' + hex(C.MARK_MASK) + ' == ' + hex(mark);
+}
+
+// Решение для соединения держится в meta mark каждого пакета и в самом конце
+// postrouting записывается в ct mark. Так оно переживает тех, кто перезаписывает
+// ct mark целиком раньше (qosmate: «ct mark set ip dscp | 0x80» в postrouting).
+function persist_chain() {
+	let s = '\n\tchain persist {\n';
+	s += '\t\ttype filter hook postrouting priority 300; policy accept;\n';
+	s += '\t\tmeta nfproto != ipv4 return\n';
+	for (let m in [ C.MARK_INBOUND, C.MARK_TUNNEL, C.MARK_DIRECT ])
+		s += '\t\tmeta mark and ' + hex(C.MARK_MASK) + ' == ' + hex(m) +
+			' ct mark set ct mark and ' + KEEP + ' or ' + hex(m) + ' return\n';
+	s += '\t}\n';
+	return s;
+}
+
+// Пакеты из Туннеля: ответы на них — только в Туннель. Метка ставится на каждый
+// пакет, а не только на первый: persist восстанавливает её после чужих перезаписей.
+function inbound_rules(iface) {
+	let s = '\t\tiifname ' + iface + ' ct state new counter name c_inbound\n';
+	s += '\t\tiifname ' + iface + ' ' + set_meta(C.MARK_INBOUND) + ' return\n';
+	return s;
+}
+
 function set_decl(name, typ, flags, elems) {
 	let s = '\tset ' + name + ' {\n\t\ttype ' + typ + ';\n';
 	if (flags)
@@ -52,29 +86,36 @@ export function nft_full(cfg, plan, ctx) {
 	s += '\t\ttype filter hook prerouting priority mangle; policy accept;\n';
 	s += '\t\tmeta nfproto != ipv4 return\n';
 	// Новые соединения извне: из Туннеля — ответы в Туннель, с остальных внешних интерфейсов — Напрямую.
-	s += '\t\tiifname ' + iface + ' ct state new ct mark set ' + hex(C.MARK_INBOUND) + ' counter name c_inbound return\n';
-	s += '\t\tiifname != @lan_if ct state new ct mark set ' + hex(C.MARK_DIRECT) + ' return\n';
+	s += inbound_rules(iface);
+	s += '\t\tiifname != @lan_if ct state new ' + set_meta(C.MARK_DIRECT) + ' return\n';
+	// Решение уже принято для соединения — тот же путь для всех его пакетов.
+	s += '\t\tct mark and ' + hex(C.MARK_MASK) + ' != 0 goto restore\n';
 	s += '\t\tiifname != @lan_if return\n';
-	s += '\t\tct mark ' + hex(C.MARK_INBOUND) + ' meta mark set ' + hex(C.MARK_TUNNEL) + ' return\n';
-	s += '\t\tct mark and ' + hex(C.MARK_TUNNEL | C.MARK_DIRECT) + ' != 0 meta mark set ct mark return\n';
 	s += '\t\tip daddr @bypass4 return\n';
 	s += '\t\tjump classify\n';
-	s += '\t\tct mark set meta mark\n';
-	s += '\t\tmeta mark ' + hex(C.MARK_TUNNEL) + ' counter name c_tunnel\n';
-	s += '\t\tmeta mark ' + hex(C.MARK_DIRECT) + ' counter name c_direct\n';
+	s += '\t\tmeta mark and ' + hex(C.MARK_MASK) + ' == ' + hex(C.MARK_TUNNEL) + ' counter name c_tunnel\n';
+	s += '\t\tmeta mark and ' + hex(C.MARK_MASK) + ' == ' + hex(C.MARK_DIRECT) + ' counter name c_direct\n';
+	s += '\t}\n\n';
+
+	// Ответы на входящие из Туннеля идут в Туннель так же, как соединения «Туннель».
+	s += '\tchain restore {\n';
+	s += '\t\t' + ct_is(C.MARK_INBOUND) + ' ' + set_meta(C.MARK_TUNNEL) + ' return\n';
+	s += '\t\t' + ct_is(C.MARK_TUNNEL) + ' ' + set_meta(C.MARK_TUNNEL) + ' return\n';
+	s += '\t\t' + ct_is(C.MARK_DIRECT) + ' ' + set_meta(C.MARK_DIRECT) + ' return\n';
 	s += '\t}\n\n';
 
 	// Приоритет: Блок → Политика устройства → geosite (Туннель > Напрямую) → geoip → Режим.
 	s += '\tchain classify {\n';
 	s += '\t\tip daddr @gi_block4 counter name c_block drop\n';
-	s += '\t\tether saddr @dev_direct meta mark set ' + hex(C.MARK_DIRECT) + ' return\n';
-	s += '\t\tether saddr @dev_tunnel meta mark set ' + hex(C.MARK_TUNNEL) + ' return\n';
-	s += '\t\tip daddr @gs_tunnel4 meta mark set ' + hex(C.MARK_TUNNEL) + ' return\n';
-	s += '\t\tip daddr @gs_direct4 meta mark set ' + hex(C.MARK_DIRECT) + ' return\n';
-	s += '\t\tip daddr @gi_tunnel4 meta mark set ' + hex(C.MARK_TUNNEL) + ' return\n';
-	s += '\t\tip daddr @gi_direct4 meta mark set ' + hex(C.MARK_DIRECT) + ' return\n';
-	s += '\t\tmeta mark set ' + hex(dflt) + '\n';
+	s += '\t\tether saddr @dev_direct ' + set_meta(C.MARK_DIRECT) + ' return\n';
+	s += '\t\tether saddr @dev_tunnel ' + set_meta(C.MARK_TUNNEL) + ' return\n';
+	s += '\t\tip daddr @gs_tunnel4 ' + set_meta(C.MARK_TUNNEL) + ' return\n';
+	s += '\t\tip daddr @gs_direct4 ' + set_meta(C.MARK_DIRECT) + ' return\n';
+	s += '\t\tip daddr @gi_tunnel4 ' + set_meta(C.MARK_TUNNEL) + ' return\n';
+	s += '\t\tip daddr @gi_direct4 ' + set_meta(C.MARK_DIRECT) + ' return\n';
+	s += '\t\t' + set_meta(dflt) + '\n';
 	s += '\t}\n';
+	s += persist_chain();
 
 	if (cfg.dns_hijack) {
 		s += '\n\tchain dns_hijack {\n';
@@ -97,9 +138,12 @@ export function nft_minimal(cfg, ctx) {
 	s += '\tchain prerouting {\n';
 	s += '\t\ttype filter hook prerouting priority mangle; policy accept;\n';
 	s += '\t\tmeta nfproto != ipv4 return\n';
-	s += '\t\tiifname ' + iface + ' ct state new ct mark set ' + hex(C.MARK_INBOUND) + ' counter name c_inbound return\n';
-	s += '\t\tiifname @lan_if ct mark ' + hex(C.MARK_INBOUND) + ' meta mark set ' + hex(C.MARK_TUNNEL) + '\n';
+	s += inbound_rules(iface);
+	// persist пишет ответы как «Туннель», поэтому подходят обе метки.
+	s += '\t\tiifname @lan_if ' + ct_is(C.MARK_INBOUND) + ' ' + set_meta(C.MARK_TUNNEL) + ' return\n';
+	s += '\t\tiifname @lan_if ' + ct_is(C.MARK_TUNNEL) + ' ' + set_meta(C.MARK_TUNNEL) + ' return\n';
 	s += '\t}\n';
+	s += persist_chain();
 	s += '}\n';
 	return s;
 };
