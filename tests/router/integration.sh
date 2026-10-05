@@ -79,7 +79,7 @@ openclash_off() {
 own_checks() {
 	check "свой UDP с меткой Туннеля → Туннель ($1)" test "$(udp_out 0x10000)" = vps
 	check "свой TCP с меткой Туннеля → Туннель ($1)" tcp_out 0x10000
-	if ! grep -q '"socket_mark":true' /var/run/truba/applied.json; then
+	if ! grep -qE '"socket_mark": ?true' /var/run/truba/applied.json; then
 		echo "skip  в ядре нет nft_socket (kmod-nft-socket): свои сокеты при OpenClash не проверяются ($1)"
 		check "без nft_socket таблица загружена, цепочки output нет ($1)" sh -c "nft list table inet truba && ! nft list chain inet truba output"
 		return
