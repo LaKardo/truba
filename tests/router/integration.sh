@@ -99,15 +99,20 @@ openclash_off() {
 own_checks() {
 	check "свой UDP с меткой Туннеля → Туннель ($1)" test "$(udp_out 0x10000)" = vps
 	check "свой TCP с меткой Туннеля → Туннель ($1)" tcp_out 0x10000
+	# Пакеты к Трубе (сам Туннель) — только напрямую: ни петли в awg0, ни чужого прокси.
+	check "output: пакеты к Трубе — «Напрямую» ($1)" sh -c "nft list chain inet truba output | grep -qE 'ip daddr 198.51.100.2 meta mark set meta mark & 0xff0[0-9a-f]ffff \| 0x00020000 return'"
+	openclash_on
+	# 10.77.77.1 у OpenClash в исключениях, но внешние пакеты Туннеля к Трубе — нет.
+	check "Туннель при OpenClash не уходит в прокси (пинг Трубы) ($1)" ping -c 2 -W 2 10.77.77.1
 	if ! grep -qE '"socket_mark": ?true' /var/run/truba/applied.json; then
+		openclash_off
 		echo "skip  в ядре нет nft_socket (kmod-nft-socket): свои сокеты при OpenClash не проверяются ($1)"
-		check "без nft_socket таблица загружена, цепочки output нет ($1)" sh -c "nft list table inet truba && ! nft list chain inet truba output"
+		check "без nft_socket нет правила socket mark ($1)" sh -c "nft list chain inet truba output && ! nft list chain inet truba output | grep -q 'socket mark'"
 		return
 	fi
-	# Внешние пакеты Туннеля к VPS несут сокет исходного пакета с меткой «Туннель»:
-	# без исключения цепочка заворачивает Туннель в себя (петля, на живом роутере).
-	check "output: пакеты к VPS не трогает, исключение раньше socket mark ($1)" sh -c "nft list chain inet truba output | grep -A1 'ip daddr 198.51.100.2 return' | grep -q 'socket mark'"
-	openclash_on
+	# Внешние пакеты Туннеля несут сокет исходного пакета с меткой «Туннель»:
+	# правило для Трубы должно стоять раньше socket mark, иначе петля (живой роутер, r4).
+	check "output: правило Трубы раньше socket mark ($1)" sh -c "nft list chain inet truba output | grep -A1 'ip daddr 198.51.100.2' | grep -q 'socket mark'"
 	check "свой UDP с меткой Туннеля при OpenClash → Туннель ($1)" test "$(udp_out 0x10000)" = vps
 	check "свой TCP с меткой Туннеля при OpenClash → Туннель ($1)" tcp_out 0x10000
 	check "свой UDP без метки при OpenClash → OpenClash ($1)" test "$(udp_out)" = clash
@@ -255,6 +260,8 @@ own_checks "Маршрутизация вкл"
 nft delete chain inet truba output 2>/dev/null
 openclash_on
 check "контроль: без цепочки output меченый UDP уходит в OpenClash" test "$(udp_out 0x10000)" = clash
+no_ping() { ! ping -c 2 -W 2 10.77.77.1; }
+check "контроль: без цепочки output Туннель при OpenClash уходит в прокси" no_ping
 openclash_off
 nft -f /var/etc/truba/truba.nft
 

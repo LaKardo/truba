@@ -43,21 +43,26 @@ function persist_chain() {
 // с router_self_proxy: «meta mark set 0x162», правило 999 → Clash). После mangle
 // байт Трубы возвращается из метки сокета, и route-цепочка перемаршрутизирует пакет:
 // правило 1000 с маской срабатывает, а чужое правило с точной меткой — уже нет.
-// socket mark — модуль kmod-nft-socket; без него цепочки нет (ctx.socket_mark).
+// socket mark — модуль kmod-nft-socket; без него этого правила нет (ctx.socket_mark).
 //
-// Внешние (зашифрованные) пакеты самого Туннеля к VPS проходят output ещё раз и
-// несут сокет исходного пакета — вместе с его меткой «Туннель». Вернуть им эту
-// метку значит завернуть Туннель в самого себя: петля, awg0 отбрасывает пакет
-// (найдено на живом роутере). К VPS в Туннель не ходит ничего (bypass4), поэтому
-// пакеты к нему цепочка не трогает; без известного IP VPS цепочки нет вовсе.
+// Пакеты к IP Трубы — это сам Туннель (внешние зашифрованные пакеты AmneziaWG), им
+// только напрямую, по двум причинам:
+// - они проходят output ещё раз и несут сокет исходного пакета — с его меткой
+//   «Туннель»; вернуть им её значит завернуть Туннель в себя: петля, awg0
+//   отбрасывает пакет (найдено на живом роутере в r4);
+// - чужая цепочка (OpenClash: 0x162 на всё, кроме своих исключений) уводит их в
+//   прокси, и Туннель идёт через чужой сервер (тоже на живом роутере).
+// Метка «Напрямую» ставится в байт Трубы: правило с точной чужой меткой уже не
+// сработает, а правило 1000 Трубы — только для «Туннеля». Без IP Трубы цепочки нет.
 function output_chain(ctx) {
-	if (!ctx.socket_mark || !ctx.vps)
+	if (!ctx.vps)
 		return '';
 	let s = '\n\tchain output {\n';
 	s += '\t\ttype route hook output priority mangle + 10; policy accept;\n';
 	s += '\t\tmeta nfproto != ipv4 return\n';
-	s += '\t\tip daddr ' + ctx.vps + ' return\n';
-	s += '\t\tsocket mark and ' + hex(C.MARK_MASK) + ' == ' + hex(C.MARK_TUNNEL) + ' ' + set_meta(C.MARK_TUNNEL) + '\n';
+	s += '\t\tip daddr ' + ctx.vps + ' ' + set_meta(C.MARK_DIRECT) + ' return\n';
+	if (ctx.socket_mark)
+		s += '\t\tsocket mark and ' + hex(C.MARK_MASK) + ' == ' + hex(C.MARK_TUNNEL) + ' ' + set_meta(C.MARK_TUNNEL) + '\n';
 	s += '\t}\n';
 	return s;
 }
