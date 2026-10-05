@@ -54,7 +54,17 @@ sudo bash install-vps.sh install
   scp -P <SSH-порт> root@<IP VPS>:/root/truba/router.conf .
   ```
 
-Команды: `install-vps.sh status | show-config | rotate-keys | uninstall [--purge]`.
+Команды: `install-vps.sh status | show-config | rotate-keys | random-trailers on|off | uninstall [--purge]`.
+
+Если модуль поддерживает AmneziaWG 3.1, Туннель сразу получает защиту заголовков (`HeaderProtectionKey`) и `DisableCookies`. Если VPS ставился на более старой версии, перейти на 3.1 можно через `rotate-keys`; после этого импортируйте `router.conf` в Роутер заново.
+
+`RandomTrailers` лежит в запасе — на случай, если DPI начнёт узнавать Туннель по размерам пакетов. Он увеличивает трафик на мелких пакетах, поэтому по умолчанию выключен. Включать надо на обеих сторонах сразу:
+
+```bash
+install-vps.sh random-trailers on
+```
+
+Затем на Роутере: **Сеть → Интерфейсы → awg0 → AmneziaWG → Random Trailers → Сохранить и применить**. Выключается так же, командой `off` и снятием флага.
 
 ### 3. Роутер (ImmortalWrt 25.12, Netcraze NC-1812)
 
@@ -131,7 +141,7 @@ bash tests/run.sh
 
 - `dat` — распаковщик на свежих `.dat`: записи переносятся один в один, `full:` и `regexp:` на месте, вложенность Категорий;
 - `router` — пакет под настоящим procd/netifd/fw4, Туннель — настоящий WireGuard до netns «VPS»: таблица nftables, правила, mosdns, Блок, Аварийная блокировка, режимы, входящие через Туннель, соседство с qosmate и OpenClash, обновление и откат списков, teardown и uninstall;
-- `vps` — shellcheck, пределы параметров AWG, правила nftables с загрузкой в ядро, sysctl;
+- `vps` — shellcheck, пределы параметров AWG, конфиги AWG 3.1 у обеих сторон, правила nftables с загрузкой в ядро, sysctl;
 - `luci` — синтаксис интерфейса и полнота русского перевода.
 
 Приёмочные тесты на живой сети (Full cone по RFC 5780, входящие, утечки, roamd) — в [PLAN.md §8](PLAN.md).

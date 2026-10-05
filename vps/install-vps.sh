@@ -6,6 +6,7 @@
 #   install-vps.sh install [--ssh-port N] [--awg-port N] [--no-confirm]
 #   install-vps.sh show-config
 #   install-vps.sh rotate-keys
+#   install-vps.sh random-trailers on|off
 #   install-vps.sh status
 #   install-vps.sh uninstall
 #
@@ -85,6 +86,8 @@ save_state() {
 		H3='$H3'
 		H4='$H4'
 		I1='$I1'
+		HPK='${HPK:-}'
+		RANDOM_TRAILERS='${RANDOM_TRAILERS:-0}'
 		SSH_CONFIRMED='${SSH_CONFIRMED:-0}'
 	EOF
 }
@@ -141,21 +144,31 @@ install_packages() {
 	fi
 }
 
-# Поддерживает ли модуль параметры AWG 2.0 (S3/S4, диапазоны H, I1)?
+# Какой протокол AWG поддерживает модуль: 3 — AWG 3.1 (защита заголовков, DisableCookies,
+# RandomTrailers), 2 — AWG 2.0 (S3/S4, диапазоны H, I1), иначе 1.
 # Проверяется тем же разбором конфига, что и у настоящего интерфейса.
-detect_awg_proto() {
-	local t=awgprobe$$ proto=1 f
+awg_proto_supported() {
+	local t=awgprobe$$ proto=1 f base
 	f=$(mktemp)
-	printf '[Interface]\nPrivateKey = %s\nS3 = 10\nS4 = 5\nH1 = 100-200\nH2 = 300-400\nH3 = 500-600\nH4 = 700-800\n' \
-		"$(awg genkey)" > "$f"
+	base=$(printf '[Interface]\nPrivateKey = %s\nS1 = 20\nS2 = 40\nS3 = 20\nS4 = 20\nH1 = 100-200\nH2 = 300-400\nH3 = 500-600\nH4 = 700-800' \
+		"$(awg genkey)")
 	if ip link add "$t" type amneziawg 2>/dev/null; then
+		printf '%s\n' "$base" > "$f"
 		if awg setconf "$t" "$f" 2>/dev/null; then
 			proto=2
+			printf '%s\nHeaderProtectionKey = %s\nDisableCookies = on\nRandomTrailers = off\n' "$base" "$(awg genkey)" > "$f"
+			if awg setconf "$t" "$f" 2>/dev/null; then
+				proto=3
+			fi
 		fi
 		ip link del "$t" 2>/dev/null || true
 	fi
 	rm -f "$f"
-	AWG_PROTO=$proto
+	echo "$proto"
+}
+
+detect_awg_proto() {
+	AWG_PROTO=$(awg_proto_supported)
 }
 
 # ---------- ключи и параметры маскировки ----------
@@ -167,9 +180,12 @@ gen_params() {
 	S1=$(rand_between 15 150)
 	while :; do S2=$(rand_between 15 150); [ $((S1 + 56)) -ne "$S2" ] && break; done
 	if [ "$AWG_PROTO" -ge 2 ]; then
-		S3=$(rand_between 8 55)
+		# Защите заголовков (AWG 3) нужны S1–S4 не меньше 12; S1 и S2 и так от 15.
+		local s3min=8 s4min=4
+		if [ "$AWG_PROTO" -ge 3 ]; then s3min=12; s4min=12; fi
+		S3=$(rand_between "$s3min" 55)
 		# S4 удлиняет каждый пакет данных: при MTU 1380 запас до 1500 есть с избытком.
-		S4=$(rand_between 4 27)
+		S4=$(rand_between "$s4min" 27)
 		# Четыре непересекающихся диапазона: по одному в каждой четверти пространства.
 		local q=$((2147483647 / 4)) i lo w
 		local hs=()
@@ -197,6 +213,9 @@ gen_keys() {
 	VPS_PRIV=$(awg genkey); VPS_PUB=$(printf '%s' "$VPS_PRIV" | awg pubkey)
 	RTR_PRIV=$(awg genkey); RTR_PUB=$(printf '%s' "$RTR_PRIV" | awg pubkey)
 	PSK=$(awg genpsk)
+	# Ключ защиты заголовков (AWG 3): одинаковый у Трубы и Роутера.
+	HPK=''
+	if [ "$AWG_PROTO" -ge 3 ]; then HPK=$(awg genkey); fi
 }
 
 awg_params_block() {
@@ -212,6 +231,13 @@ awg_params_block() {
 	echo "H3 = $H3"
 	echo "H4 = $H4"
 	[ -n "${I1:-}" ] && echo "I1 = $I1"
+	if [ "${AWG_PROTO:-1}" -ge 3 ]; then
+		[ -n "${HPK:-}" ] && echo "HeaderProtectionKey = $HPK"
+		# Ответы cookie шлются только под нагрузкой; с одним пиром они не нужны, а их размер узнаваем.
+		echo "DisableCookies = on"
+		# Запас на случай DPI по размерам пакетов: дорого по трафику, включается отдельной командой.
+		[ "${RANDOM_TRAILERS:-0}" = 1 ] && echo "RandomTrailers = on"
+	fi
 	return 0
 }
 
@@ -462,7 +488,12 @@ cmd_install() {
 	preflight          # WAN_IF и PUB_IP — всегда свежие, остальное из состояния
 
 	install_packages
-	if [ -z "${AWG_PROTO:-}" ]; then detect_awg_proto; fi
+	if [ -z "${AWG_PROTO:-}" ]; then
+		detect_awg_proto
+	elif [ "$AWG_PROTO" -lt 3 ] && [ "$(awg_proto_supported)" -ge 3 ]; then
+		# Повторный запуск параметры не меняет: иначе старый конфиг Роутера перестал бы подключаться.
+		warn "модуль поддерживает AWG 3.1 (защита заголовков): включится после rotate-keys, затем импортируйте router.conf заново"
+	fi
 
 	SSH_PORT=${OPT_SSH_PORT:-${SSH_PORT:-}}
 	[ -n "$SSH_PORT" ] || SSH_PORT=$(pick_port)
@@ -526,6 +557,8 @@ cmd_rotate_keys() {
 	load_state
 	[ -n "${VPS_PRIV:-}" ] || die "Труба не установлена"
 	say "Новые ключи и параметры маскировки"
+	# Модуль мог обновиться: новые параметры — под то, что он умеет сейчас.
+	detect_awg_proto
 	gen_keys
 	gen_params
 	save_state
@@ -535,9 +568,33 @@ cmd_rotate_keys() {
 	say "Готово. Импортируйте заново $ROUTER_CONF в Роутер — старый конфиг больше не подключится"
 }
 
+# RandomTrailers должен совпадать у сторон: пока он разный, рукопожатие не проходит,
+# а текущее соединение держится до перевыпуска ключей (около 2–3 минут).
+cmd_random_trailers() {
+	[ "$(id -u)" -eq 0 ] || die "запустите от root"
+	load_state
+	[ -n "${VPS_PRIV:-}" ] || die "Труба не установлена"
+	[ "${AWG_PROTO:-1}" -ge 3 ] || die "RandomTrailers есть только в AWG 3.1: сначала rotate-keys"
+	case "${1:-}" in
+		on) RANDOM_TRAILERS=1 ;;
+		off) RANDOM_TRAILERS=0 ;;
+		*) die "укажите on или off" ;;
+	esac
+	save_state
+	write_awg_conf
+	write_router_conf
+	awg set "$AWG_IF" random-trailers "$1" || warn "Туннель не поднят: настройка применится при его запуске"
+	say "RandomTrailers $1 на Трубе. Сразу переключите так же на Роутере:"
+	echo "  LuCI → Сеть → Интерфейсы → $AWG_IF → AmneziaWG → Random Trailers → Сохранить и применить"
+	echo "  (или импортируйте заново $ROUTER_CONF)"
+}
+
 cmd_status() {
 	load_state
 	echo "IP Трубы: ${PUB_IP:-?}   SSH: ${SSH_PORT:-?}   Туннель: udp/${AWG_PORT:-?}   AWG ${AWG_VERSION:-?} (протокол ${AWG_PROTO:-?}.x)"
+	if [ "${AWG_PROTO:-1}" -ge 3 ]; then
+		echo "Защита заголовков: $([ -n "${HPK:-}" ] && echo вкл || echo выкл)   DisableCookies: вкл   RandomTrailers: $([ "${RANDOM_TRAILERS:-0}" = 1 ] && echo вкл || echo выкл)"
+	fi
 	echo
 	awg show "$AWG_IF" 2>/dev/null || echo "Туннель не поднят"
 	echo
@@ -570,8 +627,12 @@ cmd_uninstall() {
 }
 
 main() {
-	local cmd=${1:-}
+	local cmd=${1:-} arg=''
 	shift || true
+	if [ "$cmd" = random-trailers ]; then
+		arg=${1:-}
+		shift || true
+	fi
 	while [ $# -gt 0 ]; do
 		case "$1" in
 			--ssh-port) OPT_SSH_PORT=$2; shift 2 ;;
@@ -585,9 +646,10 @@ main() {
 		install) cmd_install ;;
 		show-config) cmd_show_config ;;
 		rotate-keys) cmd_rotate_keys ;;
+		random-trailers) cmd_random_trailers "$arg" ;;
 		status) cmd_status ;;
 		uninstall) cmd_uninstall ${PURGE:+--purge} ;;
-		*) sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+		*) sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
 	esac
 }
 

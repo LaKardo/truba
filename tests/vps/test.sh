@@ -41,6 +41,17 @@ for i in $(seq 50); do
 done
 ok "50 наборов параметров AWG 2.x в допустимых пределах"
 
+# AWG 3.1: защите заголовков нужны S1–S4 не меньше 12.
+AWG_PROTO=3
+bad=0
+for i in $(seq 50); do
+	gen_params
+	for v in S1 S2 S3 S4; do [ "${!v}" -ge 12 ] || { fail "AWG 3: $v < 12 (${!v})"; bad=1; }; done
+	[ $((S1 + 56)) -ne "$S2" ] || { fail "AWG 3: S1+56 == S2"; bad=1; }
+	[ "$S4" -le 27 ] || { fail "AWG 3: S4 > 27"; bad=1; }
+done
+[ "$bad" -eq 0 ] && ok "50 наборов параметров AWG 3.1: S1–S4 ≥ 12"
+
 AWG_PROTO=1
 gen_params
 [ -z "$S3" ] && [ -z "$I1" ] && [[ "$H1" =~ ^[0-9]+$ ]] && ok "параметры AWG 1.x без S3/S4/I1" || fail "параметры AWG 1.x"
@@ -84,6 +95,25 @@ grep -q "^MTU = 1380" "$ROUTER_CONF" && ok "Роутер: MTU 1380" || fail "MTU
 diff <(grep -E '^(S[1-4]|H[1-4]) = ' "$AWG_CONF") <(grep -E '^(S[1-4]|H[1-4]) = ' "$ROUTER_CONF") >/dev/null \
 	&& ok "S1–S4 и H1–H4 совпадают у сторон" || fail "S/H различаются"
 [ "$(stat -c %a "$ROUTER_CONF")" = 600 ] && ok "router.conf доступен только root" || fail "права router.conf"
+! grep -qE '^(HeaderProtectionKey|DisableCookies|RandomTrailers)' "$AWG_CONF" "$ROUTER_CONF" \
+	&& ok "AWG 2.0: без параметров 3.1" || fail "AWG 2.0: лишние параметры 3.1"
+
+# Конфиги AWG 3.1: ключ защиты заголовков одинаковый, DisableCookies у обеих сторон,
+# RandomTrailers — только по команде random-trailers.
+AWG_PROTO=3; gen_params; HPK='aHBrLXRlc3Qta2V5LTMyLWJ5dGVzLWxvbmctLS0tLS0='; RANDOM_TRAILERS=0
+write_awg_conf; write_router_conf
+bad=0
+for f in "$AWG_CONF" "$ROUTER_CONF"; do
+	grep -qx "HeaderProtectionKey = $HPK" "$f" && grep -qx 'DisableCookies = on' "$f" && ! grep -q '^RandomTrailers' "$f" \
+		|| { fail "AWG 3.1: $(basename "$f")"; bad=1; }
+done
+[ "$bad" -eq 0 ] && ok "AWG 3.1: HeaderProtectionKey и DisableCookies у обеих сторон, RandomTrailers выкл"
+RANDOM_TRAILERS=1; write_awg_conf; write_router_conf
+grep -qx 'RandomTrailers = on' "$AWG_CONF" && grep -qx 'RandomTrailers = on' "$ROUTER_CONF" \
+	&& ok "AWG 3.1: RandomTrailers у обеих сторон" || fail "AWG 3.1: RandomTrailers"
+STATE="$STATE_DIR/pipe.env"; AWG_VERSION=test; save_state
+( unset HPK RANDOM_TRAILERS; load_state; [ "$HPK" = 'aHBrLXRlc3Qta2V5LTMyLWJ5dGVzLWxvbmctLS0tLS0=' ] && [ "$RANDOM_TRAILERS" = 1 ] ) \
+	&& ok "pipe.env хранит HeaderProtectionKey и RandomTrailers" || fail "pipe.env: HPK/RandomTrailers"
 
 echo
 [ "$FAILS" -eq 0 ] && echo "ALL OK" || echo "$FAILS FAILED"
