@@ -47,8 +47,8 @@ inbound_checks() {
 udp_out() { ucode /repo/tests/router/udp_probe.uc client 203.0.113.77 40001 "$@"; }
 tcp_out() { ucode /repo/tests/router/tcp_probe.uc client 0.0.0.0 203.0.113.77 48081 "$@"; }
 # Как OpenClash с router_self_proxy: цепочка output перезаписывает meta mark целиком,
-# правило 999 уводит 0x162 в таблицу 354 (local default dev lo → Clash). Маршрута по
-# умолчанию в контейнере нет: 203.0.113.0/24 через br-lan изображает WAN для трафика без метки.
+# правило 999 уводит 0x162 в таблицу 354 (local default dev lo → Clash). Трафик без метки
+# без OpenClash ушёл бы в «интернет» (default dev inet0).
 openclash_on() {
 	nft -f - <<-'EOF'
 		table inet t_openclash {
@@ -69,13 +69,11 @@ openclash_on() {
 	EOF
 	ip rule add fwmark 0x162 lookup 354 priority 999
 	ip route add local default dev lo table 354
-	ip route add 203.0.113.0/24 dev br-lan
 }
 openclash_off() {
 	nft delete table inet t_openclash 2>/dev/null
 	ip rule del priority 999 2>/dev/null
 	ip route flush table 354 2>/dev/null
-	ip route del 203.0.113.0/24 dev br-lan 2>/dev/null
 	return 0
 }
 own_checks() {
