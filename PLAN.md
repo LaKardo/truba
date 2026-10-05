@@ -12,24 +12,27 @@
 | [0004](docs/adr/0004-own-apk-feed-over-stock-firmware.md) | Свой apk-фид поверх стоковой ImmortalWrt |
 | [0005](docs/adr/0005-routing-ipv4-only-lan-ipv6-untouched.md) | Маршрутизация только IPv4; IPv6 домашней сети (нужен roamd) не трогаем, IPv6-интернет закрыт |
 
-### Статус реализации (2026-10-04)
+### Статус реализации (2026-10-06)
 
 | Этап | Состояние | Как проверено |
 |---|---|---|
-| 0. Репозиторий, CI | Код готов: [build.yml](.github/workflows/build.yml), [watch-releases.yml](.github/workflows/watch-releases.yml) | Не запускался: нужен репозиторий на GitHub и секреты `APK_SIGN_KEY`/`APK_SIGN_PUB` |
-| 1. `install-vps.sh` | Готов | `tests/vps`: shellcheck, пределы параметров AWG 1.x/2.x, `nft -c` и загрузка правил в ядро. На настоящем VPS не запускался |
-| 2. AmneziaWG под ImmortalWrt | Сборка описана в CI (awg-openwrt на зафиксированном коммите + свой `amneziawg-go`) | Не собиралось: первый прогон CI |
-| 3–6. Пакет `truba` | Готов | `tests/router`: ImmortalWrt 25.12.2 под настоящим procd/netifd/fw4 в Docker, Туннель — dummy-интерфейс. 50+ проверок: nftables, ip rule, таблица 77, mosdns 5.3.3 (Блок → NXDOMAIN, AAAA → пусто), `full:`/`regexp:`, Аварийная блокировка, оба Режима, teardown, uninstall |
+| 0. Репозиторий, CI | Работает: [build.yml](.github/workflows/build.yml) публикует подписанный фид на [lakardo.github.io/truba](https://lakardo.github.io/truba/), [tests.yml](.github/workflows/tests.yml) гоняет тесты на PR с изменениями пакетов Роутера и тестов, [watch-releases.yml](.github/workflows/watch-releases.yml) следит за новыми ImmortalWrt | Сборка под 25.12.2 зелёная; CI падает, если в фиде есть пакет с версией `0` (непереведённый LuCI) |
+| 1. `install-vps.sh` | Готов, работает на живом VPS (Ubuntu 24.04, ВМ Hyper-V) | `tests/vps`: shellcheck, пределы параметров AWG 1.x/2.x, `nft -c` и загрузка правил в ядро, sysctl и загрузка `nf_conntrack` при старте |
+| 2. AmneziaWG под ImmortalWrt | Собирается в CI (awg-openwrt на зафиксированном коммите + свой `amneziawg-go`) | `kmod-amneziawg`, `amneziawg-tools`, `luci-proto-amneziawg` из фида стоят на NC-1812, Туннель поднят |
+| 3–6. Пакет `truba` | Готов, на NC-1812 стоит 1.0.0-r5 | `tests/router`: ImmortalWrt 25.12.2 под настоящим procd/netifd/fw4 в Docker, Туннель — настоящий WireGuard до netns «VPS». 96 проверок: nftables, ip rule, таблица 77, mosdns 5.3.3 (Блок → NXDOMAIN, AAAA → пусто), `full:`/`regexp:`, Аварийная блокировка, оба Режима, входящие через Туннель (в том числе с qosmate), свои сокеты Роутера при OpenClash, обновление и откат списков, teardown, uninstall |
 | 4. Распаковщик | Готов | `tests/dat` на реальных `.dat`: записи один в один, 2–3 с на оба файла |
 | 7. `luci-app-truba` | Готов, 8 вкладок, перевод RU (222 строки) | Headless Chromium: все вкладки без ошибок JS; «Сохранить и применить» → служба перестраивает правила (смена Действия, Политика устройства, выключение Маршрутизации) |
 | 8. Переустановка после sysupgrade | Скрипт готов | Не проверялся реальным sysupgrade |
-| 9. Приёмка §8 | — | Нужна живая сеть: VPS + NC-1812 |
+| 9. Приёмка §8 | Частично | На живой сети: 1 — STUN через Туннель (IP Трубы, порт сохраняется, ответ одинаков у двух серверов), NatTypeTester ещё не запускался; 2 — входящие на IP Трубы доходят до устройства в `lan`, ответы уходят в `awg0`; 3 — зарубежные сайты видят IP Трубы, российские — IP провайдера. Тесты 4–7 не проводились |
 
 Отличия реализации от первоначального текста плана внесены прямо в разделы ниже:
 - проверка Туннеля пингует Трубу внутри Туннеля, а не 1.1.1.1;
 - служебные хосты Роутера резолвятся Напрямую;
 - входящие с `wan` помечаются для ответов Напрямую;
+- Труба меняет в метках только свой байт и записывает решение в ct mark последней в postrouting: qosmate перезаписывает ct mark целиком;
 - свои сокеты Роутера с меткой Туннеля защищены от чужих цепочек output (OpenClash), нужен `kmod-nft-socket`;
+- пакеты к IP Трубы (сам Туннель) всегда идут «Напрямую»: иначе петля в `awg0` или Туннель через прокси OpenClash;
+- на VPS `nf_conntrack` загружается при старте, иначе предел conntrack не применяется;
 - fw4 не трогает таблицу Трубы, поэтому include для межсетевого экрана не понадобился;
 - на VPS проверяется «не контейнер» вместо строго KVM;
 - DHCP-клиент VPS исключён из DNAT.
@@ -178,6 +181,7 @@ truba-watchdog: 3 неудачи подряд (handshake > 180 с или нет 
    net.netfilter.nf_conntrack_max = 262144
    net.ipv6.conf.all.forwarding = 0
    ```
+   И `/etc/modules-load.d/truba.conf` с `nf_conntrack`. Без него при загрузке VPS `systemd-sysctl` пропускает `nf_conntrack_max`: модуля ещё нет. Тогда остаётся ядерный предел (7680 на 1 ГБ), и при полной таблице новые соединения отбрасываются. Найдено после перезагрузки живого VPS.
 6. **Ключи и параметры AWG.**
    - Генерируются пары ключей Трубы и Роутера и PSK.
    - Параметры маскировки (`Jc/Jmin/Jmax`, `S1–S4`, `H1–H4`, `I1–I5`) генерируются по правилам Amnezia для установленной версии: например, `Jmax ≤ 1280`, `S1 + 56 ≠ S2`, диапазоны `H` не пересекаются.
@@ -716,12 +720,15 @@ truba/
 ### 6.3 Установка на Роутер (первый раз)
 
 ```sh
-wget -O /etc/apk/keys/truba.pem https://<user>.github.io/truba/truba.pem
+wget -O /etc/apk/keys/truba.pem https://<user>.github.io/truba/keys/truba.pem
 . /etc/os-release
 echo "https://<user>.github.io/truba/${VERSION}/mediatek/filogic/packages.adb" > /etc/apk/repositories.d/truba.list
 apk update
-apk add kmod-amneziawg amneziawg-tools luci-proto-amneziawg truba luci-app-truba luci-app-upnp
+apk add kmod-amneziawg amneziawg-tools luci-proto-amneziawg truba luci-app-truba luci-i18n-truba-ru luci-app-upnp
+/etc/init.d/network restart
 ```
+
+netifd загружает обработчики протоколов только при запуске, поэтому после установки `amneziawg-tools` нужен перезапуск сети: без него интерфейс Туннеля остаётся `proto none`, `NO_DEVICE`.
 
 Дальше всё делается в интерфейсе: «Службы → Труба → Туннель → Импорт `.conf`» → «Сохранить и применить» → «Обзор».
 
@@ -787,6 +794,7 @@ apk add kmod-amneziawg amneziawg-tools luci-proto-amneziawg truba luci-app-truba
 | Провайдер включит IPv6 | Устройства получат «белые» IPv6, трафик мог бы пойти мимо Туннеля | Правило `lan → wan` IPv6 REJECT и фильтр AAAA уже стоят; полная поддержка IPv6 — отдельное расширение (ADR 0005) |
 | roamd скачивает пакеты для узлов с GitHub напрямую | Подключение нового узла может не пройти, если GitHub тормозит | Осознанно оставлено как есть: операция разовая, у roamd есть запасные пути (кэш контроллера, фиды узла) |
 | Кто-то выключит IPv6 на `br-lan` (например, `network.lan.ipv6='0'`) | roamd перестанет находить узлы | Труба IPv6 домашней сети не меняет; в README — предупреждение не выключать IPv6 на `br-lan` |
+| Включён OpenClash в режиме fake-ip | «Проверить NAT» получает от DNS Роутера адреса `198.18.0.0/15` вместо STUN-серверов и показывает ошибку, хотя Full cone работает | Известно, не исправлено: проверку нужно резолвить мимо DNS Роутера. Пока — проверять при выключенном OpenClash |
 
 ---
 
