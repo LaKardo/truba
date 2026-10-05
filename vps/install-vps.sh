@@ -25,6 +25,7 @@ SSHD_DROPIN=/etc/ssh/sshd_config.d/10-truba.conf
 F2B_JAIL=/etc/fail2ban/jail.d/truba.local
 PIPE_UNIT=/etc/systemd/system/truba-pipe.service
 SYSCTL_FILE=/etc/sysctl.d/90-truba.conf
+MODULES_FILE=/etc/modules-load.d/truba.conf
 
 VPS_TUN=10.77.77.1
 RTR_TUN=10.77.77.2
@@ -347,6 +348,9 @@ write_sysctl() {
 		net.netfilter.nf_conntrack_max = 262144
 		net.ipv6.conf.all.forwarding = 0
 	EOF
+	# Без модуля при загрузке systemd-sysctl пропускает nf_conntrack_max, и остаётся ядерный
+	# по умолчанию (7680 на 1 ГБ) — мало для full cone. modules-load идёт раньше sysctl.
+	echo nf_conntrack > "$MODULES_FILE"
 	modprobe nf_conntrack 2>/dev/null || true
 	sysctl -q -p "$SYSCTL_FILE"
 }
@@ -553,7 +557,7 @@ cmd_uninstall() {
 	systemctl disable --now truba-pipe.service >/dev/null 2>&1 || true
 	nft delete table ip truba_nat 2>/dev/null || true
 	nft delete table inet truba_filter 2>/dev/null || true
-	rm -f "$PIPE_UNIT" /etc/systemd/system/truba-awg.service "$F2B_JAIL" "$SYSCTL_FILE"
+	rm -f "$PIPE_UNIT" /etc/systemd/system/truba-awg.service "$F2B_JAIL" "$SYSCTL_FILE" "$MODULES_FILE"
 	systemctl restart fail2ban >/dev/null 2>&1 || true
 	say "SSH возвращается на порт 22 (текущая сессия сохранится)"
 	rm -f "$SSHD_DROPIN"
