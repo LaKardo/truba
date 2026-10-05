@@ -84,6 +84,9 @@ own_checks() {
 		check "без nft_socket таблица загружена, цепочки output нет ($1)" sh -c "nft list table inet truba && ! nft list chain inet truba output"
 		return
 	fi
+	# Внешние пакеты Туннеля к VPS несут сокет исходного пакета с меткой «Туннель»:
+	# без исключения цепочка заворачивает Туннель в себя (петля, на живом роутере).
+	check "output: пакеты к VPS не трогает, исключение раньше socket mark ($1)" sh -c "nft list chain inet truba output | grep -A1 'ip daddr 198.51.100.2 return' | grep -q 'socket mark'"
 	openclash_on
 	check "свой UDP с меткой Туннеля при OpenClash → Туннель ($1)" test "$(udp_out 0x10000)" = vps
 	check "свой TCP с меткой Туннеля при OpenClash → Туннель ($1)" tcp_out 0x10000
@@ -92,7 +95,7 @@ own_checks() {
 }
 
 echo "== зависимости (ставятся в образ заранее: под procd у контейнера нет сети)"
-for p in mosdns ucode-mod-socket curl ip-full; do
+for p in mosdns ucode-mod-socket curl ip-full wireguard-tools; do
 	apk list -I "$p" 2>/dev/null | grep -q "^$p-" || { echo "нет пакета $p в образе"; exit 1; }
 done
 
@@ -103,16 +106,28 @@ mkdir -p /etc/truba/lists
 cp /dat/geoip.dat /dat/geosite.dat /etc/truba/lists/
 for f in geoip.dat geosite.dat; do sha256sum /etc/truba/lists/$f | awk '{print $1"  "FILENAME}' FILENAME=$f > /etc/truba/lists/$f.sha256sum; done
 
-echo "== домашняя сеть и имитация Туннеля"
-# veth в отдельные netns: «vps» — другой конец Туннеля, через него приходят клиенты
-# из интернета (203.0.113.77), «lanhost» — устройство в домашней сети.
+echo "== домашняя сеть и Туннель"
+# netns «vps» — Труба: через неё приходят клиенты из интернета (203.0.113.77);
+# netns «lanhost» — устройство в домашней сети.
+# Туннель — настоящий WireGuard, а не veth: ядро шифрует пакеты и отправляет внешние
+# через свой UDP-сокет, как AmneziaWG. На veth петля «Туннель в себя» была не видна.
+# «Интернет» между Роутером и Трубой — veth ul0/ul1 (198.51.100.0/30).
 ip netns add vps; ip netns add lanhost
-ip link add awg0 type veth peer name vps0
-ip link set vps0 netns vps
-ip -n vps link set lo up; ip -n vps link set vps0 up
-ip -n vps addr add 10.77.77.1/30 dev vps0
+ip link add ul0 type veth peer name ul1
+ip link set ul1 netns vps
+ip addr add 198.51.100.1/30 dev ul0; ip link set ul0 up
+ip -n vps link set lo up; ip -n vps link set ul1 up
+ip -n vps addr add 198.51.100.2/30 dev ul1
+umask 077; wg genkey > /tmp/r.key; wg genkey > /tmp/v.key; umask 022
+ip link add awg0 type wireguard
+wg set awg0 private-key /tmp/r.key \
+	peer "$(wg pubkey < /tmp/v.key)" endpoint 198.51.100.2:51820 allowed-ips 0.0.0.0/0 persistent-keepalive 5
+ip -n vps link add wg0 type wireguard
+ip netns exec vps wg set wg0 private-key /tmp/v.key listen-port 51820 \
+	peer "$(wg pubkey < /tmp/r.key)" allowed-ips 10.77.77.2/32
+ip -n vps addr add 10.77.77.1/30 dev wg0; ip -n vps link set wg0 up
 ip -n vps addr add 203.0.113.77/32 dev lo
-ip -n vps route add default via 10.77.77.2 src 203.0.113.77
+ip -n vps route add default via 10.77.77.2 dev wg0 src 203.0.113.77
 ip link add lan0 type veth peer name lh0
 ip link set lh0 netns lanhost
 ip -n lanhost link set lo up; ip -n lanhost link set lh0 up
@@ -142,7 +157,7 @@ uci -q batch <<-'EOF'
 	set network.awg0.ipaddr='10.77.77.2'
 	set network.awg0.netmask='255.255.255.252'
 	add network amneziawg_awg0
-	set network.@amneziawg_awg0[-1].endpoint_host='203.0.113.10'
+	set network.@amneziawg_awg0[-1].endpoint_host='198.51.100.2'
 	set network.@amneziawg_awg0[-1].endpoint_port='51820'
 	commit network
 EOF
@@ -171,7 +186,7 @@ echo "$APPLIED" | head -c 600; echo
 check "applied.json без ошибки" sh -c "! grep -q '\"error\"' /var/run/truba/applied.json"
 check "таблица inet truba есть" nft list table inet truba
 check "набор gi_direct4 наполнен geoip:ru" sh -c "nft list set inet truba gi_direct4 | grep -q '5\.'"
-check "bypass4 содержит IP Трубы" sh -c "nft list set inet truba bypass4 | grep -q '203.0.113.10'"
+check "bypass4 содержит IP Трубы" nft get element inet truba bypass4 '{ 198.51.100.2 }'
 check "bypass4 содержит подсеть Туннеля" sh -c "nft list set inet truba bypass4 | grep -q '10.77.77.0/30'"
 check "lan_if = br-lan" sh -c "nft list set inet truba lan_if | grep -q br-lan"
 check "перехват DNS (только IPv4)" sh -c "nft list chain inet truba dns_hijack | grep -q 'meta nfproto ipv4'"

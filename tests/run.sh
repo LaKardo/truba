@@ -8,7 +8,7 @@ set -euo pipefail
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 IMG=immortalwrt/rootfs:x86-64-openwrt-25.12
-TEST_IMG=truba-test:latest
+TEST_IMG=truba-test:wg
 WHAT=${1:-all}
 FAILED=()
 
@@ -34,7 +34,7 @@ t_router() {
 	# Зависимости ставятся в образ заранее: под procd у контейнера нет сети.
 	if ! docker image inspect "$TEST_IMG" >/dev/null 2>&1; then
 		docker rm -f truba-base >/dev/null 2>&1 || true
-		docker run --name truba-base "$IMG" sh -c 'apk update >/dev/null && apk add mosdns ucode-mod-socket curl ip-full >/dev/null'
+		docker run --name truba-base "$IMG" sh -c 'apk update >/dev/null && apk add mosdns ucode-mod-socket curl ip-full wireguard-tools >/dev/null'
 		docker commit truba-base "$TEST_IMG" >/dev/null
 		docker rm truba-base >/dev/null
 	fi
