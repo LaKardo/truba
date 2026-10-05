@@ -63,6 +63,14 @@ else
 	fail "nft -f"
 fi
 
+# sysctl: без загрузки nf_conntrack при старте systemd-sysctl пропускает nf_conntrack_max.
+SYSCTL_FILE="$STATE_DIR/90-truba.conf"; MODULES_FILE="$STATE_DIR/modules-load-truba.conf"
+modprobe() { :; }; sysctl() { :; }
+write_sysctl
+unset -f modprobe sysctl
+grep -q 'nf_conntrack_max = 262144' "$SYSCTL_FILE" && ok "sysctl: nf_conntrack_max" || fail "sysctl nf_conntrack_max"
+grep -qx 'nf_conntrack' "$MODULES_FILE" && ok "nf_conntrack загружается при старте" || fail "modules-load nf_conntrack"
+
 # Конфиги AWG
 AWG_PROTO=2; gen_params
 VPS_PRIV=vpriv; VPS_PUB=vpub; RTR_PRIV=rpriv; RTR_PUB=rpub; PSK=psk
