@@ -6,22 +6,43 @@ name: build
 # Секреты репозитория:
 #   APK_SIGN_KEY  — закрытый ключ EC P-256 (PEM):  openssl ecparam -name prime256v1 -genkey -noout -out truba-feed.pem
 #   APK_SIGN_PUB  — открытый ключ (PEM):           openssl ec -in truba-feed.pem -pubout > truba-feed.pub.pem
+#
+# Как сокращено время:
+# - пакеты AmneziaWG пересобираются, только если изменились их источники (router/awg)
+#   или AWG_BUILD_REV, либо это новая версия ImmortalWrt; иначе берутся из опубликованного
+#   фида той же версии (awg.json хранит отпечаток), а индекс подписывается заново;
+# - зависимости truba и luci-app-truba — только в метаданных (EXTRA_DEPENDS), SDK их не собирает;
+# - тесты идут параллельно со сборкой, публикацию держит deploy;
+# - обновляются только нужные фиды.
 
 on:
   push:
     branches: [ main ]
-    paths: [ 'router/**', 'tests/**', '.github/workflows/build.yml' ]
+    # tests/** сюда не входит: тесты гоняет tests.yml на PR, а пакеты от них не меняются.
+    paths: [ 'router/**', '.github/workflows/build.yml' ]
   workflow_dispatch:
     inputs:
       versions:
         description: 'Версии ImmortalWrt через запятую (пусто — из router/VERSIONS)'
         required: false
         type: string
+      full:
+        description: 'Пересобрать и AmneziaWG, даже если его источники не менялись'
+        type: boolean
+        default: false
+      publish:
+        description: 'Опубликовать фид (выключите, чтобы проверить сборку на ветке)'
+        type: boolean
+        default: true
   workflow_call:
     inputs:
       versions:
         required: false
         type: string
+      publish:
+        required: false
+        type: boolean
+        default: true
 
 permissions:
   contents: write
@@ -33,6 +54,8 @@ concurrency:
 env:
   TARGET: mediatek
   SUBTARGET: filogic
+  # Поднимите, если меняются шаги сборки AmneziaWG ниже: тогда его пакеты пересоберутся.
+  AWG_BUILD_REV: '1'
 
 jobs:
   test:
@@ -56,7 +79,8 @@ jobs:
           echo "versions=$(echo "$list" | tr -d ' ' | jq -R -c 'split(",") | map(select(length > 0))')" >> "$GITHUB_OUTPUT"
 
   build:
-    needs: [ test, matrix ]
+    # Тесты не ждём: тот же код проверен на PR. Без них фид не опубликует deploy.
+    needs: [ matrix ]
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
@@ -64,6 +88,37 @@ jobs:
         version: ${{ fromJson(needs.matrix.outputs.versions) }}
     steps:
       - uses: actions/checkout@v4
+
+      # Пакеты AmneziaWG меняются, только когда меняются их источники, шаги сборки (AWG_BUILD_REV)
+      # или версия ImmortalWrt (а с ней ядро). Иначе берём их из опубликованного фида этой же
+      # версии: модуль ядра там собран под то же ядро.
+      - name: Собирать ли AmneziaWG
+        id: plan
+        env:
+          FULL: ${{ inputs.full }}
+        run: |
+          set -euo pipefail
+          dir="${{ matrix.version }}/$TARGET/$SUBTARGET"
+          fp=$( { echo "$AWG_BUILD_REV"; git ls-files -s router/awg; } | sha256sum | cut -c1-16)
+          echo "fingerprint=$fp" >> "$GITHUB_OUTPUT"
+          reuse=false
+          if [ "$FULL" != true ] && git fetch -q --depth=1 origin gh-pages 2>/dev/null \
+             && prev=$(git show "FETCH_HEAD:$dir/awg.json" 2>/dev/null) \
+             && [ "$(jq -r .fingerprint <<<"$prev")" = "$fp" ]; then
+            mkdir -p prebuilt
+            reuse=true
+            for f in $(jq -r '.files[]' <<<"$prev"); do
+              git show "FETCH_HEAD:$dir/$f" > "prebuilt/$f" 2>/dev/null || { reuse=false; break; }
+            done
+            [ -n "$(ls prebuilt)" ] || reuse=false
+          fi
+          if [ "$reuse" = true ]; then
+            echo "AmneziaWG не менялся (отпечаток $fp) — берём из фида: $(ls prebuilt | tr '\n' ' ')"
+          else
+            rm -rf prebuilt
+            echo "AmneziaWG собирается (отпечаток $fp)"
+          fi
+          echo "reuse_awg=$reuse" >> "$GITHUB_OUTPUT"
 
       - name: Зависимости сборки
         run: |
@@ -82,31 +137,41 @@ jobs:
           grep " \*$sdk\$" sha256sums | sed 's/ \*/  /' | sha256sum -c -
           mkdir sdk && tar -I zstd -xf "$sdk" -C sdk --strip-components=1
 
-      - name: Фиды и исходники AmneziaWG
+      - name: Фиды
+        env:
+          REUSE_AWG: ${{ steps.plan.outputs.reuse_awg }}
         run: |
           set -euo pipefail
-          . router/awg/SOURCES
-          git clone -q "$AWG_OPENWRT_REPO" awg-src
-          git -C awg-src checkout -q "$AWG_OPENWRT_COMMIT"
-
           feed="$PWD/feed-src"
           mkdir -p "$feed"
-          cp -a awg-src/kmod-amneziawg awg-src/amneziawg-tools awg-src/luci-proto-amneziawg "$feed/"
-          # amneziawg-tools не должен жёстко требовать модуль ядра: запасной вариант — amneziawg-go.
-          sed -i '/+kmod-amneziawg/d' "$feed/amneziawg-tools/Makefile"
-          sed -i 's/^\(\s*+!BUSYBOX_CONFIG_FEATURE_IP_LINK:ip\) \\$/\1/' "$feed/amneziawg-tools/Makefile"
-          # Версия перевода = версия пакета (иначе 0, см. router/luci-app-truba/Makefile).
-          sed -i 's|^include $(TOPDIR)/feeds/luci/luci.mk|PKG_PO_VERSION=$(PKG_VERSION)-r$(PKG_RELEASE)\n&|' \
-            "$feed/luci-proto-amneziawg/Makefile"
-          grep -q '^PKG_PO_VERSION=' "$feed/luci-proto-amneziawg/Makefile"
-          cp -a router/awg/amneziawg-go router/truba router/luci-app-truba "$feed/"
+          # luci — luci.mk и его инструменты (luci-base/host, csstidy), base — lua/host
+          # и зависимости AmneziaWG. packages нужен только для полной сборки AmneziaWG.
+          feeds="base|luci"
+          if [ "$REUSE_AWG" != true ]; then
+            . router/awg/SOURCES
+            git clone -q "$AWG_OPENWRT_REPO" awg-src
+            git -C awg-src checkout -q "$AWG_OPENWRT_COMMIT"
+            cp -a awg-src/kmod-amneziawg awg-src/amneziawg-tools awg-src/luci-proto-amneziawg "$feed/"
+            # amneziawg-tools не требует модуль ядра: без модуля под это ядро truba всё равно ставится
+            # (служба и интерфейс работают и показывают, что Туннеля нет).
+            sed -i '/+kmod-amneziawg/d' "$feed/amneziawg-tools/Makefile"
+            sed -i 's/^\(\s*+!BUSYBOX_CONFIG_FEATURE_IP_LINK:ip\) \\$/\1/' "$feed/amneziawg-tools/Makefile"
+            # Версия перевода = версия пакета (иначе 0, см. router/luci-app-truba/Makefile).
+            sed -i 's|^include $(TOPDIR)/feeds/luci/luci.mk|PKG_PO_VERSION=$(PKG_VERSION)-r$(PKG_RELEASE)\n&|' \
+              "$feed/luci-proto-amneziawg/Makefile"
+            grep -q '^PKG_PO_VERSION=' "$feed/luci-proto-amneziawg/Makefile"
+            feeds="$feeds|packages"
+          fi
+          cp -a router/truba router/luci-app-truba "$feed/"
 
           cd sdk
-          cp feeds.conf.default feeds.conf
+          grep -E "^src-[a-z-]+ ($feeds) " feeds.conf.default > feeds.conf
+          [ "$(grep -cE '^src-[a-z-]+ (base|luci) ' feeds.conf)" = 2 ] || { cat feeds.conf.default; exit 1; }
           echo "src-link truba $feed" >> feeds.conf
+          cat feeds.conf
           ./scripts/feeds update -a >/dev/null
           ./scripts/feeds install -a -p truba
-          ./scripts/feeds install mosdns curl ip-full kmod-nft-fullcone ucode luci-base golang >/dev/null
+          ./scripts/feeds install luci-base lua csstidy >/dev/null
 
       - name: Ключ подписи фида
         env:
@@ -122,23 +187,24 @@ jobs:
           chmod 600 sdk/private-key.pem
 
       - name: Сборка
+        env:
+          REUSE_AWG: ${{ steps.plan.outputs.reuse_awg }}
+          AWG_FP: ${{ steps.plan.outputs.fingerprint }}
         run: |
           set -euo pipefail
+          awg_pkgs="kmod-amneziawg amneziawg-tools luci-proto-amneziawg"
+          pkgs="truba luci-app-truba"
+          [ "$REUSE_AWG" = true ] || pkgs="$awg_pkgs $pkgs"
           cd sdk
-          cat > .config <<'EOF'
-          CONFIG_PACKAGE_kmod-amneziawg=m
-          CONFIG_PACKAGE_amneziawg-tools=m
-          CONFIG_PACKAGE_amneziawg-go=m
-          CONFIG_PACKAGE_luci-proto-amneziawg=m
-          CONFIG_PACKAGE_truba=m
-          CONFIG_PACKAGE_luci-app-truba=m
-          CONFIG_PACKAGE_luci-i18n-truba-ru=m
-          CONFIG_SIGNED_PACKAGES=y
-          EOF
-          # Предупреждения kconfig SDK (прошивки других плат, bool→tristate, рекурсия у curl) безвредны.
+          {
+            for p in $pkgs; do echo "CONFIG_PACKAGE_$p=m"; done
+            echo 'CONFIG_PACKAGE_luci-i18n-truba-ru=m'
+            echo 'CONFIG_SIGNED_PACKAGES=y'
+          } > .config
+          # Предупреждения kconfig SDK (прошивки других плат, bool→tristate) безвредны.
           make defconfig >/dev/null 2>&1
           mkdir -p logs
-          for p in kmod-amneziawg amneziawg-tools amneziawg-go luci-proto-amneziawg truba luci-app-truba; do
+          for p in $pkgs; do
             t0=$(date +%s)
             echo "::group::$p"
             if ! make -j"$(nproc)" "package/feeds/truba/$p/compile" V=s >"logs/build-$p.log" 2>&1; then
@@ -158,9 +224,12 @@ jobs:
           find bin -name '*.apk' -newer .config \( -name 'kmod-amneziawg-*' -o -name 'amneziawg-*' \
             -o -name 'luci-proto-amneziawg-*' -o -name 'luci-i18n-amneziawg-*' -o -name 'truba-*' \
             -o -name 'luci-app-truba-*' -o -name 'luci-i18n-truba-*' \) -not -path "$out/*" -print -exec cp -f {} "$out/" \;
+          if [ "$REUSE_AWG" = true ]; then
+            cp -v ../prebuilt/*.apk "$out/"
+          fi
 
           missing=0
-          for want in kmod-amneziawg amneziawg-tools amneziawg-go luci-proto-amneziawg truba luci-app-truba luci-i18n-truba-ru; do
+          for want in kmod-amneziawg amneziawg-tools luci-proto-amneziawg truba luci-app-truba luci-i18n-truba-ru; do
             if ! ls "$out/$want"-[0-9]*.apk >/dev/null 2>&1; then
               echo "::error::в фиде нет пакета $want"
               missing=1
@@ -172,8 +241,34 @@ jobs:
           fi
           [ "$missing" = 0 ] || { find bin -name '*.apk' -newer .config; exit 1; }
 
+          # Зависимости Трубы записаны в EXTRA_DEPENDS: сверяем их в готовых пакетах с Makefile
+          # (плюс libc, которую SDK добавляет сам) — упаковка не должна ничего потерять.
+          deps_of() {
+            staging_dir/host/bin/apk adbdump "$out/$1"-[0-9]*.apk \
+              | sed -n '/^  depends:/,/^  [a-z-]*:/p' | sed -n 's/^    - \([^<>=~ ]*\).*/\1/p' | sort | xargs
+          }
+          extra_of() { grep -oE '[a-z0-9.+_-]+ \(>=0\)' "$1" | cut -d' ' -f1; }
+          check_deps() {
+            want=$(printf '%s\n' libc $2 | sort | xargs)
+            got=$(deps_of "$1")
+            if [ "$got" != "$want" ]; then
+              echo "::error::$1: зависимости «$got», ожидались «$want»"
+              missing=1
+            fi
+          }
+          check_deps truba "$(extra_of ../router/truba/Makefile)"
+          check_deps luci-app-truba "$(extra_of ../router/luci-app-truba/Makefile)"
+          check_deps luci-i18n-truba-ru luci-app-truba
+          [ "$missing" = 0 ] || exit 1
+
           make package/index V=s PACKAGE_DIR="$out" >logs/index.log 2>&1 || { tail -50 logs/index.log; exit 1; }
           test -s "$out/packages.adb"
+
+          # Отпечаток и состав AmneziaWG — чтобы следующая сборка могла взять его отсюда.
+          find "$out" -maxdepth 1 \( -name 'kmod-amneziawg-*.apk' -o -name 'amneziawg-tools-*.apk' \
+            -o -name 'luci-proto-amneziawg-*.apk' -o -name 'luci-i18n-amneziawg-*.apk' \) -printf '%f\n' \
+            | sort | jq -R . | jq -sc --arg fp "$AWG_FP" '{fingerprint: $fp, files: .}' > "$out/awg.json"
+          cat "$out/awg.json"
           ls -la "$out"
 
       - name: Каталог фида
@@ -201,7 +296,9 @@ jobs:
           if-no-files-found: ignore
 
   deploy:
-    needs: build
+    needs: [ test, build ]
+    # Ручной запуск с publish=false — проверка сборки без публикации (например, на ветке).
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.publish }}
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4

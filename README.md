@@ -11,7 +11,7 @@
 | [vps/install-vps.sh](vps/install-vps.sh) | Настройка VPS как Трубы: AmneziaWG, проброс всех портов на Роутер (nftables 1:1), SSH на высоком порту, fail2ban |
 | [router/truba/](router/truba/) | Пакет `truba`: служба procd, ucode-модули, распаковщик `.dat`, mosdns, nftables, контроль Туннеля |
 | [router/luci-app-truba/](router/luci-app-truba/) | Интерфейс LuCI (8 вкладок, русский перевод) |
-| [router/awg/](router/awg/) | Источники AmneziaWG для фида (модуль ядра, утилиты, `amneziawg-go`) |
+| [router/awg/](router/awg/) | Источники AmneziaWG для фида (модуль ядра, утилиты, LuCI-протокол) |
 | [.github/workflows/](.github/workflows/) | CI: тесты, сборка под ImmortalWrt SDK, подписанный apk-фид в GitHub Pages, отслеживание новых релизов |
 | [tests/](tests/) | Проверки в Docker: распаковщик, служба под настоящим procd, скрипт VPS, интерфейс |
 
@@ -129,7 +129,7 @@ logread -e truba
 
 ## Обновление ImmortalWrt
 
-Обновляйте Роутер только после того, как в фиде появился каталог новой версии (`watch-releases` собирает его автоматически). После sysupgrade настройки и ключ фида сохраняются, а `/etc/truba/reinstall.sh` из `rc.local` сам ставит пакеты заново. Если модуля ядра под новую версию ещё нет, скрипт ставит `amneziawg-go` и пишет об этом в журнал.
+Обновляйте Роутер только после того, как в фиде появился каталог новой версии (`watch-releases` собирает его автоматически). После sysupgrade настройки и ключ фида сохраняются, а `/etc/truba/reinstall.sh` из `rc.local` сам ставит пакеты заново. Если модуля ядра под новую версию ещё нет, Туннель не поднимется: скрипт пишет в журнал, как доставить модуль, когда сборка появится.
 
 ## Проверки
 
