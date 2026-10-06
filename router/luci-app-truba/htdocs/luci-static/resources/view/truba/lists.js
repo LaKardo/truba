@@ -77,8 +77,8 @@ return view.extend({
 		o.rmempty = false;
 
 		o = s.option(form.Value, 'update_utc', _('Update time (UTC)'),
-			_('The geosite build starts at 02:00 UTC. Converted to the router time zone for cron.'));
-		o.placeholder = '04:00';
+			_('geoip.dat is published every three days around 10–11 UTC, geosite.dat irregularly, usually by 09 UTC; at 12:00 a new release is picked up the same day. Converted to the router time zone for cron.'));
+		o.placeholder = '12:00';
 		o.depends('auto_update', '1');
 		o.validate = (sid, v) => (!v || /^([01]?\d|2[0-3]):[0-5]\d$/.test(v)) ? true : _('Format: HH:MM');
 

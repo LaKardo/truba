@@ -147,7 +147,7 @@ const CRONTAB = '/etc/crontabs/root';
 // update_utc «ЧЧ:ММ» → локальное время Роутера.
 function utc_to_local(hhmm) {
 	let m = match(hhmm ?? '', /^([0-9]{1,2}):([0-9]{2})$/);
-	let h = m ? int(m[1]) : 4, mi = m ? int(m[2]) : 0;
+	let h = m ? int(m[1]) : 12, mi = m ? int(m[2]) : 0;
 	let now = time();
 	let off = int((timegm(localtime(now)) - now) / 60);   // смещение часового пояса, минуты
 	let t = ((h * 60 + mi + off) % 1440 + 1440) % 1440;

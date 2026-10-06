@@ -62,9 +62,23 @@ function renderTraffic(st, rates) {
 	]);
 }
 
+// Наборы, которые последняя проверка не смогла скачать: «geoip: причина».
+function failedSets(last) {
+	const sets = last?.sets || {};
+	return Object.keys(sets).filter((k) => !sets[k].ok).map((k) => '%s: %s'.format(k, (sets[k].errors || []).join(', ') || '?'));
+}
+
+function checkResult(last) {
+	const failed = failedSets(last);
+	if (failed.length)
+		return _('failed (%s)').format(failed.join('; '));
+	return last.changed ? _('updated') : _('no newer versions');
+}
+
 function renderStatus(st, rates) {
 	const t = st.tunnel || {}, awg = t.awg || {}, h = st.health || {}, c = st.counters || {};
 	const a = st.applied || {}, nb = st.neighbours || {}, up = st.upnp || {};
+	const lastCheck = st.lists?.last;
 
 	let tunnelState;
 	if (!t.configured)
@@ -108,7 +122,11 @@ function renderStatus(st, rates) {
 		])),
 		row(_('Rule sets'), E('span', {}, [
 			'geoip.dat: ', st.lists?.geoip ? common.fmtTime(st.lists.geoip.mtime) : _('missing'), ' · ',
-			'geosite.dat: ', st.lists?.geosite ? common.fmtTime(st.lists.geosite.mtime) : _('missing')
+			'geosite.dat: ', st.lists?.geosite ? common.fmtTime(st.lists.geosite.mtime) : _('missing'),
+			// Даты — когда файл скачан; если источник не выпускал новых, они не меняются.
+			E('span', { 'class': 'cbi-value-description' }, ' · ' + (st.lists?.updating
+				? _('update in progress')
+				: lastCheck ? _('checked %s: %s').format(common.fmtTime(lastCheck.time), checkResult(lastCheck)) : _('not checked yet')))
 		]))
 	];
 
@@ -125,6 +143,14 @@ function renderStatus(st, rates) {
 		warns.push(E('li', {}, _('OpenClash runs in fake-ip mode: «Check NAT» may report a problem although full cone NAT works.')));
 	if (up.enabled && !up.installed)
 		warns.push(E('li', {}, _('UPnP is enabled on the Inbound tab, but miniupnpd is not installed: install luci-app-upnp.')));
+	// Автообновление идёт раз в сутки; проверка старше 36 ч — cron не запускал его или он падал.
+	if (st.routing && uci.get('truba', 'lists', 'auto_update') != '0' && !st.lists?.updating) {
+		const failed = failedSets(lastCheck);
+		if (!lastCheck || Date.now() / 1000 - lastCheck.time > 36 * 3600)
+			warns.push(E('li', {}, _('Rule sets have not been checked for more than 36 hours although auto-update is on: check that cron runs (System → Scheduled Tasks).')));
+		else if (failed.length)
+			warns.push(E('li', {}, _('The last rule set check failed: %s').format(failed.join('; '))));
+	}
 
 	return E('div', {}, [
 		warns.length ? E('div', { 'class': 'alert-message warning' }, E('ul', {}, warns)) : '',
@@ -150,7 +176,7 @@ function renderNat(r) {
 
 return view.extend({
 	load: function() {
-		return Promise.all([ common.callStatus(), uci.load('network') ]);
+		return Promise.all([ common.callStatus(), uci.load('network'), uci.load('truba') ]);
 	},
 
 	render: function(data) {

@@ -331,9 +331,6 @@ msgstr "Обновлять автоматически"
 msgid "Update time (UTC)"
 msgstr "Время обновления (UTC)"
 
-msgid "The geosite build starts at 02:00 UTC. Converted to the router time zone for cron."
-msgstr "Сборка geosite стартует в 02:00 UTC. Для cron время переводится в часовой пояс Роутера."
-
 msgid "Format: HH:MM"
 msgstr "Формат: ЧЧ:ММ"
 
@@ -771,3 +768,27 @@ msgstr "Случайные хвосты (RandomTrailers)"
 
 msgid "AmneziaWG 3.1, in reserve against DPI by packet sizes: pads packets to a random length, costly in traffic for small packets. Must match the Truba: on the VPS run «install-vps.sh random-trailers on» or «off» at the same time."
 msgstr "AmneziaWG 3.1, запас против DPI по размерам пакетов: добивает пакеты до случайной длины, дорого по трафику на мелких пакетах. Должен совпадать с Трубой: одновременно на VPS выполните «install-vps.sh random-trailers on» или «off»."
+
+msgid "geoip.dat is published every three days around 10–11 UTC, geosite.dat irregularly, usually by 09 UTC; at 12:00 a new release is picked up the same day. Converted to the router time zone for cron."
+msgstr "geoip.dat выходит раз в три дня около 10–11 UTC, geosite.dat — нерегулярно, обычно до 09 UTC; в 12:00 новый выпуск подхватывается в тот же день. Для cron время переводится в часовой пояс Роутера."
+
+msgid "failed (%s)"
+msgstr "не удалась (%s)"
+
+msgid "no newer versions"
+msgstr "новее нет"
+
+msgid "update in progress"
+msgstr "идёт обновление"
+
+msgid "checked %s: %s"
+msgstr "проверено %s: %s"
+
+msgid "not checked yet"
+msgstr "ещё не проверялись"
+
+msgid "Rule sets have not been checked for more than 36 hours although auto-update is on: check that cron runs (System → Scheduled Tasks)."
+msgstr "Наборы правил не проверялись больше 36 часов, хотя автообновление включено: проверьте, что работает cron (Система → Планировщик)."
+
+msgid "The last rule set check failed: %s"
+msgstr "Последняя проверка Наборов правил не удалась: %s"

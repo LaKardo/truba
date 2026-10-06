@@ -47,7 +47,7 @@ export function load() {
 			geoip_mirror: l.geoip_mirror ?? 'https://cdn.jsdelivr.net/gh/kirilllavrov/geoip-builder@release/geoip.dat',
 			geosite_url: l.geosite_url ?? 'https://raw.githubusercontent.com/kirilllavrov/geosite-builder/release/geosite.dat',
 			geosite_mirror: l.geosite_mirror ?? 'https://cdn.jsdelivr.net/gh/kirilllavrov/geosite-builder@release/geosite.dat',
-			update_utc: l.update_utc ?? '04:00',
+			update_utc: l.update_utc ?? '12:00',
 			via_tunnel: bool(l.via_tunnel, true),
 			auto_update: bool(l.auto_update, true),
 		},

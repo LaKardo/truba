@@ -190,7 +190,9 @@ EOF
 
 echo "== uci-defaults"
 OFFLOAD_BEFORE="$(uci -q get firewall.@defaults[0].flow_offloading)"
+uci set truba.lists.update_utc='04:00'; uci commit truba   # прежнее значение по умолчанию
 sh /etc/uci-defaults/90-truba
+check "время обновления списков: прежнее 04:00 → 12:00 UTC" test "$(uci -q get truba.lists.update_utc)" = 12:00
 check "зона truba создана" test "$(uci -q get firewall.truba.name)" = truba
 check "форвардинг lan→truba" test "$(uci -q get firewall.lan_truba.dest)" = truba
 check "fullcone включён" test "$(uci -q get firewall.@defaults[0].fullcone)" = 1
@@ -225,6 +227,8 @@ check "dnsmasq → mosdns" sh -c "uci -q get dhcp.@dnsmasq[0].server | grep -q '
 check "dnsmasq без кэша" test "$(uci -q get dhcp.@dnsmasq[0].cachesize)" = 0
 check "бэкап dnsmasq сохранён" test -f /etc/truba/state/dnsmasq.json
 check "cron: блок обновления" grep -q 'truba update-lists' /etc/crontabs/root
+# В контейнере часовой пояс UTC: 12:00 UTC и в cron — 12:00.
+check "cron: 12:00 UTC" sh -c "[ \"$(date +%z)\" != +0000 ] || grep -q '^0 12 \* \* \* /usr/sbin/truba update-lists' /etc/crontabs/root"
 check "mosdns запущен" pidof mosdns
 check "mosdns слушает 5335" sh -c "netstat -lnu 2>/dev/null | grep -q ':5335' || ss -lnu | grep -q ':5335'"
 check "persist: решение пишется в ct mark после всех" sh -c "nft list chain inet truba persist | grep -q 'priority 300'"
