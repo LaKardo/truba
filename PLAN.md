@@ -21,7 +21,7 @@
 | 2. AmneziaWG под ImmortalWrt | Собирается в CI (awg-openwrt на зафиксированном коммите) | `kmod-amneziawg`, `amneziawg-tools`, `luci-proto-amneziawg` из фида стоят на NC-1812, Туннель поднят |
 | 3–6. Пакет `truba` | Готов, на NC-1812 стоит 1.0.0-r5 | `tests/router`: ImmortalWrt 25.12.2 под настоящим procd/netifd/fw4 в Docker, Туннель — настоящий WireGuard до netns «VPS». 96 проверок: nftables, ip rule, таблица 77, mosdns 5.3.3 (Блок → NXDOMAIN, AAAA → пусто), `full:`/`regexp:`, Аварийная блокировка, оба Режима, входящие через Туннель (в том числе с qosmate), свои сокеты Роутера при OpenClash, обновление и откат списков, teardown, uninstall |
 | 4. Распаковщик | Готов | `tests/dat` на реальных `.dat`: записи один в один, 2–3 с на оба файла |
-| 7. `luci-app-truba` | Готов, 8 вкладок, перевод RU (256 строк) | Headless Chromium: все вкладки без ошибок JS; «Сохранить и применить» → служба перестраивает правила (смена Действия, Политика устройства, выключение Маршрутизации) |
+| 7. `luci-app-truba` | Готов, 8 вкладок, перевод RU (263 строки) | Headless Chromium: все вкладки без ошибок JS; «Сохранить и применить» → служба перестраивает правила (смена Действия, Политика устройства, выключение Маршрутизации) |
 | 8. Переустановка после sysupgrade | Скрипт готов | Не проверялся реальным sysupgrade |
 | 9. Приёмка §8 | Частично | На живой сети: 1 — STUN через Туннель (IP Трубы, порт сохраняется, ответ одинаков у двух серверов), NatTypeTester ещё не запускался; 2 — входящие на IP Трубы доходят до устройства в `lan`, ответы уходят в `awg0`; 3 — зарубежные сайты видят IP Трубы, российские — IP провайдера. Тесты 4–7 не проводились |
 
@@ -545,7 +545,7 @@ plugins:
 
 ### 4.7 Обновление Наборов правил (`/usr/libexec/truba/update-lists`)
 
-1. **Расписание.** Блок cron между маркерами `# truba-begin` / `# truba-end`. Время хранится в UTC (по умолчанию 04:00) и переводится в часовой пояс Роутера.
+1. **Расписание.** Блок cron между маркерами `# truba-begin` / `# truba-end`. Время хранится в UTC (по умолчанию 12:00) и переводится в часовой пояс Роутера. geoip выходит раз в три дня около 10–11 UTC, geosite — нерегулярно, обычно до 09 UTC: в 12:00 новый выпуск подхватывается в тот же день (прежние 04:00 были раньше обоих, и выпуск ждал следующего утра; при обновлении пакета 04:00 меняется на 12:00). «Обзор» показывает время и результат последней проверки и предупреждает, если её не было больше 36 часов или она не удалась.
 2. **Скачивание.** Для каждого файла:
    - основной путь — `curl --interface awg0 --fail --max-time 120` с `raw.githubusercontent.com/kirilllavrov/<repo>/release/<file>`;
    - при ошибке — `curl` напрямую с `cdn.jsdelivr.net/gh/kirilllavrov/<repo>@release/<file>`;
@@ -618,7 +618,7 @@ config lists 'lists'
 	option geoip_mirror   'https://cdn.jsdelivr.net/gh/kirilllavrov/geoip-builder@release/geoip.dat'
 	option geosite_url    'https://raw.githubusercontent.com/kirilllavrov/geosite-builder/release/geosite.dat'
 	option geosite_mirror 'https://cdn.jsdelivr.net/gh/kirilllavrov/geosite-builder@release/geosite.dat'
-	option update_utc     '04:00'
+	option update_utc     '12:00'
 	option via_tunnel     '1'
 
 config watchdog 'watchdog'

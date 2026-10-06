@@ -486,7 +486,7 @@ msgid "Update time (UTC)"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/lists.js
-msgid "The geosite build starts at 02:00 UTC. Converted to the router time zone for cron."
+msgid "geoip.dat is published every three days around 10–11 UTC, geosite.dat irregularly, usually by 09 UTC; at 12:00 a new release is picked up the same day. Converted to the router time zone for cron."
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/lists.js
@@ -543,6 +543,14 @@ msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/overview.js
 msgid "Now"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/overview.js
+msgid "failed (%s)"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/overview.js
+msgid "no newer versions"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/overview.js
@@ -678,6 +686,18 @@ msgid "missing"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/overview.js
+msgid "update in progress"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/overview.js
+msgid "checked %s: %s"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/overview.js
+msgid "not checked yet"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/overview.js
 msgid "Category %s is configured but missing from the current rule set — the rule is ignored."
 msgstr ""
 
@@ -695,6 +715,14 @@ msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/overview.js
 msgid "UPnP is enabled on the Inbound tab, but miniupnpd is not installed: install luci-app-upnp."
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/overview.js
+msgid "Rule sets have not been checked for more than 36 hours although auto-update is on: check that cron runs (System → Scheduled Tasks)."
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/overview.js
+msgid "The last rule set check failed: %s"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/overview.js

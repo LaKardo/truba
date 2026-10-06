@@ -22,7 +22,7 @@ config lists 'lists'
 	option geoip_mirror 'https://cdn.jsdelivr.net/gh/kirilllavrov/geoip-builder@release/geoip.dat'
 	option geosite_url 'https://raw.githubusercontent.com/kirilllavrov/geosite-builder/release/geosite.dat'
 	option geosite_mirror 'https://cdn.jsdelivr.net/gh/kirilllavrov/geosite-builder@release/geosite.dat'
-	option update_utc '04:00'
+	option update_utc '12:00'
 	option via_tunnel '1'
 	option auto_update '1'
 
