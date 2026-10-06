@@ -25,6 +25,7 @@ function usage() {
 		'  check <домен|IP> [MAC]  какая Категория и Действие сработают\n' +
 		'  status             состояние в JSON\n' +
 		'  categories         Категории и Действия в JSON\n' +
+		'  sets               размеры наборов в JSON\n' +
 		'  reset-rules <all|selective>  Стартовые настройки Режима\n' +
 		'  nat-test           проверка внешнего IP и сохранения порта через Трубу\n' +
 		'  watchdog           цикл контроля Туннеля (запускает procd)\n');
@@ -69,6 +70,10 @@ case 'status':
 
 case 'categories':
 	out(K.categories());
+	break;
+
+case 'sets':
+	out(K.sets());
 	break;
 
 case 'reset-rules':

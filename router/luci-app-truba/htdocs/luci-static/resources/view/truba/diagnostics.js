@@ -4,9 +4,8 @@
 'require truba.common as common';
 
 function actionBadge(a) {
-	const colors = { tunnel: '#1565c0', direct: '#2e7d32', block: '#c62828' };
-	return E('span', { 'style': 'background:%s;color:#fff;padding:2px 8px;border-radius:3px'.format(colors[a] || '#666') },
-		common.ACTION_LABELS[a] || a);
+	const levels = { tunnel: 'info', direct: 'ok', block: 'err' };
+	return common.pill(levels[a] || '', common.ACTION_LABELS[a] || a);
 }
 
 function renderCheck(r) {

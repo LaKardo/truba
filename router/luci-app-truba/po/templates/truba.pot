@@ -97,50 +97,6 @@ msgstr ""
 msgid "%d h ago"
 msgstr ""
 
-#: menu.d
-msgid "Devices"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/devices.js
-msgid "Per-device exceptions. A device is recognised by its MAC address, also behind roamd mesh nodes (4-address mode keeps client MACs). Block still applies to all devices."
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/devices.js
-msgid "Device policies"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/devices.js
-msgid "Enabled"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/devices.js
-msgid "Name"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/devices.js
-msgid "MAC address"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/devices.js
-msgid "Policy"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/devices.js
-msgid "All via tunnel"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/devices.js
-msgid "All direct"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/devices.js
-msgid "By rules"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/devices.js
-msgid "«All via tunnel» is recommended for game consoles: then all their traffic gets the Truba IP and full cone NAT."
-msgstr ""
-
 #: htdocs/luci-static/resources/view/truba/diagnostics.js
 msgid "Error: %s"
 msgstr ""
@@ -229,8 +185,56 @@ msgstr ""
 msgid "Refresh"
 msgstr ""
 
+#: htdocs/luci-static/resources/view/truba/dns.js
+msgid "Versions"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/dns.js
+msgid "File"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/dns.js
+msgid "Current version"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/dns.js
+msgid "Previous version"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/dns.js
+msgid "Last check"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/dns.js
+msgid "Update in progress…"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/dns.js
+msgid "%s (via %s)"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/dns.js
+msgid "updated"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/dns.js
+msgid "no changes"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/dns.js
+msgid "failed — %s"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/dns.js
+msgid "Last check: %s"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/dns.js
+msgid "not checked yet"
+msgstr ""
+
 #: menu.d
-msgid "DNS"
+msgid "DNS & lists"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/dns.js
@@ -238,7 +242,7 @@ msgid "Router DNS goes through mosdns: it recognises geosite categories, picks t
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/dns.js
-msgid "Upstream servers"
+msgid "DNS"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/dns.js
@@ -255,6 +259,14 @@ msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/dns.js
 msgid "Used for categories with action Direct, for the router's own hosts (NTP, list mirrors) and, in mode «Selective», for everything else."
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/dns.js
+msgid "Intercept DNS (port 53)"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/dns.js
+msgid "IPv4 DNS requests of devices to any server are redirected to the router, so domain categories work for them too. Encrypted DNS in browsers (DoH) is not affected."
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/dns.js
@@ -282,19 +294,83 @@ msgid "mosdns port"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/dns.js
-msgid "Local port; dnsmasq forwards requests here."
+msgid "Local port; dnsmasq forwards requests here. The next port is taken by the mosdns statistics API (127.0.0.1 only)."
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/dns.js
-msgid "Interception"
+msgid "Lists"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/dns.js
-msgid "Intercept DNS (port 53)"
+msgid "geoip.dat and geosite.dat from kirilllavrov/geoip-builder and kirilllavrov/geosite-builder. Files are used unchanged; the checksum is verified before every replacement."
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/dns.js
-msgid "IPv4 DNS requests of devices to any server are redirected to the router, so domain categories work for them too. Encrypted DNS in browsers (DoH) is not affected."
+msgid "geoip.dat"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/dns.js
+msgid "geoip.dat mirror"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/dns.js
+msgid "Downloaded directly if the main source failed."
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/dns.js
+msgid "geosite.dat"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/dns.js
+msgid "geosite.dat mirror"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/dns.js
+msgid "Download via tunnel"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/dns.js
+msgid "The main source is fetched through the tunnel; the mirror always goes direct."
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/dns.js
+msgid "Update automatically"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/dns.js
+msgid "Update time (UTC)"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/dns.js
+msgid "geoip.dat is published every three days around 10–11 UTC, geosite.dat irregularly, usually by 09 UTC; at 12:00 a new release is picked up the same day. Converted to the router time zone for cron."
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/dns.js
+msgid "Format: HH:MM"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/dns.js
+msgid "Update started."
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/dns.js
+msgid "Update now"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/dns.js
+msgid "Swap current and previous rule sets?"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/dns.js
+msgid "Rolled back: %s"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/dns.js
+msgid "No previous version."
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/dns.js
+msgid "Roll back"
 msgstr ""
 
 #: menu.d
@@ -374,6 +450,10 @@ msgid "Port forwards from the tunnel"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/inbound.js
+msgid "Name"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/inbound.js
 msgid "State"
 msgstr ""
 
@@ -401,148 +481,12 @@ msgstr ""
 msgid "Replies always go back through the tunnel, even to Russian clients."
 msgstr ""
 
-#: htdocs/luci-static/resources/view/truba/lists.js
-msgid "Update in progress…"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/lists.js
-msgid "File"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/lists.js
-msgid "Current version"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/lists.js
-msgid "Previous version"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/lists.js
-msgid "%s: %s (via %s)"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/lists.js
-msgid "updated"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/lists.js
-msgid "no changes"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/lists.js
-msgid "%s: failed — %s"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/lists.js
-msgid "Last check: %s"
-msgstr ""
-
-#: menu.d
-msgid "Lists"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/lists.js
-msgid "geoip.dat and geosite.dat from kirilllavrov/geoip-builder and kirilllavrov/geosite-builder. Files are used unchanged; the checksum is verified before every replacement."
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/lists.js
-msgid "Sources and schedule"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/lists.js
-msgid "geoip.dat"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/lists.js
-msgid "geoip.dat mirror"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/lists.js
-msgid "Downloaded directly if the main source failed."
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/lists.js
-msgid "geosite.dat"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/lists.js
-msgid "geosite.dat mirror"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/lists.js
-msgid "Download via tunnel"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/lists.js
-msgid "The main source is fetched through the tunnel; the mirror always goes direct."
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/lists.js
-msgid "Update automatically"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/lists.js
-msgid "Update time (UTC)"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/lists.js
-msgid "geoip.dat is published every three days around 10–11 UTC, geosite.dat irregularly, usually by 09 UTC; at 12:00 a new release is picked up the same day. Converted to the router time zone for cron."
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/lists.js
-msgid "Format: HH:MM"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/lists.js
-msgid "Versions"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/lists.js
-msgid "Update started."
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/lists.js
-msgid "Update now"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/lists.js
-msgid "Swap current and previous rule sets?"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/lists.js
-msgid "Rolled back: %s"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/lists.js
-msgid "No previous version."
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/lists.js
-msgid "Roll back"
+#: htdocs/luci-static/resources/view/truba/overview.js
+msgid "10 min ago"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/overview.js
-msgid "Inbound via Truba"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/overview.js
-msgid "Traffic of devices in the routed zones since %s. The router's own traffic (DNS, list downloads) is not included."
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/overview.js
-msgid "Traffic of devices in the routed zones. The router's own traffic (DNS, list downloads) is not included."
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/overview.js
-msgid "To devices"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/overview.js
-msgid "From devices"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/overview.js
-msgid "Now"
+msgid "now"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/overview.js
@@ -554,15 +498,11 @@ msgid "no newer versions"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/overview.js
+msgid "service stopped"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/overview.js
 msgid "not configured"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/overview.js
-msgid "working"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/overview.js
-msgid "not responding"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/overview.js
@@ -570,131 +510,11 @@ msgid "down"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/overview.js
-msgid "service stopped"
+msgid "not responding"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/overview.js
-msgid "emergency block (tunnel traffic is dropped)"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/overview.js
-msgid "via tunnel"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/overview.js
-msgid "fallback to direct (no tunnel route)"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/overview.js
-msgid "Last handshake"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/overview.js
-msgid "Tunnel: received / sent"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/overview.js
-msgid "since the interface came up, including the router's own traffic"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/overview.js
-msgid "now %s"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/overview.js
-msgid "speed after the next update"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/overview.js
-msgid "Truba IP (VPS)"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/overview.js
-msgid "Tunnel address"
-msgstr ""
-
-#: menu.d
-msgid "Routing"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/overview.js
-msgid "mode «Selective»"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/overview.js
-msgid "mode «All via tunnel»"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/overview.js
-msgid "disabled — everything goes direct"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/overview.js
-msgid "Tunnel route table"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/overview.js
-msgid "Tunnel watchdog"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/overview.js
-msgid "healthy since"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/overview.js
-msgid "down since"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/overview.js
-msgid "no data"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/overview.js
-msgid "DNS classifier (mosdns)"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/overview.js
-msgid "running"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/overview.js
-msgid "not running"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/overview.js
-msgid "New connections"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/overview.js
-msgid "Blocked"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/overview.js
-msgid "packets"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/overview.js
-msgid "since %s"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/overview.js
-msgid "Rule sets"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/overview.js
-msgid "missing"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/overview.js
-msgid "update in progress"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/overview.js
-msgid "checked %s: %s"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/overview.js
-msgid "not checked yet"
+msgid "working"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/overview.js
@@ -723,6 +543,210 @@ msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/overview.js
 msgid "The last rule set check failed: %s"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/overview.js
+msgid "Last handshake"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/overview.js
+msgid "Latency to the Truba"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/overview.js
+msgid "Packet loss"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/overview.js
+msgid "Tunnel watchdog"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/overview.js
+msgid "Tunnel address"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/overview.js
+msgid "Tunnel route table"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/overview.js
+msgid "Interface traffic"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/overview.js
+msgid "since the interface came up, including the router's own traffic"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/overview.js
+msgid "DNS classifier (mosdns)"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/overview.js
+msgid "DNS cache"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/overview.js
+msgid "Next check"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/overview.js
+msgid "Set sizes"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/overview.js
+msgid "Device traffic"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/overview.js
+msgid "To devices"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/overview.js
+msgid "From devices"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/overview.js
+msgid "Inbound via Truba"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/overview.js
+msgid "Warnings: %d"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/overview.js
+msgid "No warnings"
+msgstr ""
+
+#: menu.d
+msgid "Routing"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/overview.js
+msgid "mode «Selective»"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/overview.js
+msgid "mode «All via tunnel»"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/overview.js
+msgid "disabled — everything goes direct"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/overview.js
+msgid "Truba IP (VPS)"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/overview.js
+msgid "the watchdog is off"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/overview.js
+msgid "%d ms"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/overview.js
+msgid "average %d ms"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/overview.js
+msgid "no reply"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/overview.js
+msgid "%d%% over %d min"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/overview.js
+msgid "healthy since"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/overview.js
+msgid "down since"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/overview.js
+msgid "no data"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/overview.js
+msgid "emergency block (tunnel traffic is dropped)"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/overview.js
+msgid "via tunnel"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/overview.js
+msgid "fallback to direct (no tunnel route)"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/overview.js
+msgid "running"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/overview.js
+msgid "not running"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/overview.js
+msgid "not used: routing is off"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/overview.js
+msgid "%d%% from cache · %d%% expired"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/overview.js
+msgid "no queries yet"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/overview.js
+msgid "%s of %s entries · since mosdns started"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/overview.js
+msgid "downloaded %s"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/overview.js
+msgid "missing"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/overview.js
+msgid "update in progress"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/overview.js
+msgid "automatic update is off"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/overview.js
+msgid "Traffic of devices in the routed zones since %s. The router's own traffic (DNS, list downloads) is not included."
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/overview.js
+msgid "Traffic of devices in the routed zones. The router's own traffic (DNS, list downloads) is not included."
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/overview.js
+msgid "New connections"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/overview.js
+msgid "Blocked"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/overview.js
+msgid "packets"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/overview.js
+msgid "geoip subnets: %s"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/overview.js
+msgid "IPs from DNS: %s"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/overview.js
@@ -783,14 +807,6 @@ msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/overview.js
 msgid "Distributes traffic by actions. When off, everything goes direct, but inbound connections via the Truba IP keep working."
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/overview.js
-msgid "Status"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/overview.js
-msgid "Device traffic"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/overview.js
@@ -858,6 +874,42 @@ msgid "Firewall zones whose devices are routed. Other zones go direct."
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/routing.js
+msgid "Device policies"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/routing.js
+msgid "Per-device exceptions. A device is recognised by its MAC address, also behind roamd mesh nodes (4-address mode keeps client MACs). Block still applies to all devices."
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/routing.js
+msgid "Enabled"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/routing.js
+msgid "MAC address"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/routing.js
+msgid "Policy"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/routing.js
+msgid "All via tunnel"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/routing.js
+msgid "All direct"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/routing.js
+msgid "By rules"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/routing.js
+msgid "«All via tunnel» is recommended for game consoles: then all their traffic gets the Truba IP and full cone NAT."
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/routing.js
 msgid "Search category…"
 msgstr ""
 
@@ -882,7 +934,7 @@ msgid "Configured but missing from the current rule set (ignored): "
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/routing.js
-msgid "Rule sets are not downloaded yet — see the Lists tab."
+msgid "Rule sets are not downloaded yet — see the DNS & lists tab."
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/routing.js

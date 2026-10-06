@@ -5,12 +5,20 @@
 
 const callStatus = rpc.declare({ object: 'truba', method: 'status', expect: { '': {} } });
 const callCategories = rpc.declare({ object: 'truba', method: 'categories', expect: { '': {} } });
+const callSets = rpc.declare({ object: 'truba', method: 'sets', expect: { '': {} } });
 const callCheck = rpc.declare({ object: 'truba', method: 'check', params: [ 'target', 'mac' ], expect: { '': {} } });
 const callNatTest = rpc.declare({ object: 'truba', method: 'nat_test', expect: { '': {} } });
 const callUpdateLists = rpc.declare({ object: 'truba', method: 'update_lists', params: [ 'force' ], expect: { '': {} } });
 const callRollbackLists = rpc.declare({ object: 'truba', method: 'rollback_lists', expect: { '': {} } });
 const callLog = rpc.declare({ object: 'truba', method: 'log', params: [ 'lines' ], expect: { log: '' } });
 const callLeases = rpc.declare({ object: 'luci-rpc', method: 'getDHCPLeases', expect: { '': {} } });
+
+// Общие стили — один раз на страницу; ?v= — как у модулей LuCI.
+if (!document.querySelector('link[data-truba]'))
+	document.head.appendChild(E('link', {
+		'rel': 'stylesheet', 'data-truba': '',
+		'href': L.resource('truba/truba.css') + (L.env.resource_version ? '?v=' + L.env.resource_version : '')
+	}));
 
 const ACTION_LABELS = {
 	mode: _('By mode'),
@@ -68,11 +76,46 @@ function fmtTime(ts) {
 	return ts ? new Date(ts * 1000).toLocaleString() : '—';
 }
 
+function fmtDate(ts) {
+	return ts ? new Date(ts * 1000).toLocaleDateString() : '—';
+}
+
+// Целое с разделителями разрядов: 14 296.
+function fmtNum(n) {
+	return (+n || 0).toLocaleString();
+}
+
+// Значок состояния. level: ok / warn / err / info или '' (нейтральный).
+function pill(level, text) {
+	return E('span', { 'class': 'truba-badge ' + (level || '') }, text);
+}
+
 function badge(ok, yes, no) {
-	return E('span', {
-		'class': 'label',
-		'style': 'background:%s;color:#fff;padding:2px 8px;border-radius:3px'.format(ok ? '#2e7d32' : '#c62828')
-	}, ok ? yes : no);
+	return pill(ok ? 'ok' : 'err', ok ? yes : no);
+}
+
+// Обновить текст, только если он изменился: без лишних перерисовок.
+function setText(el, text) {
+	text = (text == null) ? '' : String(text);
+	if (el.textContent !== text)
+		el.textContent = text;
+}
+
+function setClass(el, cls) {
+	if (el.className !== cls)
+		el.className = cls;
+}
+
+// Ближайший запуск ежедневного задания в HH:MM UTC, unix-время; null — время не задано.
+function nextDaily(hhmm) {
+	const m = /^(\d{1,2}):(\d{2})$/.exec(hhmm || '');
+	if (!m)
+		return null;
+	const now = new Date();
+	let t = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), +m[1], +m[2]);
+	if (t <= now.getTime())
+		t += 86400000;
+	return Math.floor(t / 1000);
 }
 
 function tunnelIface() {
@@ -80,7 +123,7 @@ function tunnelIface() {
 }
 
 return baseclass.extend({
-	callStatus, callCategories, callCheck, callNatTest, callUpdateLists, callRollbackLists, callLog, callLeases,
+	callStatus, callCategories, callSets, callCheck, callNatTest, callUpdateLists, callRollbackLists, callLog, callLeases,
 	ACTION_LABELS, REASON_LABELS, WARNING_LABELS,
-	fmtBytes, fmtRate, fmtAge, fmtTime, badge, tunnelIface
+	fmtBytes, fmtRate, fmtAge, fmtTime, fmtDate, fmtNum, pill, badge, setText, setClass, nextDaily, tunnelIface
 });

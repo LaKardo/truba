@@ -77,7 +77,7 @@ function renderTable(mode, cats, filterBox) {
 
 return view.extend({
 	load: function() {
-		return Promise.all([ common.callCategories(), uci.load('truba'), uci.load('firewall') ]);
+		return Promise.all([ common.callCategories(), uci.load('truba'), uci.load('firewall'), common.callLeases().catch(() => ({})) ]);
 	},
 
 	handleReset: function(mode, starting) {
@@ -126,6 +126,39 @@ return view.extend({
 		o.nocreate = true;
 		o.default = 'lan';
 
+		// Исключения для устройств — до Категорий: политика устройства сильнее их.
+		const leases = (data[3] && data[3].dhcp_leases) || [];
+		const ds = m.section(form.GridSection, 'device', _('Device policies'),
+			_('Per-device exceptions. A device is recognised by its MAC address, also behind roamd mesh nodes (4-address mode keeps client MACs). Block still applies to all devices.'));
+		ds.anonymous = true;
+		ds.addremove = true;
+		ds.sortable = true;
+		ds.nodescriptions = true;
+
+		o = ds.option(form.Flag, 'enabled', _('Enabled'));
+		o.default = '1';
+		o.rmempty = false;
+		o.editable = true;
+
+		o = ds.option(form.Value, 'name', _('Name'));
+		o.rmempty = false;
+
+		o = ds.option(form.Value, 'mac', _('MAC address'));
+		o.datatype = 'macaddr';
+		o.rmempty = false;
+		for (let l of leases) {
+			if (l.macaddr)
+				o.value(l.macaddr.toUpperCase(), '%s (%s, %s)'.format(l.macaddr.toUpperCase(), l.hostname || '?', l.ipaddr || '?'));
+		}
+
+		o = ds.option(form.ListValue, 'policy', _('Policy'));
+		o.value('tunnel', _('All via tunnel'));
+		o.value('direct', _('All direct'));
+		o.value('rules', _('By rules'));
+		o.default = 'tunnel';
+		o.editable = true;
+		o.description = _('«All via tunnel» is recommended for game consoles: then all their traffic gets the Truba IP and full cone NAT.');
+
 		const sections = [];
 		for (let mode of [ 'all', 'selective' ]) {
 			const missing = ruleSections(mode).filter((r) => !present[r.set + ':' + r.tag]);
@@ -142,7 +175,7 @@ return view.extend({
 					_('Configured but missing from the current rule set (ignored): '),
 					missing.map((r) => '%s:%s'.format(r.set, r.tag)).join(', ')
 				]) : '',
-				cats.length ? '' : E('div', { 'class': 'alert-message' }, _('Rule sets are not downloaded yet — see the Lists tab.')),
+				cats.length ? '' : E('div', { 'class': 'alert-message' }, _('Rule sets are not downloaded yet — see the DNS & lists tab.')),
 				E('div', { 'style': 'display:flex;gap:1em;align-items:center;margin:.5em 0' }, [
 					filterBox.text,
 					E('label', {}, [ filterBox.only, ' ', _('only with an explicit action') ]),

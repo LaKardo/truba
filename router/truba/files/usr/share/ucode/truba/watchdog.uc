@@ -22,6 +22,16 @@ function handshake_age(dev) {
 	return latest ? (time() - latest) : null;
 }
 
+// Время ответа на ping через Туннель, мс; null — ответа нет.
+export function ping_rtt(dev, target) {
+	let r = U.run(sprintf('ping -c 1 -W 2 -w 3 -I %s %s', U.shq(dev), U.shq(target)));
+	let m = (r.code == 0) ? match(r.out, /time=([0-9.]+) ?ms/) : null;
+	return m ? +m[1] : null;
+};
+
+// Окно последних проверок для «Обзора»: задержка и потери за ~10 минут при интервале 30 с.
+const PROBE_WINDOW = 20;
+
 export function run() {
 	let cfg = F.load();
 	if (!cfg.watchdog.enabled)
@@ -29,7 +39,14 @@ export function run() {
 
 	let state = U.read_json(C.HEALTH_FILE, null)?.state ?? 'healthy';
 	let since = time(), fails = 0;
+	let probes = [];   // задержки последних проверок, мс; null — потеря
 	let timer;
+
+	let probed = (rtt) => {
+		push(probes, rtt);
+		if (length(probes) > PROBE_WINDOW)
+			shift(probes);
+	};
 
 	let set_state = (next, info) => {
 		if (next == state)
@@ -52,22 +69,27 @@ export function run() {
 		let w = cfg.watchdog;
 		let tinfo = F.tunnel_info(cfg.iface);
 		let st = N.iface_up(cfg.iface);
-		let rec = { state, since, fails, last_check: time(), handshake_age: null, ping: null };
+		let rec = { state, since, fails, last_check: time(), interval: w.interval, handshake_age: null, ping: null, rtt: null };
 
 		if (tinfo.disabled) {
 			fails = 0;
+			probes = [];
 			set_state('down', 'интерфейс выключен');
 		}
 		else if (!st.up) {
 			fails++;
+			probed(null);
 			if (fails >= w.fails)
 				set_state('down', 'интерфейс не поднят');
 		}
 		else {
 			let probe = length(w.probe) ? w.probe : tinfo.peer;
-			let ping_ok = probe
-				? system([ 'ping', '-c', '1', '-W', '2', '-I', st.device, probe ], 5000) == 0
-				: true;
+			let ping_ok = true;
+			if (probe) {
+				rec.rtt = ping_rtt(st.device, probe);
+				ping_ok = rec.rtt != null;
+				probed(rec.rtt);
+			}
 			let age = handshake_age(st.device);
 			rec.ping = ping_ok;
 			rec.handshake_age = age;
@@ -92,6 +114,7 @@ export function run() {
 		rec.state = state;
 		rec.since = since;
 		rec.fails = fails;
+		rec.probes = probes;
 		U.mkdirp(C.RUN_DIR);
 		U.write_json(C.HEALTH_FILE, rec);
 		timer.set(w.interval * 1000);

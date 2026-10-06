@@ -1,0 +1,113 @@
+/* Труба: общие стили интерфейса. Цвета — переменные темы Bootstrap (светлой и тёмной),
+   после запятой — запасные для тем без них. Числа — моноширинными цифрами, чтобы при
+   обновлении текст не сдвигался. */
+
+.truba-num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.truba-muted { color: var(--text-color-medium, #666); font-size: .9em; }
+
+/* Значок состояния: ok / warn / err / info, без класса — нейтральный. */
+.truba-badge {
+	display: inline-block;
+	padding: 0 .55em;
+	border-radius: 3px;
+	font-size: .9em;
+	line-height: 1.6;
+	white-space: nowrap;
+	color: var(--on-color, #fff);
+	background: var(--text-color-low, #888);
+}
+.truba-badge.ok   { color: var(--on-success-color, #fff); background: var(--success-color-high, #2e7d32); }
+.truba-badge.warn { color: var(--on-warn-color, #000);    background: var(--warn-color-high, #f9a825); }
+.truba-badge.err  { color: var(--on-error-color, #fff);   background: var(--error-color-high, #c62828); }
+.truba-badge.info { color: var(--on-primary-color, #fff); background: var(--primary-color-high, #1565c0); }
+
+/* Цветная точка перед значением: текст остаётся читаемым и при жёлтом. */
+.truba-dot::before { content: '●'; margin-right: .4em; color: var(--text-color-low, #999); }
+.truba-dot.ok::before   { color: var(--success-color-high, #2e7d32); }
+.truba-dot.warn::before { color: var(--warn-color-high, #f9a825); }
+.truba-dot.err::before  { color: var(--error-color-high, #c62828); }
+
+/* Сводка над карточками: высота не зависит от данных, предупреждения раскрываются по клику. */
+.truba-summary {
+	display: flex;
+	align-items: center;
+	gap: .5em 1em;
+	min-height: 2.75em;
+	box-sizing: border-box;
+	margin: 0 0 1em;
+	padding: .4em .5em .4em .9em;
+	border: 1px solid var(--border-color-medium, #ccc);
+	border-left: 4px solid var(--text-color-low, #999);
+	border-radius: 4px;
+}
+.truba-summary.ok   { border-left-color: var(--success-color-high, #2e7d32); }
+.truba-summary.warn { border-left-color: var(--warn-color-high, #f9a825); }
+.truba-summary.err  { border-left-color: var(--error-color-high, #c62828); }
+.truba-summary-text { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.truba-summary .btn { flex: 0 0 auto; margin: 0; }
+.truba-warnings { margin: -.5em 0 1em; }
+.truba-warnings ul { margin: 0; }
+
+/* Карточки: две колонки на широком экране, одна — на телефоне. */
+.truba-cards {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(min(100%, 24em), 1fr));
+	gap: 0 1.5em;
+}
+.truba-cards > .cbi-section { min-width: 0; margin-top: 0; }
+
+/* Таблица «название — значение» с постоянной шириной колонок. */
+.truba-kv { width: 100%; table-layout: fixed; border-collapse: collapse; }
+.truba-kv th, .truba-kv td {
+	padding: .4em .6em .4em 0;
+	vertical-align: top;
+	text-align: left;
+	font-weight: normal;
+	border-bottom: 1px solid var(--border-color-low, #e5e5e5);
+	overflow-wrap: anywhere;
+}
+.truba-kv th { width: 38%; color: var(--text-color-medium, #666); }
+.truba-kv tr:last-child > * { border-bottom: 0; }
+
+/* Трафик по Действиям: всего и скорость сейчас — две строки в ячейке. */
+.truba-traffic { width: 100%; table-layout: fixed; border-collapse: collapse; }
+.truba-traffic th, .truba-traffic td {
+	padding: .4em .5em;
+	text-align: right;
+	vertical-align: top;
+	border-bottom: 1px solid var(--border-color-low, #e5e5e5);
+}
+.truba-traffic th { font-weight: normal; color: var(--text-color-medium, #666); }
+.truba-traffic th:first-child, .truba-traffic td:first-child { width: 34%; text-align: left; padding-left: 0; }
+.truba-traffic td span { display: block; }
+
+/* Версии Наборов правил: всё по левому краю, контрольная сумма переносится в узкой колонке. */
+.truba-versions th, .truba-versions td { text-align: left; }
+.truba-versions th:first-child, .truba-versions td:first-child { width: 22%; }
+.truba-versions code { overflow-wrap: anywhere; }
+
+/* График скорости за 10 минут. */
+.truba-chart { position: relative; margin: .25em 0 .75em; }
+.truba-chart svg {
+	display: block;
+	width: 100%;
+	height: 9em;
+	box-sizing: border-box;
+	border-bottom: 1px solid var(--border-color-medium, #ccc);
+}
+.truba-chart .grid { stroke: var(--border-color-low, #e5e5e5); stroke-dasharray: 2 4; vector-effect: non-scaling-stroke; }
+.truba-chart path.line { fill: none; stroke-width: 1.75; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
+.truba-chart path.area { stroke: none; fill-opacity: .12; }
+.truba-chart .tunnel { stroke: var(--primary-color-high, #1565c0); fill: var(--primary-color-high, #1565c0); }
+.truba-chart .direct { stroke: var(--success-color-high, #2e7d32); fill: var(--success-color-high, #2e7d32); }
+.truba-chart .up { stroke-dasharray: 5 3; }
+.truba-chart-max { position: absolute; top: 0; left: 0; font-size: .8em; color: var(--text-color-medium, #666); }
+.truba-chart-axis { display: flex; justify-content: space-between; font-size: .8em; color: var(--text-color-medium, #666); }
+.truba-legend { display: flex; flex-wrap: wrap; gap: .25em 1.25em; margin-bottom: .25em; font-size: .85em; color: var(--text-color-medium, #666); }
+.truba-legend i { display: inline-block; width: 1.5em; margin-right: .4em; vertical-align: middle; border-top: 2px solid; }
+.truba-legend i.tunnel { border-top-color: var(--primary-color-high, #1565c0); }
+.truba-legend i.direct { border-top-color: var(--success-color-high, #2e7d32); }
+.truba-legend i.up { border-top-style: dashed; }
+
+/* Строка, которая меняет текст, но не высоту (например, «идёт обновление»). */
+.truba-line { min-height: 1.6em; }

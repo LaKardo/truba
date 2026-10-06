@@ -148,6 +148,7 @@ export function apply() {
 			writefile(C.STAMP_FILE, stamp);
 
 		applied.gkey = gkey;
+		applied.geoip_sizes = ctx.set_sizes;
 		applied.missing = plan.missing;
 		applied.geosite_order = map(plan.geosite, g => g.tag + '=' + g.action);
 	}
@@ -409,6 +410,22 @@ function upnp_info(cfg) {
 	return res;
 }
 
+// Счётчики кэша mosdns из его API: query — запросов, hit — ответов из кэша (вместе с
+// истёкшими), lazy_hit — истёкших, size — записей сейчас. Отсчёт — с запуска mosdns.
+function dns_cache(cfg) {
+	let r = U.run(sprintf("curl -s -m 1 http://%s/metrics | grep '^mosdns_cache_'", cfg.dns.api));
+	let res = {};
+	for (let l in split(r.out, '\n')) {
+		let m = match(l, /^mosdns_cache_(query_total|hit_total|lazy_hit_total|size_current)(\{[^}]*\})? ([0-9.e+]+)$/);
+		if (m)
+			res[replace(m[1], /_(total|current)$/, '')] = int(+m[3]);
+	}
+	if (res.query == null)
+		return null;
+	res.max = cfg.dns.cache_size;
+	return res;
+}
+
 function awg_peer(dev) {
 	let r = U.run('awg show ' + U.shq(dev) + ' dump');
 	if (r.code != 0)
@@ -461,6 +478,7 @@ export function status() {
 		neighbours: neighbours(),
 		upnp: upnp_info(cfg),
 		mosdns: system('pidof mosdns >/dev/null 2>&1') == 0,
+		dns_cache: cfg.routing ? dns_cache(cfg) : null,
 		lists: {
 			geoip: list_info(C.LISTS_DIR, C.DAT_FILES.geoip),
 			geosite: list_info(C.LISTS_DIR, C.DAT_FILES.geosite),
@@ -469,6 +487,19 @@ export function status() {
 			last: U.read_json(C.LISTS_STATE, null),
 			updating: stat(C.RUN_DIR + '/update.pid') != null,
 		},
+	};
+};
+
+// Размеры наборов для «Обзора»: geoip — подсетей по Действиям (посчитаны при применении),
+// dns — IP, которые mosdns положил по ответам для доменов geosite. Дороже status — реже.
+export function sets() {
+	let applied = U.read_json(C.APPLIED_FILE, null);
+	if (!applied?.routing)
+		return { routing: false };
+	return {
+		routing: true,
+		geoip: applied.geoip_sizes ?? null,
+		dns: { tunnel: length(set_elements('gs_tunnel4')), direct: length(set_elements('gs_direct4')) },
 	};
 };
 
