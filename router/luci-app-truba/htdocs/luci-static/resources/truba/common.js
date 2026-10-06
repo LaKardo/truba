@@ -45,6 +45,15 @@ function fmtBytes(n) {
 	return '%.1f %s'.format(n, u[i]);
 }
 
+// Байт/с → бит/с в десятичных единицах, как у провайдеров.
+function fmtRate(bps) {
+	let n = (+bps || 0) * 8;
+	const u = [ _('bit/s'), _('kbit/s'), _('Mbit/s'), _('Gbit/s') ];
+	let i = 0;
+	while (n >= 1000 && i < u.length - 1) { n /= 1000; i++; }
+	return '%.1f %s'.format(n, u[i]);
+}
+
 function fmtAge(sec) {
 	if (sec == null)
 		return _('never');
@@ -73,5 +82,5 @@ function tunnelIface() {
 return baseclass.extend({
 	callStatus, callCategories, callCheck, callNatTest, callUpdateLists, callRollbackLists, callLog, callLeases,
 	ACTION_LABELS, REASON_LABELS, WARNING_LABELS,
-	fmtBytes, fmtAge, fmtTime, badge, tunnelIface
+	fmtBytes, fmtRate, fmtAge, fmtTime, badge, tunnelIface
 });

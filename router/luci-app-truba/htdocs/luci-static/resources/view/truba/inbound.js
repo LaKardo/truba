@@ -11,8 +11,11 @@ return view.extend({
 
 	render: function(data) {
 		const st = data[2] || {};
-		const haveUpnp = data[1] != null;
+		const up = st.upnp || {};
+		// Конфиг upnpd может остаться и без самого miniupnpd — смотрим на установленную службу.
+		const haveUpnp = data[1] != null && up.installed !== false;
 		const forwards = uci.sections('firewall', 'redirect').filter((r) => r.src == 'truba');
+		const tr = st.traffic?.inbound || {}, since = st.applied?.counters_since;
 
 		const m = new form.Map('truba', _('Inbound'),
 			_('All ports of the Truba IP %s (except the VPS SSH and tunnel ports) reach the router. Full cone NAT keeps mappings open for any remote host; ports for home devices are opened manually or via UPnP.').format(st.vps_ip || '—'));
@@ -27,6 +30,19 @@ return view.extend({
 		o.rmempty = false;
 		o.readonly = !haveUpnp;
 
+		let upnpState = '';
+		if (up.enabled && !up.installed)
+			upnpState = E('div', { 'class': 'alert-message warning' }, _('UPnP is enabled, but miniupnpd is not installed: install luci-app-upnp.'));
+		else if (up.enabled && !up.running)
+			upnpState = E('div', { 'class': 'alert-message warning' }, _('UPnP is enabled, but miniupnpd is not running.'));
+		const leases = (up.leases || []).map((l) => E('tr', { 'class': 'tr' }, [
+			E('td', { 'class': 'td' }, l.proto),
+			E('td', { 'class': 'td' }, String(l.ext_port)),
+			E('td', { 'class': 'td' }, '%s:%d'.format(l.ip, l.port)),
+			E('td', { 'class': 'td' }, l.descr || '—'),
+			E('td', { 'class': 'td' }, l.expires ? common.fmtTime(l.expires) : _('no expiry'))
+		]));
+
 		const rows = forwards.map((r) => E('tr', { 'class': 'tr' }, [
 			E('td', { 'class': 'td' }, r.name || '—'),
 			E('td', { 'class': 'td' }, L.toArray(r.proto).join(', ') || 'tcp udp'),
@@ -37,6 +53,17 @@ return view.extend({
 
 		return m.render().then((mapEl) => E('div', {}, [
 			mapEl,
+			E('div', { 'class': 'cbi-section' }, [
+				E('h3', {}, _('Active UPnP / NAT-PMP mappings')),
+				upnpState,
+				leases.length ? E('table', { 'class': 'table' }, [
+					E('tr', { 'class': 'tr table-titles' }, [
+						E('th', { 'class': 'th' }, _('Protocol')), E('th', { 'class': 'th' }, _('External port')),
+						E('th', { 'class': 'th' }, _('Device')), E('th', { 'class': 'th' }, _('Description')),
+						E('th', { 'class': 'th' }, _('Expires'))
+					])
+				].concat(leases)) : E('p', {}, E('em', {}, _('No active mappings.')))
+			]),
 			E('div', { 'class': 'cbi-section' }, [
 				E('h3', {}, _('Port forwards from the tunnel')),
 				rows.length ? E('table', { 'class': 'table' }, [
@@ -51,8 +78,12 @@ return view.extend({
 					' ',
 					E('span', { 'class': 'cbi-value-description' }, _('Choose source zone «truba».'))
 				]),
-				E('p', { 'class': 'cbi-value-description' },
-					_('Inbound connections via the tunnel: %s. Replies always go back through the tunnel, even to Russian clients.').format(String(st.counters?.inbound?.packets ?? 0)))
+				E('p', { 'class': 'cbi-value-description' }, [
+					since ? _('Since %s:').format(common.fmtTime(since)) + ' ' : '',
+					_('%s inbound connections via the tunnel; %s to devices, %s from devices.').format(
+						String(st.counters?.inbound?.packets ?? 0), common.fmtBytes(tr.down), common.fmtBytes(tr.up)),
+					' ', _('Replies always go back through the tunnel, even to Russian clients.')
+				])
 			])
 		]));
 	}

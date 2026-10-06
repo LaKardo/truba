@@ -13,9 +13,58 @@ function row(label, value) {
 	]);
 }
 
-function renderStatus(st) {
+// Скорость — по разнице с прошлым опросом (раз в 5 с).
+let prevSample = null;
+
+function takeRates(st) {
+	const now = Date.now() / 1000, awg = st.tunnel?.awg || {}, tr = st.traffic || {};
+	const cur = { t: now, rx: awg.rx, tx: awg.tx, tr };
+	const p = prevSample;
+	prevSample = cur;
+	if (!p || now - p.t < 1)
+		return null;
+	const dt = now - p.t;
+	const d = (a, b) => (a != null && b != null && a >= b) ? (a - b) / dt : null;
+	const r = { rx: d(cur.rx, p.rx), tx: d(cur.tx, p.tx) };
+	for (let k of [ 'tunnel', 'direct', 'inbound' ])
+		r[k] = { down: d(tr[k]?.down, p.tr[k]?.down), up: d(tr[k]?.up, p.tr[k]?.up) };
+	return r;
+}
+
+function rateText(down, up) {
+	return (down == null || up == null) ? '—' : '↓ %s · ↑ %s'.format(common.fmtRate(down), common.fmtRate(up));
+}
+
+function renderTraffic(st, rates) {
+	const tr = st.traffic || {}, since = st.applied?.counters_since;
+	const rows = [
+		[ _('Tunnel'), 'tunnel' ],
+		[ _('Direct'), 'direct' ],
+		[ _('Inbound via Truba'), 'inbound' ]
+	].map(([ label, k ]) => E('tr', { 'class': 'tr' }, [
+		E('td', { 'class': 'td left' }, label),
+		E('td', { 'class': 'td left' }, common.fmtBytes(tr[k]?.down)),
+		E('td', { 'class': 'td left' }, common.fmtBytes(tr[k]?.up)),
+		E('td', { 'class': 'td left' }, rates ? rateText(rates[k].down, rates[k].up) : '—')
+	]));
+	return E('div', {}, [
+		E('p', { 'class': 'cbi-section-descr' }, since
+			? _('Traffic of devices in the routed zones since %s. The router\'s own traffic (DNS, list downloads) is not included.').format(common.fmtTime(since))
+			: _('Traffic of devices in the routed zones. The router\'s own traffic (DNS, list downloads) is not included.')),
+		E('table', { 'class': 'table' }, [
+			E('tr', { 'class': 'tr table-titles' }, [
+				E('th', { 'class': 'th' }, _('Action')),
+				E('th', { 'class': 'th' }, _('To devices')),
+				E('th', { 'class': 'th' }, _('From devices')),
+				E('th', { 'class': 'th' }, _('Now'))
+			])
+		].concat(rows))
+	]);
+}
+
+function renderStatus(st, rates) {
 	const t = st.tunnel || {}, awg = t.awg || {}, h = st.health || {}, c = st.counters || {};
-	const a = st.applied || {};
+	const a = st.applied || {}, nb = st.neighbours || {}, up = st.upnp || {};
 
 	let tunnelState;
 	if (!t.configured)
@@ -34,7 +83,12 @@ function renderStatus(st) {
 	const rows = [
 		row(_('Tunnel'), tunnelState),
 		row(_('Last handshake'), awg.handshake ? common.fmtAge(awg.handshake_age) : _('never')),
-		row(_('Received / sent'), awg.rx != null ? '%s / %s'.format(common.fmtBytes(awg.rx), common.fmtBytes(awg.tx)) : '—'),
+		row(_('Tunnel: received / sent'), awg.rx != null ? E('span', {}, [
+			'%s / %s'.format(common.fmtBytes(awg.rx), common.fmtBytes(awg.tx)),
+			E('span', { 'class': 'cbi-value-description' }, ' · %s · %s'.format(
+				_('since the interface came up, including the router\'s own traffic'),
+				rates ? _('now %s').format(rateText(rates.rx, rates.tx)) : _('speed after the next update')))
+		]) : '—'),
 		row(_('Truba IP (VPS)'), st.vps_ip || '—'),
 		row(_('Tunnel address'), t.address ? '%s ↔ %s'.format(t.address, t.peer || '?') : '—'),
 		row(_('Routing'), st.routing
@@ -45,11 +99,12 @@ function renderStatus(st) {
 			? '%s %s'.format(h.state == 'healthy' ? _('healthy since') : _('down since'), common.fmtTime(h.since))
 			: _('no data')),
 		row(_('DNS classifier (mosdns)'), st.routing ? common.badge(st.mosdns, _('running'), _('not running')) : '—'),
-		row(_('Traffic by action'), E('span', {}, [
-			_('Tunnel'), ': ', common.fmtBytes(c.tunnel?.bytes), ' · ',
-			_('Direct'), ': ', common.fmtBytes(c.direct?.bytes), ' · ',
-			_('Blocked'), ': ', String(c.block?.packets ?? 0), ' ', _('packets'), ' · ',
-			_('Inbound via Truba'), ': ', String(c.inbound?.packets ?? 0), ' ', _('connections')
+		row(_('New connections'), E('span', {}, [
+			_('Tunnel'), ': ', String(c.tunnel?.packets ?? 0), ' · ',
+			_('Direct'), ': ', String(c.direct?.packets ?? 0), ' · ',
+			_('Inbound via Truba'), ': ', String(c.inbound?.packets ?? 0), ' · ',
+			_('Blocked'), ': ', String(c.block?.packets ?? 0), ' ', _('packets'),
+			a.counters_since ? E('span', { 'class': 'cbi-value-description' }, ' · ' + _('since %s').format(common.fmtTime(a.counters_since))) : ''
 		])),
 		row(_('Rule sets'), E('span', {}, [
 			'geoip.dat: ', st.lists?.geoip ? common.fmtTime(st.lists.geoip.mtime) : _('missing'), ' · ',
@@ -64,6 +119,12 @@ function renderStatus(st) {
 		warns.push(E('li', {}, _('Category %s is configured but missing from the current rule set — the rule is ignored.').format(m)));
 	if (a.error)
 		warns.push(E('li', {}, _('Error while applying rules: %s').format(a.error)));
+	if (nb.offload)
+		warns.push(E('li', {}, _('Software flow offloading is on (Network → Firewall): packets of offloaded connections bypass the Truba counters, so device traffic is undercounted.')));
+	if (nb.openclash_fakeip)
+		warns.push(E('li', {}, _('OpenClash runs in fake-ip mode: «Check NAT» may report a problem although full cone NAT works.')));
+	if (up.enabled && !up.installed)
+		warns.push(E('li', {}, _('UPnP is enabled on the Inbound tab, but miniupnpd is not installed: install luci-app-upnp.')));
 
 	return E('div', {}, [
 		warns.length ? E('div', { 'class': 'alert-message warning' }, E('ul', {}, warns)) : '',
@@ -95,7 +156,9 @@ return view.extend({
 	render: function(data) {
 		const st = data[0];
 		const iface = common.tunnelIface();
-		const statusBox = E('div', {}, renderStatus(st));
+		takeRates(st);   // первая точка отсчёта скорости
+		const statusBox = E('div', {}, renderStatus(st, null));
+		const trafficBox = E('div', {}, renderTraffic(st, null));
 		const natBox = E('div');
 
 		const m = new form.Map('truba', _('Truba'),
@@ -118,7 +181,9 @@ return view.extend({
 		o.default = '1';
 
 		poll.add(() => common.callStatus().then((st) => {
-			statusBox.replaceChildren(renderStatus(st));
+			const rates = takeRates(st);
+			statusBox.replaceChildren(renderStatus(st, rates));
+			trafficBox.replaceChildren(renderTraffic(st, rates));
 		}), 5);
 
 		return m.render().then((mapEl) => E('div', {}, [
@@ -126,6 +191,10 @@ return view.extend({
 			E('div', { 'class': 'cbi-section' }, [
 				E('h3', {}, _('Status')),
 				statusBox
+			]),
+			E('div', { 'class': 'cbi-section' }, [
+				E('h3', {}, _('Device traffic')),
+				trafficBox
 			]),
 			E('div', { 'class': 'cbi-section' }, [
 				E('h3', {}, _('NAT check')),

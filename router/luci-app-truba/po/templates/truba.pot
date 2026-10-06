@@ -66,6 +66,22 @@ msgid "The tunnel is not configured yet — import the configuration on the Tunn
 msgstr ""
 
 #: htdocs/luci-static/resources/truba/common.js
+msgid "bit/s"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/common.js
+msgid "kbit/s"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/common.js
+msgid "Mbit/s"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/common.js
+msgid "Gbit/s"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/common.js
 msgid "never"
 msgstr ""
 
@@ -206,7 +222,7 @@ msgid "Check"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/diagnostics.js
-msgid "Log"
+msgid "Log: Truba and mosdns"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/diagnostics.js
@@ -306,6 +322,18 @@ msgid "Package luci-app-upnp is not installed."
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/inbound.js
+msgid "UPnP is enabled, but miniupnpd is not installed: install luci-app-upnp."
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/inbound.js
+msgid "UPnP is enabled, but miniupnpd is not running."
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/inbound.js
+msgid "no expiry"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/inbound.js
 msgid "disabled"
 msgstr ""
 
@@ -314,7 +342,7 @@ msgid "enabled"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/inbound.js
-msgid "Port forwards from the tunnel"
+msgid "Active UPnP / NAT-PMP mappings"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/inbound.js
@@ -327,6 +355,22 @@ msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/inbound.js
 msgid "Device"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/inbound.js
+msgid "Description"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/inbound.js
+msgid "Expires"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/inbound.js
+msgid "No active mappings."
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/inbound.js
+msgid "Port forwards from the tunnel"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/inbound.js
@@ -346,7 +390,15 @@ msgid "Choose source zone «truba»."
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/inbound.js
-msgid "Inbound connections via the tunnel: %s. Replies always go back through the tunnel, even to Russian clients."
+msgid "Since %s:"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/inbound.js
+msgid "%s inbound connections via the tunnel; %s to devices, %s from devices."
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/inbound.js
+msgid "Replies always go back through the tunnel, even to Russian clients."
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/lists.js
@@ -470,6 +522,30 @@ msgid "Roll back"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/overview.js
+msgid "Inbound via Truba"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/overview.js
+msgid "Traffic of devices in the routed zones since %s. The router's own traffic (DNS, list downloads) is not included."
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/overview.js
+msgid "Traffic of devices in the routed zones. The router's own traffic (DNS, list downloads) is not included."
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/overview.js
+msgid "To devices"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/overview.js
+msgid "From devices"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/overview.js
+msgid "Now"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/overview.js
 msgid "not configured"
 msgstr ""
 
@@ -506,7 +582,19 @@ msgid "Last handshake"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/overview.js
-msgid "Received / sent"
+msgid "Tunnel: received / sent"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/overview.js
+msgid "since the interface came up, including the router's own traffic"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/overview.js
+msgid "now %s"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/overview.js
+msgid "speed after the next update"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/overview.js
@@ -566,7 +654,7 @@ msgid "not running"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/overview.js
-msgid "Traffic by action"
+msgid "New connections"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/overview.js
@@ -578,11 +666,7 @@ msgid "packets"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/overview.js
-msgid "Inbound via Truba"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/overview.js
-msgid "connections"
+msgid "since %s"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/overview.js
@@ -599,6 +683,18 @@ msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/overview.js
 msgid "Error while applying rules: %s"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/overview.js
+msgid "Software flow offloading is on (Network → Firewall): packets of offloaded connections bypass the Truba counters, so device traffic is undercounted."
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/overview.js
+msgid "OpenClash runs in fake-ip mode: «Check NAT» may report a problem although full cone NAT works."
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/overview.js
+msgid "UPnP is enabled on the Inbound tab, but miniupnpd is not installed: install luci-app-upnp."
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/overview.js
@@ -663,6 +759,10 @@ msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/overview.js
 msgid "Status"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/overview.js
+msgid "Device traffic"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/overview.js
@@ -822,11 +922,39 @@ msgid "Not needed: the router connects to the Truba itself."
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/tunnel.js
+msgid "With header protection S1–S4 must be at least 12"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/tunnel.js
 msgid "A number or a range «from-to»; must match the Truba."
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/tunnel.js
 msgid "Decoy packets before the handshake (CPS format); may differ from the Truba."
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/tunnel.js
+msgid "Header protection key"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/tunnel.js
+msgid "AmneziaWG 3.1: encrypts the header fields WireGuard is recognised by. Must match the Truba and needs S1–S4 of at least 12; comes with router.conf."
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/tunnel.js
+msgid "Disable cookies"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/tunnel.js
+msgid "AmneziaWG 3.1: no cookie replies under load. Not needed with a single peer, and their size is recognisable."
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/tunnel.js
+msgid "Random trailers"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/tunnel.js
+msgid "AmneziaWG 3.1, in reserve against DPI by packet sizes: pads packets to a random length, costly in traffic for small packets. Must match the Truba: on the VPS run «install-vps.sh random-trailers on» or «off» at the same time."
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/tunnel.js

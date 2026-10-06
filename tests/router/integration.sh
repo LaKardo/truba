@@ -189,6 +189,7 @@ EOF
 /etc/init.d/network reload; sleep 3
 
 echo "== uci-defaults"
+OFFLOAD_BEFORE="$(uci -q get firewall.@defaults[0].flow_offloading)"
 sh /etc/uci-defaults/90-truba
 check "зона truba создана" test "$(uci -q get firewall.truba.name)" = truba
 check "форвардинг lan→truba" test "$(uci -q get firewall.lan_truba.dest)" = truba
@@ -197,7 +198,7 @@ check "аппаратное ускорение выключено" test "$(uci -
 check "IPv6 lan→wan REJECT" test "$(uci -q get firewall.truba_no_ipv6_inet.family)" = ipv6
 check "IPv6 lan не тронут (ra)" test "$(uci -q get dhcp.lan.ra)" != disabled
 check "Стартовые настройки: 8 правил" test "$(uci -q show truba | grep -c '=rule$')" -eq 8
-check "программное ускорение включено" test "$(uci -q get firewall.@defaults[0].flow_offloading)" = 1
+check "программное ускорение не тронуто (было: ${OFFLOAD_BEFORE:-не задано})" test "$(uci -q get firewall.@defaults[0].flow_offloading)" = "$OFFLOAD_BEFORE"
 # В ядре Docker нет nf_flow_table: с flowtable fw4 не загружается целиком (без зон).
 uci set firewall.@defaults[0].flow_offloading='0'; uci commit firewall
 /etc/init.d/firewall reload >/dev/null 2>&1
@@ -265,6 +266,45 @@ check "контроль: без цепочки output Туннель при Open
 openclash_off
 nft -f /var/etc/truba/truba.nft
 
+echo "== учёт трафика устройств (Маршрутизация вкл)"
+bytes() { nft list counter inet truba "$1" 2>/dev/null | sed -n 's/.*bytes \([0-9]*\).*/\1/p'; }
+gt0() { [ "$(bytes "$1")" -gt 0 ] 2>/dev/null; }
+same() { [ "$(bytes "$1")" = "$2" ]; }
+lan_tcp() { ip netns exec lanhost ucode /repo/tests/router/tcp_probe.uc client 192.168.1.50 "$1" "$2"; }
+probe >/dev/null 2>&1   # входящее: клиент из интернета → устройство
+check "входящие: к устройству посчитано" gt0 c_inbound_down
+check "входящие: от устройства посчитано" gt0 c_inbound_up
+IN_DOWN="$(bytes c_inbound_down)"
+# 203.0.113.0/24 входит в geoip:private («Напрямую»); 1.2.3.4 — ни в одну Категорию,
+# поэтому по Режиму «Всё в туннель» идёт через Туннель на сервер в netns vps.
+ip -n vps addr add 1.2.3.4/32 dev lo 2>/dev/null
+check "устройство → Туннель: ответ пришёл" lan_tcp 1.2.3.4 48081
+check "Туннель: от устройства посчитано" gt0 c_tunnel_up
+check "Туннель: к устройству посчитано" gt0 c_tunnel_down
+# Ответ из Туннеля на исходящее — это «Туннель», а не «входящие», хотя ct mark он переписывает.
+check "исходящее через Туннель не считается входящим" same c_inbound_down "$IN_DOWN"
+# «Интернет напрямую» в стенде — VPS по внешнему адресу через ul0; на время — в зоне wan.
+uci add_list firewall.@zone[1].device='ul0'; uci commit firewall
+/etc/init.d/firewall reload >/dev/null 2>&1; sleep 2
+TUN_UP="$(bytes c_tunnel_up)"
+check "устройство → напрямую: ответ пришёл" lan_tcp 198.51.100.2 48081
+check "Напрямую: от устройства посчитано" gt0 c_direct_up
+check "Напрямую: к устройству посчитано" gt0 c_direct_down
+check "напрямую не считается Туннелем" same c_tunnel_up "$TUN_UP"
+uci del_list firewall.@zone[1].device='ul0'; uci commit firewall
+/etc/init.d/firewall reload >/dev/null 2>&1; sleep 2
+truba status > /tmp/st.json
+check "status: traffic.tunnel.up" test "$(jsonfilter -i /tmp/st.json -e '@.traffic.tunnel.up')" = "$(bytes c_tunnel_up)"
+SINCE="$(jsonfilter -i /var/run/truba/applied.json -e '@.counters_since')"
+TUN_UP="$(bytes c_tunnel_up)"
+check "reload (не дольше 90 с)" bounded 90 /etc/init.d/truba reload; sleep 3
+check "счётчики пережили применение настроек" test "$(bytes c_tunnel_up)" -ge "$TUN_UP"
+check "отсчёт идёт с прежнего момента" test "$(jsonfilter -i /var/run/truba/applied.json -e '@.counters_since')" = "$SINCE"
+check "status: программного ускорения нет" test "$(truba status | jsonfilter -e '@.neighbours.offload')" = false
+uci set firewall.@defaults[0].flow_offloading='1'; uci commit firewall
+check "status: программное ускорение замечено" test "$(truba status | jsonfilter -e '@.neighbours.offload')" = true
+uci set firewall.@defaults[0].flow_offloading='0'; uci commit firewall
+
 echo "== порядок Категорий (узкие раньше широких)"
 grep -o '"geosite_order":[^]]*' /var/run/truba/applied.json
 check "category-cdn-ru раньше category-ru" sh -c "grep -o '\"geosite_order\":[^]]*' /var/run/truba/applied.json | grep -q 'category-cdn-ru=direct.*category-ru=direct'"
@@ -284,6 +324,9 @@ check "Блок: поддомен sub.$ADS тоже" sh -c "nslookup sub.$ADS 12
 echo "== truba check"
 /usr/sbin/truba check 77.88.8.8 > /tmp/chk.json; head -c 400 /tmp/chk.json; echo
 check "check IP из geoip:ru → direct" grep -q '"action": "direct"' /tmp/chk.json
+check "check: Категория geoip адреса — ru" test "$(jsonfilter -i /tmp/chk.json -e '@.ips[0].geoip[0]')" = ru
+check "check: набор gi_direct4 выведен верно" test "$(jsonfilter -i /tmp/chk.json -e '@.ips[0].sets.gi_direct')" = true
+check "check: адрес домашней сети — в bypass4 из ядра" sh -c "/usr/sbin/truba check 192.168.1.50 | jsonfilter -e '@.ips[0].reason' | grep -qx local"
 /usr/sbin/truba check "$ADS" > /tmp/chk2.json
 check "check $ADS → block" grep -q '"action": "block"' /tmp/chk2.json
 FULL="$(sed -n 's/^full://p' /var/lib/truba/geosite/youtube.txt | head -1)"
