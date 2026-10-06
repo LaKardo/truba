@@ -32,8 +32,88 @@ function entry_match(entry, d) {
 	return false;
 }
 
-function in_nft_set(set, ip) {
-	return system('nft get element inet ' + C.NFT_TABLE + ' ' + set + ' { ' + ip + ' } >/dev/null 2>&1') == 0;
+// «a.b.c.d[/n]» → [ сеть, маска ] числами. Без регулярного выражения: на 35 тысячах
+// диапазонов geoip это в десять раз быстрее U.cidr_contains.
+function net_mask(cidr) {
+	let i = index(cidr, '/');
+	let a = iptoarr(i < 0 ? cidr : substr(cidr, 0, i));
+	if (length(a) != 4)
+		return null;
+	let len = (i < 0) ? 32 : int(substr(cidr, i + 1));
+	let mask = len ? ((0xffffffff << (32 - len)) & 0xffffffff) : 0;
+	return [ ((a[0] << 24) | (a[1] << 16) | (a[2] << 8) | a[3]) & mask, mask ];
+}
+
+// Категории geoip каждого адреса: один проход по Категории сразу для всех адресов.
+function geoip_hits(cats, nums) {
+	let hits = map(nums, () => []);
+	for (let c in cats) {
+		if (c.set != 'geoip')
+			continue;
+		let left = length(nums), found = map(nums, () => false);
+		for (let cidr in D.geoip_cidrs(c.tag)) {
+			let nm = net_mask(cidr);
+			if (!nm)
+				continue;
+			for (let k = 0; k < length(nums); k++) {
+				if (!found[k] && (nums[k] & nm[1]) == nm[0]) {
+					found[k] = true;
+					push(hits[k], c.tag);
+					left--;
+				}
+			}
+			if (!left)
+				break;
+		}
+	}
+	return hits;
+}
+
+// Набор из ядра как список диапазонов [ от, до ]. Целиком один раз на проверку:
+// «nft get element» на каждый адрес загружает всю таблицу (≈0,2 с на NC-1812).
+function kernel_set(name) {
+	let r = U.run('nft -j list set inet ' + C.NFT_TABLE + ' ' + name);
+	let out = [];
+	if (r.code != 0)
+		return out;
+	try {
+		for (let o in json(r.out)?.nftables ?? []) {
+			for (let e in o?.set?.elem ?? []) {
+				let v = (type(e) == 'object' && e.elem) ? e.elem.val : e;
+				if (type(v) == 'string') {
+					let n = U.ip2int(v);
+					if (n != null)
+						push(out, [ n, n ]);
+				}
+				else if (v?.prefix) {
+					let nm = net_mask(v.prefix.addr + '/' + v.prefix.len);
+					if (nm)
+						push(out, [ nm[0], nm[0] | (~nm[1] & 0xffffffff) ]);
+				}
+				else if (v?.range) {
+					let a = U.ip2int(v.range[0]), b = U.ip2int(v.range[1]);
+					if (a != null && b != null)
+						push(out, [ a, b ]);
+				}
+			}
+		}
+	}
+	catch (e) { }
+	return out;
+}
+
+function in_ranges(rs, n) {
+	for (let r in rs)
+		if (n >= r[0] && n <= r[1])
+			return true;
+	return false;
+}
+
+function any_of(tags, wanted) {
+	for (let t in tags)
+		if (index(wanted, t) >= 0)
+			return true;
+	return false;
 }
 
 function resolve(domain) {
@@ -49,28 +129,19 @@ function resolve(domain) {
 	return uniq(ips);
 }
 
-function ip_verdict(cfg, plan, cats, ip, mac) {
-	let steps = [];
-	let geoip_hits = [];
-	for (let c in cats) {
-		if (c.set != 'geoip')
-			continue;
-		for (let cidr in D.geoip_cidrs(c.tag)) {
-			if (U.cidr_contains(cidr, ip)) {
-				push(geoip_hits, c.tag);
-				break;
-			}
-		}
-	}
-
+// kern — наборы из ядра (bypass4, gs_tunnel4, gs_direct4: их наполняют интерфейсы и mosdns).
+// Наборы geoip выводятся из Категорий адреса и плана: в ядре каждый из них — объединение
+// CIDR Категорий с этим Действием; при выключенной Маршрутизации их нет.
+function ip_verdict(cfg, plan, ip, n, geoip, kern, mac) {
+	let gi = (a) => cfg.routing && any_of(geoip, plan.geoip[a] ?? []);
 	let action = null, reason = null;
 	let sets = {
-		bypass: in_nft_set('bypass4', ip),
-		gi_block: in_nft_set('gi_block4', ip),
-		gs_tunnel: in_nft_set('gs_tunnel4', ip),
-		gs_direct: in_nft_set('gs_direct4', ip),
-		gi_tunnel: in_nft_set('gi_tunnel4', ip),
-		gi_direct: in_nft_set('gi_direct4', ip),
+		bypass: in_ranges(kern.bypass4, n),
+		gi_block: gi('block'),
+		gs_tunnel: in_ranges(kern.gs_tunnel4, n),
+		gs_direct: in_ranges(kern.gs_direct4, n),
+		gi_tunnel: gi('tunnel'),
+		gi_direct: gi('direct'),
 	};
 	let dev = mac ? filter(cfg.devices, d => d.mac == lc(mac))[0] : null;
 
@@ -84,7 +155,19 @@ function ip_verdict(cfg, plan, cats, ip, mac) {
 	else if (sets.gi_direct) { action = 'direct'; reason = 'geoip'; }
 	else { action = plan.mode_default; reason = 'mode'; }
 
-	return { ip, geoip: geoip_hits, sets, device: dev?.name, action, reason };
+	return { ip, geoip, sets, device: dev?.name, action, reason };
+}
+
+function verdicts(cfg, plan, cats, ips, mac) {
+	if (!length(ips))
+		return [];
+	let nums = map(ips, U.ip2int);
+	let hits = geoip_hits(cats, nums);
+	let kern = { bypass4: kernel_set('bypass4'), gs_tunnel4: kernel_set('gs_tunnel4'), gs_direct4: kernel_set('gs_direct4') };
+	let out = [];
+	for (let k = 0; k < length(ips); k++)
+		push(out, ip_verdict(cfg, plan, ips[k], nums[k], hits[k], kern, mac));
+	return out;
 }
 
 export function check(target, mac) {
@@ -101,7 +184,7 @@ export function check(target, mac) {
 
 	if (U.is_ipv4(target)) {
 		res.kind = 'ip';
-		res.ips = [ ip_verdict(cfg, plan, cats, target, mac) ];
+		res.ips = verdicts(cfg, plan, cats, [ target ], mac);
 		res.action = res.ips[0].action;
 		res.reason = res.ips[0].reason;
 		return res;
@@ -143,7 +226,7 @@ export function check(target, mac) {
 
 	// Резолв через Роутер: mosdns заодно кладёт IP в набор своей Категории,
 	// поэтому итог по IP совпадает с тем, что увидит nftables для нового соединения.
-	res.ips = map(resolve(d), ip => ip_verdict(cfg, plan, cats, ip, mac));
+	res.ips = verdicts(cfg, plan, cats, resolve(d), mac);
 	if (length(res.ips)) {
 		res.action = res.ips[0].action;
 		res.reason = res.ips[0].reason;

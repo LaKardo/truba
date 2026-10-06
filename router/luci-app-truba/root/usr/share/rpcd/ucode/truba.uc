@@ -74,7 +74,9 @@ const methods = {
 			let n = int(req.args?.lines ?? 200);
 			if (n < 10 || n > 2000)
 				n = 200;
-			let p = popen(sprintf("logread -e 'truba' | tail -n %d", n), 'r');
+			// Труба и mosdns (ошибки DNS-серверов). «invalid msg» — повреждённые запросы
+			// устройств, которые dnsmasq пересылает как есть: это шум, а не ошибка Трубы.
+			let p = popen(sprintf("logread -e 'truba\\|mosdns' | grep -v 'invalid msg' | tail -n %d", n), 'r');
 			let out = p ? p.read('all') : '';
 			p?.close();
 			return { log: out };

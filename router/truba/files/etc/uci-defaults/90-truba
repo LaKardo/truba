@@ -8,14 +8,14 @@ mkdir -p "$STATE"
 if [ ! -f "$STATE/firewall.orig" ]; then
 	{
 		echo "fullcone=$(uci -q get firewall.@defaults[0].fullcone)"
-		echo "flow_offloading=$(uci -q get firewall.@defaults[0].flow_offloading)"
 		echo "flow_offloading_hw=$(uci -q get firewall.@defaults[0].flow_offloading_hw)"
 	} > "$STATE/firewall.orig"
 fi
 
-# Full cone NAT и программное ускорение; аппаратное выключено (PLAN §4.2).
+# Full cone NAT; аппаратное ускорение выключено: оно обходит netfilter целиком (PLAN §4.2).
+# Программное ускорение не трогаем: его выбирает владелец. Пакеты ускоренных соединений
+# идут мимо счётчиков Трубы и мимо ограничения скорости qosmate — об этом предупреждает «Обзор».
 uci -q set firewall.@defaults[0].fullcone='1'
-uci -q set firewall.@defaults[0].flow_offloading='1'
 uci -q set firewall.@defaults[0].flow_offloading_hw='0'
 
 IFACE="$(uci -q get truba.main.iface)"

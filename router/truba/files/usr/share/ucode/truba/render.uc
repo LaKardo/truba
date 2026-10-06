@@ -75,6 +75,43 @@ function inbound_rules(iface) {
 	return s;
 }
 
+// Счётчики. c_tunnel, c_direct — новые соединения устройств по Действиям (первый пакет
+// проходит классификацию), c_block — отброшенные пакеты, c_inbound — новые входящие
+// через Туннель. Остальные — байты трафика устройств по направлениям (цепочка stats).
+const CONN_COUNTERS = [ 'c_tunnel', 'c_direct', 'c_block', 'c_inbound' ];
+export const TRAFFIC_COUNTERS = [ 'c_tunnel_down', 'c_tunnel_up', 'c_direct_down', 'c_direct_up',
+                                  'c_inbound_down', 'c_inbound_up' ];
+
+// Значения из прежней таблицы (carry) переносятся: «Сохранить и применить» не обнуляет учёт.
+function counter_decls(names, carry) {
+	let s = '';
+	for (let n in names) {
+		let v = carry?.[n];
+		s += '\tcounter ' + n + ' {' + (v ? sprintf(' packets %d bytes %d', v.packets, v.bytes) : '') + ' }\n';
+	}
+	return s + '\n';
+}
+
+// Учёт трафика устройств из зон Трубы. Хук forward видит только транзитные пакеты,
+// уже пропущенные fw4 (приоритет после него), — свой трафик Роутера сюда не попадает.
+// Направление — по интерфейсам и ct direction, а не по ct mark: ответы из Туннеля
+// переписывают её на «входящее». Down — к устройствам, up — от них. Пакеты соединений,
+// ускоренных flowtable (программное ускорение), идут мимо этой цепочки.
+function stats_chain(iface) {
+	let s = '\n\tchain stats {\n';
+	s += '\t\ttype filter hook forward priority filter + 10; policy accept;\n';
+	s += '\t\tmeta nfproto != ipv4 return\n';
+	s += '\t\tiifname @lan_if oifname @lan_if return\n';
+	s += '\t\tiifname @lan_if oifname ' + iface + ' ct direction original counter name c_tunnel_up return\n';
+	s += '\t\tiifname ' + iface + ' oifname @lan_if ct direction reply counter name c_tunnel_down return\n';
+	s += '\t\tiifname ' + iface + ' oifname @lan_if counter name c_inbound_down return\n';
+	s += '\t\tiifname @lan_if oifname ' + iface + ' counter name c_inbound_up return\n';
+	s += '\t\tiifname @lan_if ct direction original counter name c_direct_up return\n';
+	s += '\t\toifname @lan_if ct direction reply counter name c_direct_down return\n';
+	s += '\t}\n';
+	return s;
+}
+
 function set_decl(name, typ, flags, elems) {
 	let s = '\tset ' + name + ' {\n\t\ttype ' + typ + ';\n';
 	if (flags)
@@ -87,7 +124,7 @@ function set_decl(name, typ, flags, elems) {
 	return s;
 }
 
-// ctx: { lan_if[], bypass4[], gs_tunnel4[], gs_direct4[], dev_tunnel[], dev_direct[], socket_mark }
+// ctx: { lan_if[], bypass4[], gs_tunnel4[], gs_direct4[], dev_tunnel[], dev_direct[], socket_mark, counters }
 export function nft_full(cfg, plan, ctx) {
 	let gi = { block: [], tunnel: [], direct: [] };
 	for (let a in [ 'block', 'tunnel', 'direct' ])
@@ -109,7 +146,7 @@ export function nft_full(cfg, plan, ctx) {
 	s += set_decl('gs_direct4', 'ipv4_addr', null, ctx.gs_direct4);
 	s += set_decl('dev_tunnel', 'ether_addr', null, ctx.dev_tunnel);
 	s += set_decl('dev_direct', 'ether_addr', null, ctx.dev_direct);
-	s += '\tcounter c_tunnel { }\n\tcounter c_direct { }\n\tcounter c_block { }\n\tcounter c_inbound { }\n\n';
+	s += counter_decls([ ...CONN_COUNTERS, ...TRAFFIC_COUNTERS ], ctx.counters);
 
 	s += '\tchain prerouting {\n';
 	s += '\t\ttype filter hook prerouting priority mangle; policy accept;\n';
@@ -145,6 +182,7 @@ export function nft_full(cfg, plan, ctx) {
 	s += '\t\t' + set_meta(dflt) + '\n';
 	s += '\t}\n';
 	s += persist_chain();
+	s += stats_chain(iface);
 	s += output_chain(ctx);
 
 	if (cfg.dns_hijack) {
@@ -164,7 +202,7 @@ export function nft_minimal(cfg, ctx) {
 	let s = 'table inet ' + C.NFT_TABLE + '\ndelete table inet ' + C.NFT_TABLE + '\n';
 	s += 'table inet ' + C.NFT_TABLE + ' {\n';
 	s += set_decl('lan_if', 'ifname', null, map(ctx.lan_if, q));
-	s += '\tcounter c_inbound { }\n\n';
+	s += counter_decls([ 'c_inbound', ...TRAFFIC_COUNTERS ], ctx.counters);
 	s += '\tchain prerouting {\n';
 	s += '\t\ttype filter hook prerouting priority mangle; policy accept;\n';
 	s += '\t\tmeta nfproto != ipv4 return\n';
@@ -174,6 +212,7 @@ export function nft_minimal(cfg, ctx) {
 	s += '\t\tiifname @lan_if ' + ct_is(C.MARK_TUNNEL) + ' ' + set_meta(C.MARK_TUNNEL) + ' return\n';
 	s += '\t}\n';
 	s += persist_chain();
+	s += stats_chain(iface);
 	s += output_chain(ctx);
 	s += '}\n';
 	return s;

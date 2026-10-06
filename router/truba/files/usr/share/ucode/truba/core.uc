@@ -45,6 +45,22 @@ function set_elements(name) {
 	return out;
 }
 
+// Счётчики таблицы Трубы под своими именами (c_…); пусто, если таблицы нет.
+// Объявлена до apply(): ucode не поднимает объявления функций.
+function counters_raw() {
+	let r = U.run('nft -j list counters table inet ' + C.NFT_TABLE);
+	let out = {};
+	if (r.code != 0)
+		return out;
+	try {
+		for (let o in json(r.out)?.nftables ?? [])
+			if (o.counter)
+				out[o.counter.name] = { packets: o.counter.packets, bytes: o.counter.bytes };
+	}
+	catch (e) { }
+	return out;
+}
+
 // Умеет ли ядро «socket mark» (kmod-nft-socket). nft -c проверяет правило в ядре,
 // ничего не создавая: без модуля таблица Трубы не загрузилась бы целиком.
 function socket_mark_ok() {
@@ -84,7 +100,9 @@ export function apply() {
 	let st = N.iface_up(cfg.iface);
 	let prev = U.read_json(C.APPLIED_FILE, {});
 	let warnings = [];
-	let ctx = { lan_if: F.zone_devices(cfg.zones), bypass4: bypass4(vps, tinfo), socket_mark: socket_mark_ok(), vps };
+	// Счётчики прежней таблицы переносятся в новую: учёт идёт с запуска службы, а не с последнего применения.
+	let ctx = { lan_if: F.zone_devices(cfg.zones), bypass4: bypass4(vps, tinfo), socket_mark: socket_mark_ok(), vps,
+	            counters: counters_raw() };
 	if (!ctx.socket_mark)
 		U.warn_log('nft: нет socket mark (kmod-nft-socket) — свои сокеты Роутера с меткой Туннеля не защищены от чужих цепочек output');
 
@@ -94,7 +112,8 @@ export function apply() {
 		push(warnings, 'tunnel_not_configured');
 
 	let applied = { routing: cfg.routing, mode: cfg.mode, time: time(), vps, warnings, missing: [],
-	                socket_mark: ctx.socket_mark };
+	                socket_mark: ctx.socket_mark,
+	                counters_since: (length(ctx.counters) && prev.counters_since) ? prev.counters_since : time() };
 	let text;
 
 	if (cfg.routing) {
@@ -342,18 +361,52 @@ function list_info(dir, file) {
 
 // ---- Состояние ----
 
-function counters() {
-	let r = U.run('nft -j list counters table inet ' + C.NFT_TABLE);
+function counters(raw) {
 	let out = {};
-	if (r.code != 0)
-		return out;
-	try {
-		for (let o in json(r.out)?.nftables ?? [])
-			if (o.counter)
-				out[replace(o.counter.name, /^c_/, '')] = { packets: o.counter.packets, bytes: o.counter.bytes };
-	}
-	catch (e) { }
+	for (let n in raw)
+		out[replace(n, /^c_/, '')] = raw[n];
 	return out;
+}
+
+// Трафик устройств по Действиям, байты: down — к устройствам, up — от них.
+function traffic(raw) {
+	let b = (n) => raw['c_' + n]?.bytes ?? 0;
+	return {
+		tunnel: { down: b('tunnel_down'), up: b('tunnel_up') },
+		direct: { down: b('direct_down'), up: b('direct_up') },
+		inbound: { down: b('inbound_down'), up: b('inbound_up') },
+	};
+}
+
+// Соседи, которые искажают учёт или проверки Трубы.
+function neighbours() {
+	let c = cursor();
+	let res = { offload: false, offload_hw: false, openclash_fakeip: false };
+	if (c.load('firewall'))
+		c.foreach('firewall', 'defaults', (s) => {
+			res.offload ||= (s.flow_offloading == '1');
+			res.offload_hw ||= (s.flow_offloading_hw == '1');
+		});
+	if (stat('/etc/config/openclash') && c.load('openclash'))
+		res.openclash_fakeip = c.get('openclash', 'config', 'enable') == '1' &&
+			match(c.get('openclash', 'config', 'en_mode') ?? '', /fake-ip/) != null;
+	return res;
+}
+
+// UPnP на Туннеле: включён ли в Трубе, стоит ли miniupnpd, работает ли, его пробросы.
+function upnp_info(cfg) {
+	let res = { enabled: cfg.upnp, installed: stat('/etc/init.d/miniupnpd') != null,
+	            running: system('pidof miniupnpd >/dev/null 2>&1') == 0, leases: [] };
+	let c = cursor();
+	let file = (stat('/etc/config/upnpd') && c.load('upnpd')) ? c.get('upnpd', 'config', 'upnp_lease_file') : null;
+	// Строка: ПРОТОКОЛ:внешний порт:IP устройства:порт устройства:срок (unix):описание
+	for (let l in split(trim(readfile(file ?? '/var/run/miniupnpd.leases') ?? ''), '\n')) {
+		let f = split(l, ':', 6);
+		if (length(f) >= 4)
+			push(res.leases, { proto: f[0], ext_port: int(f[1]), ip: f[2], port: int(f[3]),
+			                   expires: int(f[4] ?? 0), descr: f[5] ?? '' });
+	}
+	return res;
 }
 
 function awg_peer(dev) {
@@ -380,6 +433,7 @@ export function status() {
 	let tinfo = F.tunnel_info(cfg.iface);
 	let st = N.iface_up(cfg.iface);
 	let applied = U.read_json(C.APPLIED_FILE, null);
+	let raw = counters_raw();
 	return {
 		routing: cfg.routing,
 		mode: cfg.mode,
@@ -400,7 +454,12 @@ export function status() {
 		vps_ip: applied?.vps ?? F.vps_ip(tinfo),
 		health: health_state(),
 		table: U.run('ip -4 route show table ' + C.RT_TABLE).out,
-		counters: counters(),
+		// counters — сырые счётчики (connections: tunnel/direct/inbound — новые соединения,
+		// block — отброшенные пакеты), traffic — байты трафика устройств; отсчёт с applied.counters_since.
+		counters: counters(raw),
+		traffic: traffic(raw),
+		neighbours: neighbours(),
+		upnp: upnp_info(cfg),
 		mosdns: system('pidof mosdns >/dev/null 2>&1') == 0,
 		lists: {
 			geoip: list_info(C.LISTS_DIR, C.DAT_FILES.geoip),

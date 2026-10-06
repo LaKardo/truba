@@ -95,7 +95,7 @@ return view.extend({
 				out
 			]),
 			E('div', { 'class': 'cbi-section' }, [
-				E('h3', {}, _('Log')),
+				E('h3', {}, _('Log: Truba and mosdns')),
 				E('button', { 'class': 'btn cbi-button', 'click': ui.createHandlerFn(this, loadLog) }, _('Refresh')),
 				logBox
 			])

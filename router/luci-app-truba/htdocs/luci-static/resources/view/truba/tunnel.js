@@ -169,6 +169,11 @@ return view.extend({
 				o = s.taboption('obfs', form.Value, 'awg_' + k, k.toUpperCase());
 				o.datatype = 'uinteger';
 				o.optional = true;
+				if (k[0] == 's')
+					o.validate = function(sid, v) {
+						const hpk = this.section.formvalue(sid, 'awg_header_protection_key');
+						return (hpk && v !== '' && +v < 12) ? _('With header protection S1–S4 must be at least 12') : true;
+					};
 			}
 			for (let k of [ 'h1', 'h2', 'h3', 'h4' ]) {
 				o = s.taboption('obfs', form.Value, 'awg_' + k, k.toUpperCase(), k == 'h1' ? _('A number or a range «from-to»; must match the Truba.') : null);
@@ -178,6 +183,16 @@ return view.extend({
 				o = s.taboption('obfs', form.Value, 'awg_' + k, k.toUpperCase(), k == 'i1' ? _('Decoy packets before the handshake (CPS format); may differ from the Truba.') : null);
 				o.optional = true;
 			}
+
+			// AmneziaWG 3.1. Ключ и флаги приходят импортом router.conf; здесь — видеть и переключать.
+			o = s.taboption('obfs', form.Value, 'awg_header_protection_key', _('Header protection key'),
+				_('AmneziaWG 3.1: encrypts the header fields WireGuard is recognised by. Must match the Truba and needs S1–S4 of at least 12; comes with router.conf.'));
+			o.password = true;
+			o.optional = true;
+			o = s.taboption('obfs', form.Flag, 'awg_disable_cookies', _('Disable cookies'),
+				_('AmneziaWG 3.1: no cookie replies under load. Not needed with a single peer, and their size is recognisable.'));
+			o = s.taboption('obfs', form.Flag, 'awg_random_trailers', _('Random trailers'),
+				_('AmneziaWG 3.1, in reserve against DPI by packet sizes: pads packets to a random length, costly in traffic for small packets. Must match the Truba: on the VPS run «install-vps.sh random-trailers on» or «off» at the same time.'));
 
 			s = mn.section(form.TypedSection, 'amneziawg_' + iface, _('Truba (peer)'));
 			s.anonymous = true;

@@ -175,9 +175,6 @@ msgstr "Показывает, какая Категория и какое Дей
 msgid "Check"
 msgstr "Проверить"
 
-msgid "Log"
-msgstr "Журнал"
-
 msgid "Refresh"
 msgstr "Обновить"
 
@@ -273,9 +270,6 @@ msgstr "Изменить пробросы портов"
 
 msgid "Choose source zone «truba»."
 msgstr "Выберите зону-источник «truba»."
-
-msgid "Inbound connections via the tunnel: %s. Replies always go back through the tunnel, even to Russian clients."
-msgstr "Входящих соединений через Туннель: %s. Ответы всегда возвращаются через Туннель, даже российским клиентам."
 
 msgid "Update in progress…"
 msgstr "Идёт обновление…"
@@ -391,9 +385,6 @@ msgstr "обход напрямую (маршрута через Туннель 
 msgid "Last handshake"
 msgstr "Последний handshake"
 
-msgid "Received / sent"
-msgstr "Получено / отправлено"
-
 msgid "Truba IP (VPS)"
 msgstr "IP Трубы (VPS)"
 
@@ -433,9 +424,6 @@ msgstr "работает"
 msgid "not running"
 msgstr "не запущен"
 
-msgid "Traffic by action"
-msgstr "Трафик по Действиям"
-
 msgid "Blocked"
 msgstr "Заблокировано"
 
@@ -444,9 +432,6 @@ msgstr "пакетов"
 
 msgid "Inbound via Truba"
 msgstr "Входящие через Трубу"
-
-msgid "connections"
-msgstr "соединений"
 
 msgid "Rule sets"
 msgstr "Наборы правил"
@@ -675,3 +660,114 @@ msgstr "Туннель ещё не настроен. Запустите install-
 
 msgid "Import .conf"
 msgstr "Импорт .conf"
+
+msgid "bit/s"
+msgstr "бит/с"
+
+msgid "kbit/s"
+msgstr "Кбит/с"
+
+msgid "Mbit/s"
+msgstr "Мбит/с"
+
+msgid "Gbit/s"
+msgstr "Гбит/с"
+
+msgid "Log: Truba and mosdns"
+msgstr "Журнал: Труба и mosdns"
+
+msgid "UPnP is enabled, but miniupnpd is not installed: install luci-app-upnp."
+msgstr "UPnP включён, но miniupnpd не установлен: поставьте luci-app-upnp."
+
+msgid "UPnP is enabled, but miniupnpd is not running."
+msgstr "UPnP включён, но miniupnpd не запущен."
+
+msgid "no expiry"
+msgstr "бессрочно"
+
+msgid "Active UPnP / NAT-PMP mappings"
+msgstr "Действующие пробросы UPnP / NAT-PMP"
+
+msgid "Description"
+msgstr "Описание"
+
+msgid "Expires"
+msgstr "Истекает"
+
+msgid "No active mappings."
+msgstr "Пробросов нет."
+
+msgid "Since %s:"
+msgstr "С %s:"
+
+msgid "%s inbound connections via the tunnel; %s to devices, %s from devices."
+msgstr "входящих соединений через Туннель — %s; к устройствам %s, от устройств %s."
+
+msgid "Replies always go back through the tunnel, even to Russian clients."
+msgstr "Ответы всегда возвращаются через Туннель, даже российским клиентам."
+
+msgid "Traffic of devices in the routed zones since %s. The router's own traffic (DNS, list downloads) is not included."
+msgstr "Трафик устройств из маршрутизируемых зон с %s. Собственный трафик Роутера (DNS, загрузка списков) не входит."
+
+msgid "Traffic of devices in the routed zones. The router's own traffic (DNS, list downloads) is not included."
+msgstr "Трафик устройств из маршрутизируемых зон. Собственный трафик Роутера (DNS, загрузка списков) не входит."
+
+msgid "To devices"
+msgstr "К устройствам"
+
+msgid "From devices"
+msgstr "От устройств"
+
+msgid "Now"
+msgstr "Сейчас"
+
+msgid "Tunnel: received / sent"
+msgstr "Туннель: получено / отправлено"
+
+msgid "since the interface came up, including the router's own traffic"
+msgstr "с подъёма интерфейса, вместе с трафиком самого Роутера"
+
+msgid "now %s"
+msgstr "сейчас %s"
+
+msgid "speed after the next update"
+msgstr "скорость — после следующего обновления"
+
+msgid "New connections"
+msgstr "Новые соединения"
+
+msgid "since %s"
+msgstr "с %s"
+
+msgid "Software flow offloading is on (Network → Firewall): packets of offloaded connections bypass the Truba counters, so device traffic is undercounted."
+msgstr "Включено программное ускорение (Сеть → Межсетевой экран): пакеты ускоренных соединений идут мимо счётчиков Трубы, трафик устройств посчитан не полностью."
+
+msgid "OpenClash runs in fake-ip mode: «Check NAT» may report a problem although full cone NAT works."
+msgstr "OpenClash работает в режиме fake-ip: «Проверить NAT» может показать проблему, хотя Full cone NAT работает."
+
+msgid "UPnP is enabled on the Inbound tab, but miniupnpd is not installed: install luci-app-upnp."
+msgstr "UPnP включён на вкладке «Входящие», но miniupnpd не установлен: поставьте luci-app-upnp."
+
+msgid "Device traffic"
+msgstr "Трафик устройств"
+
+msgid "With header protection S1–S4 must be at least 12"
+msgstr "С защитой заголовков S1–S4 должны быть не меньше 12"
+
+msgid "Header protection key"
+msgstr "Ключ защиты заголовков"
+
+msgid "AmneziaWG 3.1: encrypts the header fields WireGuard is recognised by. Must match the Truba and needs S1–S4 of at least 12; comes with router.conf."
+msgstr "AmneziaWG 3.1: шифрует поля заголовка, по которым узнают WireGuard. Должен совпадать с Трубой, нужны S1–S4 не меньше 12; приходит с router.conf."
+
+msgid "Disable cookies"
+msgstr "Без ответов cookie"
+
+msgid "AmneziaWG 3.1: no cookie replies under load. Not needed with a single peer, and their size is recognisable."
+msgstr "AmneziaWG 3.1: не отвечать cookie под нагрузкой. С одним пиром они не нужны, а их размер узнаваем."
+
+msgid "Random trailers"
+msgstr "Случайные хвосты (RandomTrailers)"
+
+msgid "AmneziaWG 3.1, in reserve against DPI by packet sizes: pads packets to a random length, costly in traffic for small packets. Must match the Truba: on the VPS run «install-vps.sh random-trailers on» or «off» at the same time."
+msgstr "AmneziaWG 3.1, запас против DPI по размерам пакетов: добивает пакеты до случайной длины, дорого по трафику на мелких пакетах. Должен совпадать с Трубой: одновременно на VPS выполните «install-vps.sh random-trailers on» или «off»."
