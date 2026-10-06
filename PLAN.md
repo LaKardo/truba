@@ -744,7 +744,7 @@ truba/
 
 ### 6.2 `build.yml`
 
-1. Скачать ImmortalWrt SDK `25.12.x` для `mediatek/filogic` с `downloads.immortalwrt.org`.
+1. Скачать ImmortalWrt SDK `25.12.x` для `mediatek/filogic` с `downloads.immortalwrt.org`. Архив хранится в кэше GitHub Actions по контрольной сумме из `sha256sums`: сервер ImmortalWrt бывает медленным, а архив одной версии не меняется.
 2. Решить, собирать ли AmneziaWG. Отпечаток — `router/awg/*` и `AWG_BUILD_REV` в workflow; в опубликованном фиде он лежит в `awg.json` рядом с пакетами. Совпал — `kmod-amneziawg`, `amneziawg-tools`, `luci-proto-amneziawg` берутся из фида этой же версии ImmortalWrt (модуль ядра собран под то же ядро). Полная сборка — при новой версии ImmortalWrt, смене источников AWG или вручную (`full`).
 3. Подключить фиды `base` и `luci` (для полной сборки AmneziaWG ещё `packages` и `awg-openwrt` на зафиксированном коммите) и локальный фид `router/`.
 4. `make package/<пакет>/compile` для нужных пакетов. Зависимости `truba` и `luci-app-truba` записаны в `EXTRA_DEPENDS`: SDK кладёт их в метаданные, но не компилирует (раньше он собирал mosdns вместе с Go, curl, openssl, luci-base и выбрасывал). CI сверяет зависимости готовых пакетов с Makefile.
