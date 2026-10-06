@@ -32,8 +32,8 @@ fi
 if apk add kmod-amneziawg >/dev/null 2>&1; then
 	log "kmod-amneziawg установлен для ${VERSION}"
 else
-	log "под ImmortalWrt ${VERSION} ещё нет kmod-amneziawg — ставлю amneziawg-go (запасной вариант)"
-	apk add amneziawg-go >/dev/null 2>&1 || { log "amneziawg-go тоже недоступен"; exit 1; }
+	# Остальное всё равно ставим: служба и интерфейс покажут, что Туннеля нет.
+	log "под ImmortalWrt ${VERSION} в фиде ещё нет kmod-amneziawg — Туннель не поднимется. Когда сборка появится: apk update && apk add kmod-amneziawg && /etc/init.d/network restart"
 fi
 
 PKGS="amneziawg-tools luci-proto-amneziawg truba luci-app-truba"

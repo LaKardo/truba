@@ -2,7 +2,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=truba
 PKG_VERSION:=1.0.0
-PKG_RELEASE:=7
+PKG_RELEASE:=8
 PKG_LICENSE:=Apache-2.0
 
 include $(INCLUDE_DIR)/package.mk
@@ -13,20 +13,24 @@ define Package/truba
   SUBMENU:=VPN
   TITLE:=Truba: home network through your own VPS (AmneziaWG, full cone, geoip/geosite routing)
   PKGARCH:=all
-  DEPENDS:= \
-	+amneziawg-tools \
-	+mosdns \
-	+curl \
-	+ip-full \
-	+kmod-nft-fullcone \
-	+kmod-nft-socket \
-	+ucode \
-	+ucode-mod-fs \
-	+ucode-mod-uci \
-	+ucode-mod-ubus \
-	+ucode-mod-uloop \
-	+ucode-mod-math \
-	+ucode-mod-socket
+  # Зависимости — только в метаданных пакета (EXTRA_DEPENDS), а не в DEPENDS: иначе
+  # SDK перед упаковкой компилирует их все из исходников (mosdns вместе с Go, curl,
+  # openssl…) и выбрасывает — роутер берёт их из фида ImmortalWrt. Сборка apk требует
+  # у EXTRA_DEPENDS ограничение версии; «>=0» выполняется для любой. CI сверяет итог.
+  EXTRA_DEPENDS:= \
+	amneziawg-tools (>=0), \
+	mosdns (>=0), \
+	curl (>=0), \
+	ip-full (>=0), \
+	kmod-nft-fullcone (>=0), \
+	kmod-nft-socket (>=0), \
+	ucode (>=0), \
+	ucode-mod-fs (>=0), \
+	ucode-mod-uci (>=0), \
+	ucode-mod-ubus (>=0), \
+	ucode-mod-uloop (>=0), \
+	ucode-mod-math (>=0), \
+	ucode-mod-socket (>=0)
 endef
 
 define Package/truba/description
