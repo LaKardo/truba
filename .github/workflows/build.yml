@@ -165,8 +165,9 @@ jobs:
           cp -a router/truba router/luci-app-truba "$feed/"
 
           cd sdk
-          grep -E "^src-[a-z-]+ ($feeds) " feeds.conf.default > feeds.conf
-          [ "$(grep -cE '^src-[a-z-]+ (base|luci) ' feeds.conf)" = 2 ] || { cat feeds.conf.default; exit 1; }
+          # Строка base в SDK — «src-git --root=package base …»: между типом и именем бывают параметры.
+          grep -E "^src-[a-z-]+( --[^ ]+)* ($feeds) " feeds.conf.default > feeds.conf
+          [ "$(grep -cE '^src-[a-z-]+( --[^ ]+)* (base|luci) ' feeds.conf)" = 2 ] || { cat feeds.conf.default; exit 1; }
           echo "src-link truba $feed" >> feeds.conf
           cat feeds.conf
           ./scripts/feeds update -a >/dev/null
