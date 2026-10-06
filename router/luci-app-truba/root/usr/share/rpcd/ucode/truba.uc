@@ -34,6 +34,12 @@ const methods = {
 		}
 	},
 
+	sets: {
+		call: function() {
+			return truba('sets');
+		}
+	},
+
 	check: {
 		args: { target: 'target', mac: 'mac' },
 		call: function(req) {

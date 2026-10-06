@@ -124,13 +124,15 @@ function set_decl(name, typ, flags, elems) {
 	return s;
 }
 
-// ctx: { lan_if[], bypass4[], gs_tunnel4[], gs_direct4[], dev_tunnel[], dev_direct[], socket_mark, counters }
+// ctx: { lan_if[], bypass4[], gs_tunnel4[], gs_direct4[], dev_tunnel[], dev_direct[], socket_mark, counters }.
+// Заполняет ctx.set_sizes — число подсетей geoip по Действиям: из ядра огромный набор читать дорого.
 export function nft_full(cfg, plan, ctx) {
 	let gi = { block: [], tunnel: [], direct: [] };
 	for (let a in [ 'block', 'tunnel', 'direct' ])
 		for (let tag in plan.geoip[a])
 			for (let cidr in D.geoip_cidrs(tag))
 				push(gi[a], cidr);
+	ctx.set_sizes = { block: length(gi.block), tunnel: length(gi.tunnel), direct: length(gi.direct) };
 
 	let iface = q(cfg.iface);
 	let dflt = (plan.mode_default == 'tunnel') ? C.MARK_TUNNEL : C.MARK_DIRECT;
@@ -291,5 +293,10 @@ export function mosdns(cfg, plan, router_hosts) {
 	push(P, { tag: 'udp_in', type: 'udp_server', args: { entry: 'main', listen } });
 	push(P, { tag: 'tcp_in', type: 'tcp_server', args: { entry: 'main', listen } });
 
-	return { log: { level: 'warn' }, plugins: P };
+	// API — ради счётчиков кэша (/metrics) на «Обзоре». Только 127.0.0.1: там же mosdns отдаёт
+	// и /debug/pprof, снаружи Роутера их не видно. Нет адреса — порт занят, без API.
+	let conf = { log: { level: 'warn' }, plugins: P };
+	if (cfg.dns.api)
+		conf.api = { http: cfg.dns.api };
+	return conf;
 };

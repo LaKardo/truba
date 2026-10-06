@@ -2,10 +2,12 @@
 //   node tests/luci/check.mjs            — проверить
 //   node tests/luci/check.mjs --pot      — напечатать шаблон .pot
 import { readFileSync, readdirSync, statSync } from 'node:fs';
-import { join, relative } from 'node:path';
+import { join, relative, sep } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const root = new URL('../../router/luci-app-truba/', import.meta.url).pathname;
+const root = fileURLToPath(new URL('../../router/luci-app-truba/', import.meta.url));
 const files = [];
+const rel = (f) => relative(root, f).split(sep).join('/');
 (function walk(d) {
 	for (const f of readdirSync(d)) {
 		const p = join(d, f);
@@ -23,7 +25,7 @@ for (const f of files) {
 		// Представления LuCI возвращают значение с верхнего уровня — компилируем как тело функции.
 		new Function(src);
 	} catch (e) {
-		console.log(`FAIL  синтаксис ${relative(root, f)}: ${e.message}`);
+		console.log(`FAIL  синтаксис ${rel(f)}: ${e.message}`);
 		fails++;
 		continue;
 	}
@@ -31,7 +33,7 @@ for (const f of files) {
 	let m;
 	while ((m = re.exec(src))) {
 		const s = m[2].replace(/\\'/g, "'").replace(/\\"/g, '"');
-		if (!strings.has(s)) strings.set(s, relative(root, f));
+		if (!strings.has(s)) strings.set(s, rel(f));
 	}
 }
 

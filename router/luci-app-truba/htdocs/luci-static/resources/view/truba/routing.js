@@ -77,22 +77,26 @@ function renderTable(mode, cats, filterBox) {
 
 return view.extend({
 	load: function() {
-		return Promise.all([ common.callCategories(), uci.load('truba'), uci.load('firewall') ]);
+		return Promise.all([ common.callCategories(), uci.load('truba'), uci.load('firewall'), common.callLeases().catch(() => ({})) ]);
 	},
 
-	handleReset: function(mode, starting) {
+	// Не handleReset: так LuCI называет обработчик кнопки «Сброс» внизу страницы.
+	handleResetRules: function(mode, starting) {
 		if (!confirm(_('Reset all category actions of this mode to the starting settings?')))
 			return;
-		for (let s of ruleSections(mode))
-			uci.remove('truba', s['.name']);
-		for (let r of starting.filter((x) => x.mode == mode)) {
-			const sid = uci.add('truba', 'rule');
-			uci.set('truba', sid, 'mode', r.mode);
-			uci.set('truba', sid, 'set', r.set);
-			uci.set('truba', sid, 'tag', r.tag);
-			uci.set('truba', sid, 'action', r.action);
-		}
-		return uci.save().then(() => window.location.reload());
+		// Сначала — несохранённые правки формы (Политики устройств): перезагрузка их потеряла бы.
+		return this.map.parse().then(() => {
+			for (let s of ruleSections(mode))
+				uci.remove('truba', s['.name']);
+			for (let r of starting.filter((x) => x.mode == mode)) {
+				const sid = uci.add('truba', 'rule');
+				uci.set('truba', sid, 'mode', r.mode);
+				uci.set('truba', sid, 'set', r.set);
+				uci.set('truba', sid, 'tag', r.tag);
+				uci.set('truba', sid, 'action', r.action);
+			}
+			return uci.save();
+		}).then(() => window.location.reload());
 	},
 
 	render: function(data) {
@@ -103,7 +107,7 @@ return view.extend({
 		for (let c of cats)
 			present[c.set + ':' + c.tag] = true;
 
-		const m = new form.Map('truba', _('Routing'),
+		const m = this.map = new form.Map('truba', _('Routing'),
 			_('Which traffic goes through the tunnel. Categories are taken from geoip.dat and geosite.dat as they are; new categories are never created.'));
 
 		const s = m.section(form.NamedSection, 'main', 'main');
@@ -126,6 +130,39 @@ return view.extend({
 		o.nocreate = true;
 		o.default = 'lan';
 
+		// Исключения для устройств — до Категорий: политика устройства сильнее их.
+		const leases = (data[3] && data[3].dhcp_leases) || [];
+		const ds = m.section(form.GridSection, 'device', _('Device policies'),
+			_('Per-device exceptions. A device is recognised by its MAC address, also behind roamd mesh nodes (4-address mode keeps client MACs). Block still applies to all devices.'));
+		ds.anonymous = true;
+		ds.addremove = true;
+		ds.sortable = true;
+		ds.nodescriptions = true;
+
+		o = ds.option(form.Flag, 'enabled', _('Enabled'));
+		o.default = '1';
+		o.rmempty = false;
+		o.editable = true;
+
+		o = ds.option(form.Value, 'name', _('Name'));
+		o.rmempty = false;
+
+		o = ds.option(form.Value, 'mac', _('MAC address'));
+		o.datatype = 'macaddr';
+		o.rmempty = false;
+		for (let l of leases) {
+			if (l.macaddr)
+				o.value(l.macaddr.toUpperCase(), '%s (%s, %s)'.format(l.macaddr.toUpperCase(), l.hostname || '?', l.ipaddr || '?'));
+		}
+
+		o = ds.option(form.ListValue, 'policy', _('Policy'));
+		o.value('tunnel', _('All via tunnel'));
+		o.value('direct', _('All direct'));
+		o.value('rules', _('By rules'));
+		o.default = 'tunnel';
+		o.editable = true;
+		o.description = _('«All via tunnel» is recommended for game consoles: then all their traffic gets the Truba IP and full cone NAT.');
+
 		const sections = [];
 		for (let mode of [ 'all', 'selective' ]) {
 			const missing = ruleSections(mode).filter((r) => !present[r.set + ':' + r.tag]);
@@ -142,11 +179,11 @@ return view.extend({
 					_('Configured but missing from the current rule set (ignored): '),
 					missing.map((r) => '%s:%s'.format(r.set, r.tag)).join(', ')
 				]) : '',
-				cats.length ? '' : E('div', { 'class': 'alert-message' }, _('Rule sets are not downloaded yet — see the Lists tab.')),
+				cats.length ? '' : E('div', { 'class': 'alert-message' }, _('Rule sets are not downloaded yet — see the DNS & lists tab.')),
 				E('div', { 'style': 'display:flex;gap:1em;align-items:center;margin:.5em 0' }, [
 					filterBox.text,
 					E('label', {}, [ filterBox.only, ' ', _('only with an explicit action') ]),
-					E('button', { 'class': 'btn cbi-button-reset', 'click': ui.createHandlerFn(this, 'handleReset', mode, info.starting || []) },
+					E('button', { 'class': 'btn cbi-button-reset', 'click': ui.createHandlerFn(this, 'handleResetRules', mode, info.starting || []) },
 						_('Reset to starting settings'))
 				]),
 				renderTable(mode, cats, filterBox)

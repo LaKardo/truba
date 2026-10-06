@@ -59,6 +59,9 @@ export function load() {
 			probe: w.probe ?? '',
 		},
 	};
+	// HTTP API mosdns (счётчики кэша для «Обзора») — на соседнем с DNS порту, только 127.0.0.1.
+	let p = cfg.dns.port;
+	cfg.dns.api = sprintf('127.0.0.1:%d', (p < 65535) ? p + 1 : p - 1);
 
 	c.foreach('truba', 'rule', (s) => {
 		if (!s.set || !s.tag || !(s.action in C.ACTIONS))

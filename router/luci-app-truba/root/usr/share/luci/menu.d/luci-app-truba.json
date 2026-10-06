@@ -25,29 +25,25 @@
 		"order": 30,
 		"action": { "type": "view", "path": "truba/routing" }
 	},
-	"admin/services/truba/devices": {
-		"title": "Devices",
-		"order": 40,
-		"action": { "type": "view", "path": "truba/devices" }
-	},
 	"admin/services/truba/dns": {
-		"title": "DNS",
-		"order": 50,
+		"title": "DNS & lists",
+		"order": 40,
 		"action": { "type": "view", "path": "truba/dns" }
-	},
-	"admin/services/truba/lists": {
-		"title": "Lists",
-		"order": 60,
-		"action": { "type": "view", "path": "truba/lists" }
 	},
 	"admin/services/truba/inbound": {
 		"title": "Inbound",
-		"order": 70,
+		"order": 50,
 		"action": { "type": "view", "path": "truba/inbound" }
 	},
 	"admin/services/truba/diagnostics": {
 		"title": "Diagnostics",
-		"order": 80,
+		"order": 60,
 		"action": { "type": "view", "path": "truba/diagnostics" }
+	},
+	"admin/services/truba/devices": {
+		"action": { "type": "alias", "path": "admin/services/truba/routing" }
+	},
+	"admin/services/truba/lists": {
+		"action": { "type": "alias", "path": "admin/services/truba/dns" }
 	}
 }

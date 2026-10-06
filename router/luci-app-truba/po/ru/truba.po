@@ -16,9 +16,6 @@ msgstr "Туннель"
 msgid "Routing"
 msgstr "Маршрутизация"
 
-msgid "Devices"
-msgstr "Устройства"
-
 msgid "DNS"
 msgstr "DNS"
 
@@ -181,9 +178,6 @@ msgstr "Обновить"
 msgid "Router DNS goes through mosdns: it recognises geosite categories, picks the upstream and puts resolved IPs into the routing sets."
 msgstr "DNS Роутера идёт через mosdns: он узнаёт Категории geosite, выбирает DNS-сервер и кладёт полученные IP в наборы маршрутизации."
 
-msgid "Upstream servers"
-msgstr "DNS-серверы"
-
 msgid "For «Tunnel»"
 msgstr "Для «Туннель»"
 
@@ -213,12 +207,6 @@ msgstr "Истёкший ответ отдаётся сразу и обновл�
 
 msgid "mosdns port"
 msgstr "Порт mosdns"
-
-msgid "Local port; dnsmasq forwards requests here."
-msgstr "Локальный порт, на который dnsmasq пересылает запросы."
-
-msgid "Interception"
-msgstr "Перехват"
 
 msgid "Intercept DNS (port 53)"
 msgstr "Перехватывать DNS (порт 53)"
@@ -283,26 +271,17 @@ msgstr "Текущая версия"
 msgid "Previous version"
 msgstr "Предыдущая версия"
 
-msgid "%s: %s (via %s)"
-msgstr "%s: %s (через %s)"
-
 msgid "updated"
 msgstr "обновлён"
 
 msgid "no changes"
 msgstr "без изменений"
 
-msgid "%s: failed — %s"
-msgstr "%s: ошибка — %s"
-
 msgid "Last check: %s"
 msgstr "Последняя проверка: %s"
 
 msgid "geoip.dat and geosite.dat from kirilllavrov/geoip-builder and kirilllavrov/geosite-builder. Files are used unchanged; the checksum is verified before every replacement."
 msgstr "geoip.dat и geosite.dat из kirilllavrov/geoip-builder и kirilllavrov/geosite-builder. Файлы используются без изменений; контрольная сумма проверяется перед каждой заменой."
-
-msgid "Sources and schedule"
-msgstr "Источники и расписание"
 
 msgid "geoip.dat"
 msgstr "geoip.dat"
@@ -430,9 +409,6 @@ msgstr "пакетов"
 msgid "Inbound via Truba"
 msgstr "Входящие через Трубу"
 
-msgid "Rule sets"
-msgstr "Наборы правил"
-
 msgid "missing"
 msgstr "нет"
 
@@ -483,9 +459,6 @@ msgstr "Поднимает или опускает интерфейс AmneziaWG 
 
 msgid "Distributes traffic by actions. When off, everything goes direct, but inbound connections via the Truba IP keep working."
 msgstr "Распределяет трафик по Действиям. Когда выключена, всё идёт напрямую, но входящие через IP Трубы продолжают работать."
-
-msgid "Status"
-msgstr "Состояние"
 
 msgid "NAT check"
 msgstr "Проверка NAT"
@@ -552,9 +525,6 @@ msgstr "«По режиму» = Напрямую. Через Туннель ид
 
 msgid "Configured but missing from the current rule set (ignored): "
 msgstr "Заданы в настройках, но отсутствуют в текущем Наборе правил (пропускаются): "
-
-msgid "Rule sets are not downloaded yet — see the Lists tab."
-msgstr "Наборы правил ещё не скачаны — см. вкладку «Списки»."
 
 msgid "only with an explicit action"
 msgstr "только с явным Действием"
@@ -715,26 +685,11 @@ msgstr "К устройствам"
 msgid "From devices"
 msgstr "От устройств"
 
-msgid "Now"
-msgstr "Сейчас"
-
-msgid "Tunnel: received / sent"
-msgstr "Туннель: получено / отправлено"
-
 msgid "since the interface came up, including the router's own traffic"
 msgstr "с подъёма интерфейса, вместе с трафиком самого Роутера"
 
-msgid "now %s"
-msgstr "сейчас %s"
-
-msgid "speed after the next update"
-msgstr "скорость — после следующего обновления"
-
 msgid "New connections"
 msgstr "Новые соединения"
-
-msgid "since %s"
-msgstr "с %s"
 
 msgid "Software flow offloading is on (Network → Firewall): packets of offloaded connections bypass the Truba counters, so device traffic is undercounted."
 msgstr "Включено программное ускорение (Сеть → Межсетевой экран): пакеты ускоренных соединений идут мимо счётчиков Трубы, трафик устройств посчитан не полностью."
@@ -781,9 +736,6 @@ msgstr "новее нет"
 msgid "update in progress"
 msgstr "идёт обновление"
 
-msgid "checked %s: %s"
-msgstr "проверено %s: %s"
-
 msgid "not checked yet"
 msgstr "ещё не проверялись"
 
@@ -792,3 +744,90 @@ msgstr "Наборы правил не проверялись больше 36 ч
 
 msgid "The last rule set check failed: %s"
 msgstr "Последняя проверка Наборов правил не удалась: %s"
+
+msgid "DNS & lists"
+msgstr "DNS и списки"
+
+msgid "Local port; dnsmasq forwards requests here. The next port is taken by the mosdns statistics API (127.0.0.1 only)."
+msgstr "Локальный порт; сюда dnsmasq пересылает запросы. Следующий порт занимает API статистики mosdns (только 127.0.0.1)."
+
+msgid "Rule sets are not downloaded yet — see the DNS & lists tab."
+msgstr "Наборы правил ещё не скачаны — см. вкладку «DNS и списки»."
+
+msgid "Last check"
+msgstr "Последняя проверка"
+
+msgid "%s (via %s)"
+msgstr "%s (через %s)"
+
+msgid "failed — %s"
+msgstr "ошибка — %s"
+
+msgid "10 min ago"
+msgstr "10 мин назад"
+
+msgid "now"
+msgstr "сейчас"
+
+msgid "Latency to the Truba"
+msgstr "Задержка до Трубы"
+
+msgid "Packet loss"
+msgstr "Потери"
+
+msgid "Interface traffic"
+msgstr "Через интерфейс"
+
+msgid "DNS cache"
+msgstr "Кэш DNS"
+
+msgid "Next check"
+msgstr "Следующая проверка"
+
+msgid "Set sizes"
+msgstr "В наборах"
+
+msgid "Warnings: %d"
+msgstr "Предупреждения: %d"
+
+msgid "No warnings"
+msgstr "Без предупреждений"
+
+msgid "the watchdog is off"
+msgstr "Контроль Туннеля выключен"
+
+msgid "%d ms"
+msgstr "%d мс"
+
+msgid "average %d ms"
+msgstr "в среднем %d мс"
+
+msgid "no reply"
+msgstr "нет ответа"
+
+msgid "%d%% over %d min"
+msgstr "%d%% за %d мин"
+
+msgid "not used: routing is off"
+msgstr "не нужен: Маршрутизация выключена"
+
+msgid "%d%% from cache · %d%% expired"
+msgstr "%d%% из кэша · %d%% устаревших"
+
+msgid "no queries yet"
+msgstr "запросов ещё не было"
+
+msgid "%s of %s entries · since mosdns started"
+msgstr "%s из %s записей · с запуска mosdns"
+
+msgid "downloaded %s"
+msgstr "скачан %s"
+
+msgid "automatic update is off"
+msgstr "автообновление выключено"
+
+msgid "geoip subnets: %s"
+msgstr "подсетей geoip: %s"
+
+msgid "IPs from DNS: %s"
+msgstr "IP из DNS: %s"

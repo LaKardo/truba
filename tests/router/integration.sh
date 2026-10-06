@@ -229,8 +229,16 @@ check "бэкап dnsmasq сохранён" test -f /etc/truba/state/dnsmasq.jso
 check "cron: блок обновления" grep -q 'truba update-lists' /etc/crontabs/root
 # В контейнере часовой пояс UTC: 12:00 UTC и в cron — 12:00.
 check "cron: 12:00 UTC" sh -c "[ \"$(date +%z)\" != +0000 ] || grep -q '^0 12 \* \* \* /usr/sbin/truba update-lists' /etc/crontabs/root"
+# «Следующая проверка» на «Обзоре» — по самой строке cron, в ближайшие сутки.
+NEXT="$(truba status | jsonfilter -e '@.lists.next')"
+check "status: следующий запуск обновления — в ближайшие сутки" sh -c "N=$NEXT; T=\$(date +%s); [ \"\$N\" -gt \"\$T\" ] && [ \"\$N\" -le \$((T + 86400)) ]"
+check "status: следующий запуск — в 12:00 UTC" sh -c "[ \"$(date +%z)\" != +0000 ] || [ \$(( $NEXT % 86400 )) -eq 43200 ]"
 check "mosdns запущен" pidof mosdns
 check "mosdns слушает 5335" sh -c "netstat -lnu 2>/dev/null | grep -q ':5335' || ss -lnu | grep -q ':5335'"
+# API статистики — на соседнем порту и только на 127.0.0.1: там же отладка mosdns (/debug/pprof).
+check "API mosdns: счётчики кэша на 127.0.0.1:5336" sh -c "curl -s -m 2 http://127.0.0.1:5336/metrics | grep -q '^mosdns_cache_query_total'"
+check "API mosdns не слушает внешние адреса" sh -c "L=\$(netstat -lnt | grep ':5336 '); [ -n \"\$L\" ] && ! echo \"\$L\" | grep -qv '127.0.0.1:5336'"
+check "sets: подсети geoip «Напрямую» посчитаны при применении" sh -c "[ \"\$(truba sets | jsonfilter -e '@.geoip.direct')\" -gt 0 ]"
 check "persist: решение пишется в ct mark после всех" sh -c "nft list chain inet truba persist | grep -q 'priority 300'"
 # nft печатает «& 0xff00ffff | 0x00040000» как «& 0xff04ffff | 0x00040000» — то же самое.
 check "persist: ct mark меняется только в байте Трубы" sh -c "nft list chain inet truba persist | grep -qE 'ct mark set ct mark & 0xff0[0-9a-f]ffff \| 0x00040000'"
@@ -324,6 +332,8 @@ ADS="$(sed -n '1s/^domain://p' /var/lib/truba/geosite/category-ads.txt)"
 check "AAAA → пусто" sh -c "! nslookup -type=AAAA google.com 127.0.0.1 2>/dev/null | grep -q 'has AAAA\|Address: .*:'"
 check "Блок: $ADS (category-ads) → NXDOMAIN" sh -c "nslookup $ADS 127.0.0.1 2>&1 | grep -qiE 'NXDOMAIN|can.t find'"
 check "Блок: поддомен sub.$ADS тоже" sh -c "nslookup sub.$ADS 127.0.0.1 2>&1 | grep -qiE 'NXDOMAIN|can.t find'"
+# Запросы выше прошли через кэш mosdns — «Обзор» видит их в status.
+check "status: счётчики кэша DNS" sh -c "[ \"\$(truba status | jsonfilter -e '@.dns_cache.query')\" -gt 0 ] && [ \"\$(truba status | jsonfilter -e '@.dns_cache.max')\" -eq 65536 ]"
 
 echo "== truba check"
 /usr/sbin/truba check 77.88.8.8 > /tmp/chk.json; head -c 400 /tmp/chk.json; echo
@@ -379,6 +389,8 @@ if lazy_round 0; then fail "без ленивого кэша истёкшая з
 check "mosdns: lazy_cache_ttl 0 — ленивый кэш выключен" sh -c "! grep -q lazy_cache_ttl /var/etc/truba/mosdns.json"
 if lazy_round 86400; then ok "истёкшая запись отдана из ленивого кэша, пока сервер недоступен"; else fail "ленивый кэш не отдал истёкшую запись"; fi
 check "IP из истёкшего ответа снова в gs_direct4" sh -c "nft list set inet truba gs_direct4 | grep -q 192.0.2.77"
+check "sets: IP из DNS посчитаны" sh -c "[ \"\$(truba sets | jsonfilter -e '@.dns.direct')\" -ge 1 ]"
+check "status: истёкшие ответы видны в счётчиках кэша" sh -c "[ \"\$(truba status | jsonfilter -e '@.dns_cache.lazy_hit')\" -ge 1 ]"
 # Дамп кэша в оперативной памяти: смена настройки DNS перезапускает mosdns, кэш остаётся.
 # Сервер по-прежнему выключен — ответ после перезапуска может прийти только из дампа.
 MOSDNS_PID="$(pidof mosdns)"
@@ -394,6 +406,25 @@ set_upstreams "$OLD_TUNNEL_DNS" "$OLD_DIRECT_DNS"
 uci set truba.dns.lazy_cache_ttl=86400
 uci commit truba
 check "reload (не дольше 90 с)" bounded 90 /etc/init.d/truba reload; sleep 3
+
+echo "== API mosdns: порт занят другой программой"
+# Ошибка API останавливает mosdns целиком, а с ней DNS всей сети: тогда — без API.
+OLD_DNS_PORT="$(uci -q get truba.dns.port)"
+ucode /repo/tests/router/tcp_probe.uc server 5346 >/dev/null 2>&1 & BUSY_PID=$!
+sleep 1
+uci set truba.dns.port=5345; uci commit truba
+check "reload (не дольше 90 с)" bounded 90 /etc/init.d/truba reload; sleep 3
+check "занятый порт API: в конфиге mosdns нет API" sh -c "! grep -q '\"api\"' /var/etc/truba/mosdns.json"
+MOSDNS_PID="$(pidof mosdns)"; sleep 7
+check "занятый порт API: mosdns работает и не перезапускается" sh -c "[ -n '$MOSDNS_PID' ] && [ \"\$(pidof mosdns)\" = '$MOSDNS_PID' ]"
+check "занятый порт API: mosdns слушает 5345" sh -c "netstat -lnu | grep -q '127.0.0.1:5345 '"
+check "занятый порт API: предупреждение в журнале" sh -c "logread | grep -q 'порт 127.0.0.1:5346 занят'"
+check "занятый порт API: счётчиков кэша нет" sh -c "[ -z \"\$(truba status | jsonfilter -e '@.dns_cache.query')\" ]"
+kill "$BUSY_PID"
+if [ -n "$OLD_DNS_PORT" ]; then uci set truba.dns.port="$OLD_DNS_PORT"; else uci -q delete truba.dns.port; fi
+uci commit truba
+check "reload (не дольше 90 с)" bounded 90 /etc/init.d/truba reload; sleep 3
+check "порт API свободен — API снова есть" sh -c "curl -s -m 2 http://127.0.0.1:5336/metrics | grep -q '^mosdns_cache_query_total'"
 
 echo "== Политика устройства"
 uci -q batch <<-'EOF'
@@ -412,6 +443,40 @@ else
 	check "reload (не дольше 90 с)" bounded 90 /etc/init.d/truba reload; sleep 3
 	check "gs_direct4 сохранён при перезагрузке правил" sh -c "nft list set inet truba gs_direct4 | grep -q 198.51.100.7"
 fi
+
+echo "== Контроль Туннеля: задержка и потери для «Обзора»"
+# 192.0.2.200 уходит в Туннель, но Труба его не пересылает — ответа нет.
+cat > /tmp/rtt.uc <<-'EOF'
+	import { ping_rtt } from 'truba.watchdog';
+	print(sprintf('%J %J\n', ping_rtt('awg0', '10.77.77.1'), ping_rtt('awg0', '192.0.2.200')));
+EOF
+RTT="$(ucode /tmp/rtt.uc 2>&1)"; echo "ping_rtt: $RTT"
+check "ping_rtt: задержка до Трубы через Туннель" sh -c "echo '$RTT' | grep -qE '^[0-9.]+ '"
+check "ping_rtt: нет ответа → null" sh -c "echo '$RTT' | grep -q ' null$'"
+OLD_WD_INTERVAL="$(uci -q get truba.watchdog.interval)"
+uci set truba.watchdog.enabled='1'; uci set truba.watchdog.interval='10'; uci commit truba
+check "reload (не дольше 90 с)" bounded 90 /etc/init.d/truba reload
+wd_probes() { [ "$(jsonfilter -i /var/run/truba/health.json -e '@.probes[0]' 2>/dev/null | cut -d. -f1)" -ge 0 ] 2>/dev/null; }
+check "watchdog: задержка и окно проверок в health.json" wait_for 15 wd_probes
+check "watchdog: health.json в /var/run (оперативная память)" sh -c "jsonfilter -i /var/run/truba/health.json -e '@.rtt' && [ \"\$(jsonfilter -i /var/run/truba/health.json -e '@.interval')\" = 10 ]"
+check "status: health.probes для «Обзора»" sh -c "truba status | jsonfilter -e '@.health.probes[0]'"
+# Обновление пакета меняет код, но не команду инстанса: reload должен перезапустить watchdog.
+WD_PID="$(pgrep -f 'truba watchdo[g]')"
+WD_SINCE="$(jsonfilter -i /var/run/truba/health.json -e '@.since')"
+echo '// обновлено' >> /usr/share/ucode/truba/const.uc
+check "reload (не дольше 90 с)" bounded 90 /etc/init.d/truba reload; sleep 2
+check "новый код watchdog вступает в силу при reload" sh -c "P=\$(pgrep -f 'truba watchdo[g]'); [ -n \"\$P\" ] && [ \"\$P\" != '$WD_PID' ]"
+check "перезапуск watchdog не обнуляет «в порядке с»" test "$(jsonfilter -i /var/run/truba/health.json -e '@.since')" = "$WD_SINCE"
+sed -i '$d' /usr/share/ucode/truba/const.uc
+# Запись после перерыва (watchdog был выключен) описывает прошлое — её «в порядке с» и окно не берутся.
+echo '{"state":"healthy","since":1000,"last_check":1000,"interval":10,"probes":[1,2,3]}' > /var/run/truba/health.json
+kill "$(pgrep -f 'truba watchdo[g]')"   # procd перезапустит через 5 с
+wd_fresh() { [ "$(jsonfilter -i /var/run/truba/health.json -e '@.since')" != 1000 ]; }
+check "устаревшая запись: «в порядке с» начинается заново" wait_for 20 wd_fresh
+check "устаревшая запись: окно проверок не взято" sh -c "[ \$(jsonfilter -i /var/run/truba/health.json -e '@.probes[*]' | wc -l) -le 1 ]"
+if [ -n "$OLD_WD_INTERVAL" ]; then uci set truba.watchdog.interval="$OLD_WD_INTERVAL"; else uci -q delete truba.watchdog.interval; fi
+uci set truba.watchdog.enabled='0'; uci commit truba
+check "reload (не дольше 90 с)" bounded 90 /etc/init.d/truba reload; sleep 2
 
 echo "== Аварийная блокировка"
 echo '{"state":"down"}' > /var/run/truba/health.json
