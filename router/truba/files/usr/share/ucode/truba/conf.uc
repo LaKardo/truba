@@ -40,6 +40,7 @@ export function load() {
 			port: int(d.port ?? 5335),
 			ttl_max: int(d.ttl_max ?? 300),
 			cache_size: int(d.cache_size ?? 65536),
+			lazy_cache_ttl: int(d.lazy_cache_ttl ?? 86400),
 		},
 		lists: {
 			geoip_url: l.geoip_url ?? 'https://raw.githubusercontent.com/kirilllavrov/geoip-builder/release/geoip.dat',

@@ -254,6 +254,14 @@ msgid "Cache size, entries"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/dns.js
+msgid "Keep expired answers, s"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/dns.js
+msgid "An expired answer is returned at once and refreshed in the background, so familiar sites open without waiting for DNS. 0 — off."
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/dns.js
 msgid "mosdns port"
 msgstr ""
 

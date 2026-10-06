@@ -21,7 +21,7 @@
 | 2. AmneziaWG под ImmortalWrt | Собирается в CI (awg-openwrt на зафиксированном коммите + свой `amneziawg-go`) | `kmod-amneziawg`, `amneziawg-tools`, `luci-proto-amneziawg` из фида стоят на NC-1812, Туннель поднят |
 | 3–6. Пакет `truba` | Готов, на NC-1812 стоит 1.0.0-r5 | `tests/router`: ImmortalWrt 25.12.2 под настоящим procd/netifd/fw4 в Docker, Туннель — настоящий WireGuard до netns «VPS». 96 проверок: nftables, ip rule, таблица 77, mosdns 5.3.3 (Блок → NXDOMAIN, AAAA → пусто), `full:`/`regexp:`, Аварийная блокировка, оба Режима, входящие через Туннель (в том числе с qosmate), свои сокеты Роутера при OpenClash, обновление и откат списков, teardown, uninstall |
 | 4. Распаковщик | Готов | `tests/dat` на реальных `.dat`: записи один в один, 2–3 с на оба файла |
-| 7. `luci-app-truba` | Готов, 8 вкладок, перевод RU (222 строки) | Headless Chromium: все вкладки без ошибок JS; «Сохранить и применить» → служба перестраивает правила (смена Действия, Политика устройства, выключение Маршрутизации) |
+| 7. `luci-app-truba` | Готов, 8 вкладок, перевод RU (224 строки) | Headless Chromium: все вкладки без ошибок JS; «Сохранить и применить» → служба перестраивает правила (смена Действия, Политика устройства, выключение Маршрутизации) |
 | 8. Переустановка после sysupgrade | Скрипт готов | Не проверялся реальным sysupgrade |
 | 9. Приёмка §8 | Частично | На живой сети: 1 — STUN через Туннель (IP Трубы, порт сохраняется, ответ одинаков у двух серверов), NatTypeTester ещё не запускался; 2 — входящие на IP Трубы доходят до устройства в `lan`, ответы уходят в `awg0`; 3 — зарубежные сайты видят IP Трубы, российские — IP провайдера. Тесты 4–7 не проводились |
 
@@ -459,7 +459,11 @@ plugins:
       upstreams:
         - { addr: "tls://common.dot.dns.yandex.net", dial_addr: "77.88.8.8" }
 
-  - { tag: cache, type: cache, args: { size: 65536 } }
+  # Ленивый кэш: истёкшая запись отдаётся сразу с TTL 5 с и проходит дальше по цепочке (nftset тоже),
+  # а свежий ответ запрашивается в фоне по тем же правилам. Повторные запросы не ждут DNS.
+  # Дамп в /var (tmpfs): кэш переживает перезапуск mosdns при смене настроек DNS или списков,
+  # но не перезагрузку; флеш не изнашивается.
+  - { tag: cache, type: cache, args: { size: 65536, lazy_cache_ttl: 86400, dump_file: /var/lib/truba/mosdns-cache.dump } }
 
   # nftset в mosdns 5 — только встроенное действие «семейство,таблица,набор,тип,маска», не тип плагина.
   # Ответ из кэша тоже проходит через nftset: после пересборки наборов IP возвращаются сами.
@@ -588,6 +592,8 @@ config dns 'dns'
 	list   direct_upstream 'tls://common.dot.dns.yandex.net@77.88.8.8'
 	option port            '5335'
 	option ttl_max         '300'
+	option cache_size      '65536'
+	option lazy_cache_ttl  '86400'   # сколько хранить истёкшие ответы для ленивого кэша; 0 — выключен
 
 config lists 'lists'
 	option geoip_url      'https://raw.githubusercontent.com/kirilllavrov/geoip-builder/release/geoip.dat'

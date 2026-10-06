@@ -298,6 +298,56 @@ check "check 8.8.8.8 → tunnel (Режим «Всё в туннель»)" grep 
 /usr/sbin/truba check 192.0.2.55 > /tmp/chk3b.json
 check "check 192.0.2.55 → direct (geoip:private)" grep -q '"reason": "geoip"' /tmp/chk3b.json
 
+echo "== DNS: ленивый кэш mosdns"
+check "mosdns: lazy_cache_ttl 86400 по умолчанию" grep -q '"lazy_cache_ttl": 86400' /var/etc/truba/mosdns.json
+# Свой DNS-сервер с TTL 2 с — для «Туннеля» и «Напрямую» сразу, чтобы не зависеть от Категории
+# (.test входит в private, то есть «Напрямую»). Запись истекает, сервер выключается: ответ может
+# прийти только из ленивого кэша. Сначала то же без него — иначе проверка ничего не доказывает.
+# Спрашиваем mosdns напрямую: dnsmasq со stop-dns-rebind отбрасывает ответы из 192.0.2.0/24.
+OLD_TUNNEL_DNS="$(uci -q get truba.dns.tunnel_upstream)"
+OLD_DIRECT_DNS="$(uci -q get truba.dns.direct_upstream)"
+MOSDNS_PORT="$(uci -q get truba.dns.port || echo 5335)"
+lazy_ask() { nslookup -type=A -port="$MOSDNS_PORT" lazy.test 127.0.0.1 2>&1 | grep -q 192.0.2.77; }
+set_upstreams() {   # set_upstreams "туннель…" "напрямую…"
+	uci -q delete truba.dns.tunnel_upstream
+	uci -q delete truba.dns.direct_upstream
+	for u in $1; do uci add_list truba.dns.tunnel_upstream="$u"; done
+	for u in $2; do uci add_list truba.dns.direct_upstream="$u"; done
+}
+lazy_round() {   # lazy_round TTL — ответ после истечения записи при выключенном сервере
+	dnsmasq --conf-file=/dev/null --port=5399 --listen-address=127.0.0.1 --bind-interfaces --no-resolv --no-hosts \
+		--address=/lazy.test/192.0.2.77 --local-ttl=2 --pid-file=/tmp/dm-lazy.pid
+	uci set truba.dns.lazy_cache_ttl="$1"
+	set_upstreams 'udp://127.0.0.1:5399' 'udp://127.0.0.1:5399'
+	uci commit truba
+	check "reload (не дольше 90 с)" bounded 90 /etc/init.d/truba reload; sleep 3
+	check "lazy_cache_ttl=$1: ответ от своего DNS-сервера" lazy_ask
+	sleep 4
+	kill "$(cat /tmp/dm-lazy.pid)"; sleep 1
+	# Истёкший ответ тоже должен пройти через nftset: после пересборки наборов IP возвращаются сами.
+	nft flush set inet truba gs_direct4
+	lazy_ask
+}
+if lazy_round 0; then fail "без ленивого кэша истёкшая запись отдана"; else ok "без ленивого кэша истёкшая запись не отдаётся"; fi
+check "mosdns: lazy_cache_ttl 0 — ленивый кэш выключен" sh -c "! grep -q lazy_cache_ttl /var/etc/truba/mosdns.json"
+if lazy_round 86400; then ok "истёкшая запись отдана из ленивого кэша, пока сервер недоступен"; else fail "ленивый кэш не отдал истёкшую запись"; fi
+check "IP из истёкшего ответа снова в gs_direct4" sh -c "nft list set inet truba gs_direct4 | grep -q 192.0.2.77"
+# Дамп кэша в оперативной памяти: смена настройки DNS перезапускает mosdns, кэш остаётся.
+# Сервер по-прежнему выключен — ответ после перезапуска может прийти только из дампа.
+MOSDNS_PID="$(pidof mosdns)"
+OLD_TTL_MAX="$(uci -q get truba.dns.ttl_max)"
+uci set truba.dns.ttl_max=299
+uci commit truba
+check "reload (не дольше 90 с)" bounded 90 /etc/init.d/truba reload; sleep 3
+check "смена настройки DNS перезапустила mosdns" sh -c "pidof mosdns && [ \"\$(pidof mosdns)\" != '$MOSDNS_PID' ]"
+check "дамп кэша в оперативной памяти" test -s /var/lib/truba/mosdns-cache.dump
+check "после перезапуска mosdns запись взята из дампа" lazy_ask
+if [ -n "$OLD_TTL_MAX" ]; then uci set truba.dns.ttl_max="$OLD_TTL_MAX"; else uci -q delete truba.dns.ttl_max; fi
+set_upstreams "$OLD_TUNNEL_DNS" "$OLD_DIRECT_DNS"
+uci set truba.dns.lazy_cache_ttl=86400
+uci commit truba
+check "reload (не дольше 90 с)" bounded 90 /etc/init.d/truba reload; sleep 3
+
 echo "== Политика устройства"
 uci -q batch <<-'EOF'
 	add truba device
