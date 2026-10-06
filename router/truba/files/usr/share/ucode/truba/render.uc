@@ -216,7 +216,14 @@ export function mosdns(cfg, plan, router_hosts) {
 	          args: { concurrent: 2, upstreams: map(cfg.dns.tunnel, u => upstream(u, C.MARK_TUNNEL)) } });
 	push(P, { tag: 'up_direct', type: 'forward',
 	          args: { concurrent: 2, upstreams: map(cfg.dns.direct, u => upstream(u, null)) } });
-	push(P, { tag: 'cache', type: 'cache', args: { size: cfg.dns.cache_size } });
+	// Ленивый кэш: истёкшая запись отдаётся сразу (TTL 5 с) и проходит дальше по цепочке, в том числе
+	// через nftset, а свежий ответ запрашивается в фоне по тем же правилам. 0 — выключен.
+	// Дамп в /var (tmpfs): кэш переживает перезапуск mosdns при смене настроек DNS или списков,
+	// но не перезагрузку, и флеш не изнашивается. Пишется при остановке и раз в 10 минут.
+	let cache = { size: cfg.dns.cache_size, dump_file: C.MOSDNS_DUMP };
+	if (cfg.dns.lazy_cache_ttl > 0)
+		cache.lazy_cache_ttl = cfg.dns.lazy_cache_ttl;
+	push(P, { tag: 'cache', type: 'cache', args: cache });
 
 	let ttl = sprintf('ttl 0-%d', cfg.dns.ttl_max);
 	// nftset в mosdns 5 — только встроенное действие: «семейство,таблица,набор,тип,маска».

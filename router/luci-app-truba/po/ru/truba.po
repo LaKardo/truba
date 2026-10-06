@@ -208,6 +208,12 @@ msgstr "Верхний предел для ответов по Категори�
 msgid "Cache size, entries"
 msgstr "Размер кэша, записей"
 
+msgid "Keep expired answers, s"
+msgstr "Хранить истёкшие ответы, с"
+
+msgid "An expired answer is returned at once and refreshed in the background, so familiar sites open without waiting for DNS. 0 — off."
+msgstr "Истёкший ответ отдаётся сразу и обновляется в фоне: знакомые сайты открываются без ожидания DNS. 0 — выключено."
+
 msgid "mosdns port"
 msgstr "Порт mosdns"
 

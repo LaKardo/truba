@@ -27,6 +27,11 @@ return view.extend({
 		o.datatype = 'range(1024,1048576)';
 		o.placeholder = '65536';
 
+		o = s.option(form.Value, 'lazy_cache_ttl', _('Keep expired answers, s'),
+			_('An expired answer is returned at once and refreshed in the background, so familiar sites open without waiting for DNS. 0 — off.'));
+		o.datatype = 'range(0,604800)';
+		o.placeholder = '86400';
+
 		o = s.option(form.Value, 'port', _('mosdns port'), _('Local port; dnsmasq forwards requests here.'));
 		o.datatype = 'port';
 		o.placeholder = '5335';

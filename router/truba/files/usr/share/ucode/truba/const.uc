@@ -20,6 +20,7 @@ export const RUN_DIR   = '/var/run/truba';
 export const ETC_DIR   = '/var/etc/truba';
 
 export const MOSDNS_CONF = '/var/etc/truba/mosdns.json';
+export const MOSDNS_DUMP = '/var/lib/truba/mosdns-cache.dump';
 export const NFT_FILE    = '/var/etc/truba/truba.nft';
 export const STAMP_FILE  = '/var/lib/truba/stamp';
 export const CATS_FILE   = '/var/lib/truba/categories.json';
