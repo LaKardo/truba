@@ -197,7 +197,7 @@ function kv(rows) {
 }
 
 // Пустая вторая строка ячейки — неразрывный пробел: высота строки не меняется.
-const NBSP = ' ';
+const NBSP = String.fromCharCode(160);   // неразрывный пробел
 
 function buildPage() {
 	const r = { warns: [], warnOpen: false, warnKey: null };

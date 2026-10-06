@@ -2,7 +2,7 @@
    после запятой — запасные для тем без них. Числа — моноширинными цифрами, чтобы при
    обновлении текст не сдвигался. */
 
-.truba-num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.truba-num { font-variant-numeric: tabular-nums; }
 .truba-muted { color: var(--text-color-medium, #666); font-size: .9em; }
 
 /* Значок состояния: ok / warn / err / info, без класса — нейтральный. */
@@ -46,6 +46,13 @@
 .truba-summary-text { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .truba-summary .btn { flex: 0 0 auto; margin: 0; }
 .truba-warnings { margin: -.5em 0 1em; }
+/* На телефоне текст сводки переносится, кнопка — отдельной строкой. Текст меняется
+   только вместе с состоянием, поэтому высота при опросе всё равно постоянна. */
+@media (max-width: 600px) {
+	.truba-summary { flex-wrap: wrap; }
+	.truba-summary-text { flex: 1 1 0; white-space: normal; }
+	.truba-summary .btn { flex: 1 1 100%; }
+}
 .truba-warnings ul { margin: 0; }
 
 /* Карточки: две колонки на широком экране, одна — на телефоне. */
@@ -79,7 +86,7 @@
 }
 .truba-traffic th { font-weight: normal; color: var(--text-color-medium, #666); }
 .truba-traffic th:first-child, .truba-traffic td:first-child { width: 34%; text-align: left; padding-left: 0; }
-.truba-traffic td span { display: block; }
+.truba-traffic td span { display: block; white-space: nowrap; }
 
 /* Версии Наборов правил: всё по левому краю, контрольная сумма переносится в узкой колонке. */
 .truba-versions th, .truba-versions td { text-align: left; }

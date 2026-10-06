@@ -37,9 +37,12 @@ export function run() {
 	if (!cfg.watchdog.enabled)
 		return;
 
-	let state = U.read_json(C.HEALTH_FILE, null)?.state ?? 'healthy';
-	let since = time(), fails = 0;
-	let probes = [];   // задержки последних проверок, мс; null — потеря
+	// Перезапуск watchdog (смена настроек, обновление пакета) продолжает с прежнего места:
+	// «в порядке с» и окно проверок не обнуляются. После перезагрузки файла нет.
+	let prev = U.read_json(C.HEALTH_FILE, null);
+	let state = prev?.state ?? 'healthy';
+	let since = prev?.since ?? time(), fails = 0;
+	let probes = (type(prev?.probes) == 'array') ? slice(prev.probes, -PROBE_WINDOW) : [];   // задержки, мс; null — потеря
 	let timer;
 
 	let probed = (rtt) => {

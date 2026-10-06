@@ -8,7 +8,7 @@
 // «DNS и списки»: две подвкладки одной формы. Версии Наборов правил строятся один раз
 // и обновляются на месте — опрос не перерисовывает таблицу.
 
-const NBSP = ' ';
+const NBSP = String.fromCharCode(160);   // неразрывный пробел
 
 function buildVersions() {
 	const r = { files: {} };
@@ -44,9 +44,11 @@ function updateVersions(r, st) {
 		r.updating = !!l.updating;
 		r.busy.replaceChildren(r.updating ? E('em', { 'class': 'spinning' }, _('Update in progress…')) : NBSP);
 	}
+	// Нет версии — «отсутствует» обычным текстом, а не моноширинным, как контрольная сумма.
 	const ver = (c, v) => {
-		common.setText(c.sha, v ? (v.sha256 || '').substring(0, 12) : _('none'));
-		common.setText(c.date, v ? common.fmtTime(v.mtime) : NBSP);
+		c.sha.style.display = v ? '' : 'none';
+		common.setText(c.sha, v ? (v.sha256 || '').substring(0, 12) : '');
+		common.setText(c.date, v ? common.fmtTime(v.mtime) : _('none'));
 		common.setText(c.size, v ? common.fmtBytes(v.size) : NBSP);
 	};
 	for (let k of [ 'geoip', 'geosite' ]) {

@@ -436,6 +436,14 @@ wd_probes() { [ "$(jsonfilter -i /var/run/truba/health.json -e '@.probes[0]' 2>/
 check "watchdog: задержка и окно проверок в health.json" wait_for 15 wd_probes
 check "watchdog: health.json в /var/run (оперативная память)" sh -c "jsonfilter -i /var/run/truba/health.json -e '@.rtt' && [ \"\$(jsonfilter -i /var/run/truba/health.json -e '@.interval')\" = 10 ]"
 check "status: health.probes для «Обзора»" sh -c "truba status | jsonfilter -e '@.health.probes[0]'"
+# Обновление пакета меняет код, но не команду инстанса: reload должен перезапустить watchdog.
+WD_PID="$(pgrep -f 'truba watchdo[g]')"
+WD_SINCE="$(jsonfilter -i /var/run/truba/health.json -e '@.since')"
+echo '// обновлено' >> /usr/share/ucode/truba/const.uc
+check "reload (не дольше 90 с)" bounded 90 /etc/init.d/truba reload; sleep 2
+check "новый код watchdog вступает в силу при reload" sh -c "P=\$(pgrep -f 'truba watchdo[g]'); [ -n \"\$P\" ] && [ \"\$P\" != '$WD_PID' ]"
+check "перезапуск watchdog не обнуляет «в порядке с»" test "$(jsonfilter -i /var/run/truba/health.json -e '@.since')" = "$WD_SINCE"
+sed -i '$d' /usr/share/ucode/truba/const.uc
 uci set truba.watchdog.enabled='0'; uci -q delete truba.watchdog.interval; uci commit truba
 check "reload (не дольше 90 с)" bounded 90 /etc/init.d/truba reload; sleep 2
 
