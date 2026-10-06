@@ -139,7 +139,7 @@ function drawChart(c) {
 // Наборы, которые последняя проверка не смогла скачать: «geoip: причина».
 function failedSets(last) {
 	const sets = last?.sets || {};
-	return Object.keys(sets).filter((k) => !sets[k].ok).map((k) => '%s: %s'.format(k, (sets[k].errors || []).join(', ') || '?'));
+	return Object.keys(sets).filter((k) => !sets[k].ok).map((k) => '%s: %s'.format(k, (sets[k].errors || []).join('; ') || '?'));
 }
 
 function checkResult(last) {
@@ -197,7 +197,7 @@ function kv(rows) {
 }
 
 // Пустая вторая строка ячейки — неразрывный пробел: высота строки не меняется.
-const NBSP = String.fromCharCode(160);   // неразрывный пробел
+const NBSP = common.NBSP;
 
 function buildPage() {
 	const r = { warns: [], warnOpen: false, warnKey: null };
@@ -312,14 +312,9 @@ function paintWarnings(r) {
 	}
 }
 
-function setPill(el, level, text) {
-	common.setClass(el, 'truba-badge ' + level);
-	common.setText(el, text);
-}
-
-function setDot(el, level, text) {
-	const extra = el.classList.contains('truba-num') ? ' truba-num' : '';
-	common.setClass(el, 'truba-dot ' + level + extra);
+// Значок или точка: уровень и текст.
+function setState(el, level, text) {
+	common.setLevel(el, level);
 	common.setText(el, text);
 }
 
@@ -332,8 +327,8 @@ function update(r, st, rates) {
 	// Сводка
 	r.warns = warnings(st);
 	const sumLevel = (tLevel == 'ok' && r.warns.length) ? 'warn' : tLevel;
-	common.setClass(r.summary, 'truba-summary ' + sumLevel);
-	setPill(r.sumState, tLevel, tText);
+	common.setLevel(r.summary, sumLevel);
+	setState(r.sumState, tLevel, tText);
 	const routing = st.routing
 		? '%s: %s'.format(_('Routing'), st.mode == 'selective' ? _('mode «Selective»') : _('mode «All via tunnel»'))
 		: _('disabled — everything goes direct');
@@ -343,27 +338,27 @@ function update(r, st, rates) {
 	paintWarnings(r);
 
 	// Туннель
-	setPill(r.tState, tLevel, tText);
+	setState(r.tState, tLevel, tText);
 	const age = awg.handshake ? awg.handshake_age : null;
-	setDot(r.tHs, age == null ? 'err' : age > 300 ? 'err' : age > 180 ? 'warn' : 'ok', common.fmtAge(age));
+	setState(r.tHs, age == null ? 'err' : age > 300 ? 'err' : age > 180 ? 'warn' : 'ok', common.fmtAge(age));
 
-	const probes = Array.isArray(h.probes) ? h.probes : null;
-	if (!wdOn || !probes || !t.up) {
+	// Окно пустое — проверок ещё не было (или не с чем: нет адреса для ping): не «нет ответа».
+	const probes = Array.isArray(h.probes) ? h.probes : [];
+	if (!wdOn || !probes.length || !t.up) {
 		const why = !wdOn ? _('the watchdog is off') : '—';
-		setDot(r.tRtt, '', why);
-		setDot(r.tLoss, '', why);
+		setState(r.tRtt, '', why);
+		setState(r.tLoss, '', why);
 	}
 	else {
 		const got = probes.filter((x) => x != null);
 		const avg = got.length ? got.reduce((s, x) => s + x, 0) / got.length : null;
-		setDot(r.tRtt, h.rtt != null ? 'ok' : 'err', h.rtt != null
+		setState(r.tRtt, h.rtt != null ? 'ok' : 'err', h.rtt != null
 			? _('%d ms').format(Math.round(h.rtt)) + (avg != null ? ' · ' + _('average %d ms').format(Math.round(avg)) : '')
 			: _('no reply'));
 		const lost = probes.length - got.length;
-		const pct = probes.length ? Math.round(lost * 100 / probes.length) : 0;
-		setDot(r.tLoss, !probes.length ? '' : !lost ? 'ok' : pct < 20 ? 'warn' : 'err', probes.length
-			? _('%d%% over %d min').format(pct, Math.max(1, Math.round(probes.length * (h.interval || 30) / 60)))
-			: '—');
+		const pct = Math.round(lost * 100 / probes.length);
+		setState(r.tLoss, !lost ? 'ok' : pct < 20 ? 'warn' : 'err',
+			_('%d%% over %d min').format(pct, Math.max(1, Math.round(probes.length * (h.interval || 30) / 60))));
 	}
 
 	common.setText(r.tWd, h.state
@@ -379,9 +374,9 @@ function update(r, st, rates) {
 
 	// DNS и списки
 	if (st.routing)
-		setPill(r.dMosdns, st.mosdns ? 'ok' : 'err', st.mosdns ? _('running') : _('not running'));
+		setState(r.dMosdns, st.mosdns ? 'ok' : 'err', st.mosdns ? _('running') : _('not running'));
 	else
-		setPill(r.dMosdns, '', _('not used: routing is off'));
+		setState(r.dMosdns, '', _('not used: routing is off'));
 	const dc = st.dns_cache;
 	if (st.routing && dc) {
 		const pct = (n) => dc.query ? Math.round(n * 100 / dc.query) : 0;
@@ -398,16 +393,17 @@ function update(r, st, rates) {
 	common.setText(r.dGeoip, fileText(l.geoip));
 	common.setText(r.dGeosite, fileText(l.geosite));
 	if (l.updating)
-		setDot(r.dCheck, '', _('update in progress'));
+		setState(r.dCheck, '', _('update in progress'));
 	else if (!last)
-		setDot(r.dCheck, 'warn', _('not checked yet'));
+		setState(r.dCheck, 'warn', _('not checked yet'));
 	else
-		setDot(r.dCheck, failedSets(last).length ? 'err' : (Date.now() / 1000 - last.time > 36 * 3600) ? 'warn' : 'ok',
+		setState(r.dCheck, failedSets(last).length ? 'err' : (Date.now() / 1000 - last.time > 36 * 3600) ? 'warn' : 'ok',
 			'%s — %s'.format(common.fmtTime(last.time), checkResult(last)));
+	// Время следующего запуска считает Роутер по своей строке cron.
 	const auto = uci.get('truba', 'lists', 'auto_update') != '0';
 	common.setText(r.dNext, !st.routing ? '—'
 		: !auto ? _('automatic update is off')
-		: common.fmtTime(common.nextDaily(uci.get('truba', 'lists', 'update_utc') || '12:00')));
+		: common.fmtTime(l.next));
 
 	// Трафик устройств
 	const since = a.counters_since;

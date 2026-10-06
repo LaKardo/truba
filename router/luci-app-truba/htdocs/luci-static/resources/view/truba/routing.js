@@ -80,19 +80,23 @@ return view.extend({
 		return Promise.all([ common.callCategories(), uci.load('truba'), uci.load('firewall'), common.callLeases().catch(() => ({})) ]);
 	},
 
-	handleReset: function(mode, starting) {
+	// Не handleReset: так LuCI называет обработчик кнопки «Сброс» внизу страницы.
+	handleResetRules: function(mode, starting) {
 		if (!confirm(_('Reset all category actions of this mode to the starting settings?')))
 			return;
-		for (let s of ruleSections(mode))
-			uci.remove('truba', s['.name']);
-		for (let r of starting.filter((x) => x.mode == mode)) {
-			const sid = uci.add('truba', 'rule');
-			uci.set('truba', sid, 'mode', r.mode);
-			uci.set('truba', sid, 'set', r.set);
-			uci.set('truba', sid, 'tag', r.tag);
-			uci.set('truba', sid, 'action', r.action);
-		}
-		return uci.save().then(() => window.location.reload());
+		// Сначала — несохранённые правки формы (Политики устройств): перезагрузка их потеряла бы.
+		return this.map.parse().then(() => {
+			for (let s of ruleSections(mode))
+				uci.remove('truba', s['.name']);
+			for (let r of starting.filter((x) => x.mode == mode)) {
+				const sid = uci.add('truba', 'rule');
+				uci.set('truba', sid, 'mode', r.mode);
+				uci.set('truba', sid, 'set', r.set);
+				uci.set('truba', sid, 'tag', r.tag);
+				uci.set('truba', sid, 'action', r.action);
+			}
+			return uci.save();
+		}).then(() => window.location.reload());
 	},
 
 	render: function(data) {
@@ -103,7 +107,7 @@ return view.extend({
 		for (let c of cats)
 			present[c.set + ':' + c.tag] = true;
 
-		const m = new form.Map('truba', _('Routing'),
+		const m = this.map = new form.Map('truba', _('Routing'),
 			_('Which traffic goes through the tunnel. Categories are taken from geoip.dat and geosite.dat as they are; new categories are never created.'));
 
 		const s = m.section(form.NamedSection, 'main', 'main');
@@ -179,7 +183,7 @@ return view.extend({
 				E('div', { 'style': 'display:flex;gap:1em;align-items:center;margin:.5em 0' }, [
 					filterBox.text,
 					E('label', {}, [ filterBox.only, ' ', _('only with an explicit action') ]),
-					E('button', { 'class': 'btn cbi-button-reset', 'click': ui.createHandlerFn(this, 'handleReset', mode, info.starting || []) },
+					E('button', { 'class': 'btn cbi-button-reset', 'click': ui.createHandlerFn(this, 'handleResetRules', mode, info.starting || []) },
 						_('Reset to starting settings'))
 				]),
 				renderTable(mode, cats, filterBox)

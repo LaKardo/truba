@@ -38,11 +38,14 @@ export function run() {
 		return;
 
 	// Перезапуск watchdog (смена настроек, обновление пакета) продолжает с прежнего места:
-	// «в порядке с» и окно проверок не обнуляются. После перезагрузки файла нет.
+	// «в порядке с» и окно проверок не обнуляются — если запись свежая. После перерыва
+	// (watchdog был выключен) они бы описывали давнее прошлое. Состояние берётся всегда:
+	// по нему построена таблица 77. После перезагрузки файла нет.
 	let prev = U.read_json(C.HEALTH_FILE, null);
+	let fresh = prev && time() - (prev.last_check ?? 0) <= 3 * cfg.watchdog.interval && prev.interval == cfg.watchdog.interval;
 	let state = prev?.state ?? 'healthy';
-	let since = prev?.since ?? time(), fails = 0;
-	let probes = (type(prev?.probes) == 'array') ? slice(prev.probes, -PROBE_WINDOW) : [];   // задержки, мс; null — потеря
+	let since = (fresh && prev.since) ? prev.since : time(), fails = 0;
+	let probes = (fresh && type(prev.probes) == 'array') ? slice(prev.probes, -PROBE_WINDOW) : [];   // задержки, мс; null — потеря
 	let timer;
 
 	let probed = (rtt) => {
@@ -51,14 +54,16 @@ export function run() {
 			shift(probes);
 	};
 
-	let set_state = (next, info) => {
+	// rec — запись текущей проверки: в файл идёт целиком, чтобы «Обзор» и в этот момент
+	// видел задержку и окно проверок.
+	let set_state = (next, info, rec) => {
 		if (next == state)
 			return;
 		state = next;
 		since = time();
 		// routes() читает состояние из файла — записать до пересчёта таблицы.
 		U.mkdirp(C.RUN_DIR);
-		U.write_json(C.HEALTH_FILE, { state, since, fails, last_check: time() });
+		U.write_json(C.HEALTH_FILE, { ...rec, state, since, fails, probes });
 		let c = F.load();
 		let table = K.routes(c, F.tunnel_info(c.iface));
 		U.log(next == 'healthy' ? 'notice' : 'warning',
@@ -77,13 +82,13 @@ export function run() {
 		if (tinfo.disabled) {
 			fails = 0;
 			probes = [];
-			set_state('down', 'интерфейс выключен');
+			set_state('down', 'интерфейс выключен', rec);
 		}
 		else if (!st.up) {
 			fails++;
 			probed(null);
 			if (fails >= w.fails)
-				set_state('down', 'интерфейс не поднят');
+				set_state('down', 'интерфейс не поднят', rec);
 		}
 		else {
 			let probe = length(w.probe) ? w.probe : tinfo.peer;
@@ -99,13 +104,13 @@ export function run() {
 
 			if (ping_ok && age != null && age <= w.handshake_max) {
 				fails = 0;
-				set_state('healthy', sprintf('handshake %d с назад', age));
+				set_state('healthy', sprintf('handshake %d с назад', age), rec);
 			}
 			else {
 				fails++;
 				let why = !ping_ok ? 'нет ответа на ping ' + probe : sprintf('handshake %s', age == null ? 'не было' : age + ' с назад');
 				if (fails >= w.fails) {
-					set_state('down', why);
+					set_state('down', why, rec);
 					if (fails % w.fails == 0) {
 						U.warn_log('перезапуск интерфейса ' + cfg.iface + ': ' + why);
 						system([ 'ifup', cfg.iface ]);

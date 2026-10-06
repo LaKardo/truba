@@ -8,7 +8,9 @@
 // «DNS и списки»: две подвкладки одной формы. Версии Наборов правил строятся один раз
 // и обновляются на месте — опрос не перерисовывает таблицу.
 
-const NBSP = String.fromCharCode(160);   // неразрывный пробел
+const NBSP = common.NBSP;
+// Версии меняются раз в сутки: опрос раз в 30 с, а пока идёт обновление — раз в 5 с.
+const SLOW_POLL = 30000;
 
 function buildVersions() {
 	const r = { files: {} };
@@ -54,10 +56,7 @@ function updateVersions(r, st) {
 	for (let k of [ 'geoip', 'geosite' ]) {
 		ver(r.files[k].cur, l[k]);
 		ver(r.files[k].prev, l['prev_' + k]);
-		const s = last?.sets?.[k];
-		common.setText(r.files[k].check, !s ? '—' : s.ok
-			? _('%s (via %s)').format(s.changed ? _('updated') : _('no changes'), s.via)
-			: _('failed — %s').format((s.errors || []).join('; ')));
+		common.setText(r.files[k].check, common.setResult(last?.sets?.[k]));
 	}
 	common.setText(r.last, last ? _('Last check: %s').format(common.fmtTime(last.time)) : _('not checked yet'));
 }
@@ -140,22 +139,37 @@ return view.extend({
 		// Версии и кнопки — частью подвкладки «Списки». Один и тот же узел: форма
 		// после сохранения перерисовывается, а опрос продолжает обновлять его.
 		o = s.option(form.DummyValue, '_versions');
-		o.render = () => Promise.resolve(E('div', { 'class': 'cbi-value' }, [
+		// data-field — как у обычных полей: иначе форма считает поле скрытым и при каждой
+		// проверке зависимостей «включает» его заново.
+		o.render = () => Promise.resolve(E('div', { 'class': 'cbi-value', 'data-field': o.cbid('lists') }, [
 			versions.el,
 			E('div', { 'style': 'display:flex;gap:.5em;flex-wrap:wrap' }, [
 				E('button', { 'class': 'btn cbi-button-action', 'type': 'button', 'click': ui.createHandlerFn(this, () =>
-					common.callUpdateLists(false).then(() => ui.addNotification(null, E('p', {}, _('Update started.')), 'info'))) },
+					common.callUpdateLists(false).then(() => {
+						versions.kicked = Date.now();   // опрос раз в 5 с, пока обновление не начнётся
+						ui.addNotification(null, E('p', {}, _('Update started.')), 'info');
+					})) },
 					_('Update now')),
 				E('button', { 'class': 'btn cbi-button-reset', 'type': 'button', 'click': ui.createHandlerFn(this, () => {
 					if (!confirm(_('Swap current and previous rule sets?')))
 						return;
-					return common.callRollbackLists().then((r) => ui.addNotification(null,
-						E('p', {}, (r.swapped || []).length ? _('Rolled back: %s').format(r.swapped.join(', ')) : _('No previous version.')), 'info'));
+					return common.callRollbackLists().then((r) => {
+						versions.kicked = Date.now();
+						ui.addNotification(null,
+							E('p', {}, (r.swapped || []).length ? _('Rolled back: %s').format(r.swapped.join(', ')) : _('No previous version.')), 'info');
+					});
 				}) }, _('Roll back'))
 			])
 		]));
 
-		poll.add(() => common.callStatus().then((st) => updateVersions(versions, st)), 5);
+		let polled = Date.now();
+		poll.add(() => {
+			const fast = versions.updating || Date.now() - (versions.kicked || 0) < 15000;
+			if (!fast && Date.now() - polled < SLOW_POLL)
+				return Promise.resolve();
+			polled = Date.now();
+			return common.callStatus().then((st) => updateVersions(versions, st));
+		}, 5);
 
 		return m.render();
 	}

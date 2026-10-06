@@ -69,6 +69,22 @@ function socket_mark_ok() {
 	             "add rule inet truba_probe o socket mark 0'").code == 0;
 }
 
+// Порт API mosdns занят другой программой? Ошибка API останавливает mosdns целиком —
+// весь DNS сети, поэтому тогда mosdns запускается без API (нет только счётчиков кэша).
+// Конфликтуют слушатели этого порта на 127.0.0.1 и на всех адресах.
+function api_port_taken(api) {
+	let port = split(api, ':')[1];
+	for (let l in split(U.run('netstat -lntp').out, '\n')) {
+		let f = split(trim(l), /\s+/);
+		if (f[5] != 'LISTEN' || match(f[6] ?? '', /\/mosdns$/))
+			continue;
+		let i = rindex(f[3], ':');
+		if (substr(f[3], i + 1) == port && (substr(f[3], 0, i) in [ '127.0.0.1', '0.0.0.0', '::', '' ]))
+			return true;
+	}
+	return false;
+}
+
 function health_state() {
 	return U.read_json(C.HEALTH_FILE, null);
 }
@@ -139,6 +155,11 @@ export function apply() {
 
 		text = R.nft_full(cfg, plan, ctx);
 
+		if (api_port_taken(cfg.dns.api)) {
+			U.warn_log(sprintf('порт %s занят другой программой: mosdns без API, счётчиков кэша на «Обзоре» не будет', cfg.dns.api));
+			cfg.dns.api = null;
+		}
+		applied.dns_api = cfg.dns.api;
 		let hosts = F.router_hosts(cfg, tinfo);
 		let mconf = sprintf('%J', R.mosdns(cfg, plan, hosts));
 		U.write_atomic(C.MOSDNS_CONF, mconf);
@@ -412,8 +433,8 @@ function upnp_info(cfg) {
 
 // Счётчики кэша mosdns из его API: query — запросов, hit — ответов из кэша (вместе с
 // истёкшими), lazy_hit — истёкших, size — записей сейчас. Отсчёт — с запуска mosdns.
-function dns_cache(cfg) {
-	let r = U.run(sprintf("curl -s -m 1 http://%s/metrics | grep '^mosdns_cache_'", cfg.dns.api));
+function dns_cache(api, cfg) {
+	let r = U.run(sprintf("curl -s -m 1 http://%s/metrics | grep '^mosdns_cache_'", api));
 	let res = {};
 	for (let l in split(r.out, '\n')) {
 		let m = match(l, /^mosdns_cache_(query_total|hit_total|lazy_hit_total|size_current)(\{[^}]*\})? ([0-9.e+]+)$/);
@@ -478,7 +499,8 @@ export function status() {
 		neighbours: neighbours(),
 		upnp: upnp_info(cfg),
 		mosdns: system('pidof mosdns >/dev/null 2>&1') == 0,
-		dns_cache: cfg.routing ? dns_cache(cfg) : null,
+		// Адрес API — тот, с которым mosdns запущена (его может не быть, если порт занят).
+		dns_cache: (cfg.routing && applied?.dns_api) ? dns_cache(applied.dns_api, cfg) : null,
 		lists: {
 			geoip: list_info(C.LISTS_DIR, C.DAT_FILES.geoip),
 			geosite: list_info(C.LISTS_DIR, C.DAT_FILES.geosite),
@@ -486,6 +508,7 @@ export function status() {
 			prev_geosite: list_info(C.PREV_DIR, C.DAT_FILES.geosite),
 			last: U.read_json(C.LISTS_STATE, null),
 			updating: stat(C.RUN_DIR + '/update.pid') != null,
+			next: N.cron_next(),
 		},
 	};
 };

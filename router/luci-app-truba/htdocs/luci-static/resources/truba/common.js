@@ -101,21 +101,24 @@ function setText(el, text) {
 		el.textContent = text;
 }
 
-function setClass(el, cls) {
-	if (el.className !== cls)
-		el.className = cls;
+// Уровень значка, точки или сводки (ok / warn / err / info, '' — нейтральный): меняются только
+// классы уровня, остальные классы элемента остаются.
+const LEVELS = [ 'ok', 'warn', 'err', 'info' ];
+function setLevel(el, level) {
+	for (let l of LEVELS)
+		el.classList.toggle(l, l == level);
 }
 
-// Ближайший запуск ежедневного задания в HH:MM UTC, unix-время; null — время не задано.
-function nextDaily(hhmm) {
-	const m = /^(\d{1,2}):(\d{2})$/.exec(hhmm || '');
-	if (!m)
-		return null;
-	const now = new Date();
-	let t = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), +m[1], +m[2]);
-	if (t <= now.getTime())
-		t += 86400000;
-	return Math.floor(t / 1000);
+// Неразрывный пробел: пустая строка ячейки сохраняет высоту.
+const NBSP = String.fromCharCode(160);
+
+// Итог проверки одного Набора правил (запись lists.last.sets[…]).
+function setResult(s) {
+	if (!s)
+		return '—';
+	return s.ok
+		? _('%s (via %s)').format(s.changed ? _('updated') : _('no changes'), s.via)
+		: _('failed — %s').format((s.errors || []).join('; ') || '?');
 }
 
 function tunnelIface() {
@@ -124,6 +127,6 @@ function tunnelIface() {
 
 return baseclass.extend({
 	callStatus, callCategories, callSets, callCheck, callNatTest, callUpdateLists, callRollbackLists, callLog, callLeases,
-	ACTION_LABELS, REASON_LABELS, WARNING_LABELS,
-	fmtBytes, fmtRate, fmtAge, fmtTime, fmtDate, fmtNum, pill, badge, setText, setClass, nextDaily, tunnelIface
+	ACTION_LABELS, REASON_LABELS, WARNING_LABELS, NBSP,
+	fmtBytes, fmtRate, fmtAge, fmtTime, fmtDate, fmtNum, pill, badge, setText, setLevel, setResult, tunnelIface
 });

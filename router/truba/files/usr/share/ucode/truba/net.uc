@@ -154,6 +154,26 @@ function utc_to_local(hhmm) {
 	return [ int(t / 60), t % 60 ];
 }
 
+// Ближайший запуск обновления списков, unix-время; null — блока cron нет. Считается по
+// самой строке cron в местном времени Роутера, как её запустит crond (и после смены
+// летнего времени, когда строка уже разошлась с update_utc до следующего применения).
+export function cron_next() {
+	let m = match(readfile(CRONTAB) ?? '', /(^|\n)([0-9]+) ([0-9]+) \* \* \* \/usr\/sbin\/truba update-lists/);
+	if (!m)
+		return null;
+	let now = time();
+	let tm = localtime(now);
+	tm.hour = int(m[3]);
+	tm.min = int(m[2]);
+	tm.sec = 0;
+	let t = timelocal(tm);
+	if (t <= now) {
+		tm.mday++;
+		t = timelocal(tm);
+	}
+	return t;
+};
+
 export function cron_set(enabled, update_utc) {
 	let cur = readfile(CRONTAB) ?? '';
 	let lines = split(cur, '\n');

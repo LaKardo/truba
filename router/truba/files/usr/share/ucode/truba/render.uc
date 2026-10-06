@@ -294,6 +294,9 @@ export function mosdns(cfg, plan, router_hosts) {
 	push(P, { tag: 'tcp_in', type: 'tcp_server', args: { entry: 'main', listen } });
 
 	// API — ради счётчиков кэша (/metrics) на «Обзоре». Только 127.0.0.1: там же mosdns отдаёт
-	// и /debug/pprof, снаружи Роутера их не видно.
-	return { log: { level: 'warn' }, api: { http: cfg.dns.api }, plugins: P };
+	// и /debug/pprof, снаружи Роутера их не видно. Нет адреса — порт занят, без API.
+	let conf = { log: { level: 'warn' }, plugins: P };
+	if (cfg.dns.api)
+		conf.api = { http: cfg.dns.api };
+	return conf;
 };
