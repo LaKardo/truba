@@ -159,7 +159,8 @@ return view.extend({
 			o = s.taboption('general', form.DynamicList, 'addresses', _('Tunnel address'));
 			o.datatype = 'cidr';
 			o = s.taboption('general', form.Value, 'mtu', _('MTU'));
-			o.datatype = 'range(1280,1500)';
+			// install-vps.sh подбирает MTU под сеть VPS: при сети уже 1367 он ниже 1280.
+			o.datatype = 'range(576,1500)';
 			o.placeholder = '1380';
 			o = s.taboption('general', form.Value, 'listen_port', _('Listen port'), _('Not needed: the router connects to the Truba itself.'));
 			o.datatype = 'port';

@@ -30,7 +30,11 @@ MODULES_FILE=/etc/modules-load.d/truba.conf
 
 VPS_TUN=10.77.77.1
 RTR_TUN=10.77.77.2
-MTU=1380
+# MTU Туннеля — не больше MTU_MAX и такой, чтобы пакет Туннеля с обёрткой помещался в сеть
+# VPS целиком: IPv4 20 + UDP 8 + заголовок и тег AWG 32 + S4 до 27 = 87 байт. Иначе VPS режет
+# каждый полноразмерный пакет на два фрагмента: у части провайдеров сеть VPS — 1400, а не 1500.
+MTU_MAX=1380
+TUN_OVERHEAD=87
 CONFIRM_TIMEOUT=120
 
 say()  { printf '\033[1;32m==>\033[0m %s\n' "$*"; }
@@ -38,6 +42,15 @@ warn() { printf '\033[1;33m!!\033[0m  %s\n' "$*" >&2; }
 die()  { printf '\033[1;31mОшибка:\033[0m %s\n' "$*" >&2; exit 1; }
 
 rand_between() { shuf -i "$1-$2" -n 1; }
+
+# MTU Туннеля по MTU интерфейса WAN: при 1500 — 1380, при 1400 — 1313.
+tunnel_mtu() {
+	local nic m
+	nic=$(cat "/sys/class/net/${WAN_IF:-}/mtu" 2>/dev/null) || nic=1500
+	m=$((nic - TUN_OVERHEAD))
+	[ "$m" -le "$MTU_MAX" ] || m=$MTU_MAX
+	echo "$m"
+}
 
 port_busy() { ss -Hlntu "( sport = :$1 )" 2>/dev/null | grep -q .; }
 
@@ -184,7 +197,7 @@ gen_params() {
 		local s3min=8 s4min=4
 		if [ "$AWG_PROTO" -ge 3 ]; then s3min=12; s4min=12; fi
 		S3=$(rand_between "$s3min" 55)
-		# S4 удлиняет каждый пакет данных: при MTU 1380 запас до 1500 есть с избытком.
+		# S4 удлиняет каждый пакет данных: tunnel_mtu оставляет под него до 27 байт.
 		S4=$(rand_between "$s4min" 27)
 		# Четыре непересекающихся диапазона: по одному в каждой четверти пространства.
 		local q=$((2147483647 / 4)) i lo w
@@ -250,7 +263,7 @@ write_awg_conf() {
 		echo "PrivateKey = $VPS_PRIV"
 		echo "Address = $VPS_TUN/30"
 		echo "ListenPort = $AWG_PORT"
-		echo "MTU = $MTU"
+		echo "MTU = $(tunnel_mtu)"
 		awg_params_block
 		echo
 		echo "[Peer]"
@@ -269,7 +282,7 @@ write_router_conf() {
 		echo "[Interface]"
 		echo "PrivateKey = $RTR_PRIV"
 		echo "Address = $RTR_TUN/30"
-		echo "MTU = $MTU"
+		echo "MTU = $(tunnel_mtu)"
 		awg_params_block
 		echo
 		echo "[Peer]"
@@ -365,11 +378,14 @@ write_pipe_unit() {
 	systemctl enable --now truba-pipe.service >/dev/null 2>&1
 }
 
+# Очередь fq_codel, а не fq: fq держит на поток не больше 100 пакетов, а весь Туннель для неё —
+# один поток. На пиках она отбрасывала пачки пакетов, и скачивание через Туннель вставало на
+# секунды. BBR с ядра 4.13 сам задаёт темп отправки и без fq.
 write_sysctl() {
 	cat > "$SYSCTL_FILE" <<-EOF
 		# Труба
 		net.ipv4.ip_forward = 1
-		net.core.default_qdisc = fq
+		net.core.default_qdisc = fq_codel
 		net.ipv4.tcp_congestion_control = bbr
 		net.netfilter.nf_conntrack_max = 262144
 		net.ipv6.conf.all.forwarding = 0
@@ -379,6 +395,8 @@ write_sysctl() {
 	echo nf_conntrack > "$MODULES_FILE"
 	modprobe nf_conntrack 2>/dev/null || true
 	sysctl -q -p "$SYSCTL_FILE"
+	# default_qdisc действует только на новые очереди: у WAN заменить текущую сразу, без перезагрузки.
+	tc qdisc replace dev "$WAN_IF" root fq_codel 2>/dev/null || warn "не удалось заменить очередь $WAN_IF на fq_codel: заменится после перезагрузки"
 }
 
 setup_awg_service() {
@@ -539,6 +557,7 @@ cmd_install() {
 	echo "  IP Трубы:        $PUB_IP"
 	echo "  SSH VPS:         ssh -p $SSH_PORT root@$PUB_IP"
 	echo "  Туннель:         udp/$AWG_PORT, AmneziaWG $AWG_VERSION (протокол ${AWG_PROTO}.x)"
+	echo "  MTU Туннеля:     $(tunnel_mtu) (сеть VPS: $(cat "/sys/class/net/$WAN_IF/mtu"))"
 	echo "  Конфиг Роутера:  $ROUTER_CONF"
 	echo
 	echo "  Скопировать на компьютер:  scp -P $SSH_PORT root@$PUB_IP:$ROUTER_CONF ."
@@ -592,6 +611,7 @@ cmd_random_trailers() {
 cmd_status() {
 	load_state
 	echo "IP Трубы: ${PUB_IP:-?}   SSH: ${SSH_PORT:-?}   Туннель: udp/${AWG_PORT:-?}   AWG ${AWG_VERSION:-?} (протокол ${AWG_PROTO:-?}.x)"
+	echo "MTU Туннеля: $(cat "/sys/class/net/$AWG_IF/mtu" 2>/dev/null || echo ?) (по сети VPS — не больше $(tunnel_mtu))   очередь ${WAN_IF:-?}: $(tc qdisc show dev "${WAN_IF:-}" root 2>/dev/null | awk '{print $2; exit}')"
 	if [ "${AWG_PROTO:-1}" -ge 3 ]; then
 		echo "Защита заголовков: $([ -n "${HPK:-}" ] && echo вкл || echo выкл)   DisableCookies: вкл   RandomTrailers: $([ "${RANDOM_TRAILERS:-0}" = 1 ] && echo вкл || echo выкл)"
 	fi
