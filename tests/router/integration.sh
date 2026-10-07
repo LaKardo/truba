@@ -19,21 +19,29 @@ idle() { [ -z "$(busy)" ]; }
 wait_idle() { wait_for "$1" idle; }
 # После провала — снять зависшие процессы, чтобы остальные проверки не повисли следом.
 unstick() { for p in $(busy) $(pgrep -f 'flock 1000'); do kill "$p" 2>/dev/null; done; return 0; }
+# wait_pid N PID — ждать до N секунд, пока процесс не завершится; неуспех — ещё работает.
+wait_pid() { t=$1; while [ "$t" -gt 0 ] && kill -0 "$2" 2>/dev/null; do sleep 1; t=$((t - 1)); done; ! kill -0 "$2" 2>/dev/null; }
 # bounded N cmd… — шаг не дольше N секунд. Если повис: кто чего ждёт, блокировки,
 # журнал — и снять, чтобы прогон дошёл до конца, а не обрывался по тайм-ауту CI.
 bounded() {
 	n=$1; shift
 	"$@" & bp=$!
-	while [ "$n" -gt 0 ] && kill -0 "$bp" 2>/dev/null; do sleep 1; n=$((n - 1)); done
-	kill -0 "$bp" 2>/dev/null || { wait "$bp"; return; }
+	wait_pid "$n" "$bp" && { wait "$bp"; return; }
 	{
 	echo "TIMEOUT: $*"
+	# Все процессы, без фильтра: шаг может ждать службу, которую заранее не угадать
+	# (в CI повисли dropbear reload и logread). В контейнере их десятка три.
 	for d in /proc/[0-9]*; do
 		c=$(tr '\0' ' ' < "$d/cmdline" 2>/dev/null); [ -n "$c" ] || continue
 		echo "  ${d#/proc/} ppid=$(cut -d' ' -f4 "$d/stat") $(cut -d' ' -f3 "$d/stat") wchan=$(cat "$d/wchan" 2>/dev/null): $(echo "$c" | cut -c1-110)"
-	done | grep -E 'truba|mosdns|dnsmasq|cron|nft|ip |flock|rc.common|ucode|sleep' | grep -v 'grep -E'
+	done
 	echo "  locks:"; sed 's/^/    /' /proc/locks
-	echo "  log:"; logread | tail -25 | cut -c1-200 | sed 's/^/    /'
+	# logread читает журнал через ubus: если встали procd или ubusd, он висит и сам.
+	# timeout в образе нет — фоном и не дольше 5 с.
+	echo "  log:"
+	logread > /tmp/bounded.log 2>&1 & lp=$!
+	wait_pid 5 "$lp" || { kill "$lp" 2>/dev/null; echo "    (logread не ответил за 5 с)"; }
+	tail -25 /tmp/bounded.log | cut -c1-200 | sed 's/^/    /'
 	} >&3 2>&3
 	kill "$bp" 2>/dev/null; unstick
 	return 124
