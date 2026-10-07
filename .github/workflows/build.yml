@@ -60,6 +60,9 @@ env:
 jobs:
   test:
     runs-on: ubuntu-24.04
+    # Обычно ~4 мин; если все шаги bounded упрутся в предел — ~25. Без предела
+    # зависший шаг держит задание до 6 ч.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - name: Проверки (распаковщик, роутер под procd, VPS, LuCI)
