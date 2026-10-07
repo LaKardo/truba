@@ -32,7 +32,7 @@ return view.extend({
 
 		let upnpState = '';
 		if (up.enabled && !up.installed)
-			upnpState = E('div', { 'class': 'alert-message warning' }, _('UPnP is enabled, but miniupnpd is not installed: install luci-app-upnp.'));
+			upnpState = E('div', { 'class': 'alert-message warning' }, common.UPNP_MISSING);
 		else if (up.enabled && !up.running)
 			upnpState = E('div', { 'class': 'alert-message warning' }, _('UPnP is enabled, but miniupnpd is not running.'));
 		const leases = (up.leases || []).map((l) => E('tr', { 'class': 'tr' }, [
@@ -51,8 +51,28 @@ return view.extend({
 			E('td', { 'class': 'td' }, r.enabled == '0' ? _('disabled') : _('enabled'))
 		]));
 
+		// Те же счётчики, что в строке «Входящие через Трубу» на «Обзоре».
+		const num = (v) => E('td', { 'class': 'truba-num' }, v);
 		return m.render().then((mapEl) => E('div', {}, [
 			mapEl,
+			E('div', { 'class': 'cbi-section' }, [
+				E('h3', {}, _('Inbound via Truba')),
+				E('table', { 'class': 'truba-grid' }, [
+					E('tr', {}, [
+						E('th', {}, _('Counted since')),
+						E('th', {}, '↓ ' + _('To devices')),
+						E('th', {}, '↑ ' + _('From devices')),
+						E('th', {}, _('New connections'))
+					]),
+					E('tr', {}, [
+						num(since ? common.fmtTime(since) : '—'),
+						num(common.fmtBytes(tr.down)),
+						num(common.fmtBytes(tr.up)),
+						num(common.fmtNum(st.counters?.inbound?.packets))
+					])
+				]),
+				E('p', { 'class': 'cbi-section-descr' }, _('Replies always go back through the tunnel, even to Russian clients.'))
+			]),
 			E('div', { 'class': 'cbi-section' }, [
 				E('h3', {}, _('Active UPnP / NAT-PMP mappings')),
 				upnpState,
@@ -62,7 +82,7 @@ return view.extend({
 						E('th', { 'class': 'th' }, _('Device')), E('th', { 'class': 'th' }, _('Description')),
 						E('th', { 'class': 'th' }, _('Expires'))
 					])
-				].concat(leases)) : E('p', {}, E('em', {}, _('No active mappings.')))
+				].concat(leases)) : E('p', {}, common.empty(_('No active mappings.')))
 			]),
 			E('div', { 'class': 'cbi-section' }, [
 				E('h3', {}, _('Port forwards from the tunnel')),
@@ -72,17 +92,10 @@ return view.extend({
 						E('th', { 'class': 'th' }, _('External port')), E('th', { 'class': 'th' }, _('Device')),
 						E('th', { 'class': 'th' }, _('State'))
 					])
-				].concat(rows)) : E('p', {}, E('em', {}, _('No port forwards with source zone «truba».'))),
-				E('p', {}, [
+				].concat(rows)) : E('p', {}, common.empty(_('No port forwards with source zone «truba».'))),
+				E('div', { 'class': 'truba-toolbar' }, [
 					E('a', { 'class': 'btn cbi-button', 'href': L.url('admin/network/firewall/forwards') }, _('Edit port forwards')),
-					' ',
 					E('span', { 'class': 'cbi-value-description' }, _('Choose source zone «truba».'))
-				]),
-				E('p', { 'class': 'cbi-value-description' }, [
-					since ? _('Since %s:').format(common.fmtTime(since)) + ' ' : '',
-					_('%s inbound connections via the tunnel; %s to devices, %s from devices.').format(
-						String(st.counters?.inbound?.packets ?? 0), common.fmtBytes(tr.down), common.fmtBytes(tr.up)),
-					' ', _('Replies always go back through the tunnel, even to Russian clients.')
 				])
 			])
 		]));

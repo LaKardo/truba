@@ -127,6 +127,9 @@ done
 echo "== копирование файлов пакета"
 cp -a /repo/router/truba/files/. /
 chmod +x /usr/sbin/truba /etc/init.d/truba /etc/truba/reinstall.sh /usr/share/truba/uninstall.sh /etc/uci-defaults/90-truba
+# Туннель — WireGuard, и awg из amneziawg-tools нет. «awg show» выводит то же, что «wg show»:
+# без обёртки watchdog не видит handshake и не считает Туннель в порядке.
+[ -x /usr/bin/awg ] || { printf '#!/bin/sh\nexec wg "$@"\n' > /usr/bin/awg; chmod +x /usr/bin/awg; }
 mkdir -p /etc/truba/lists
 cp /dat/geoip.dat /dat/geosite.dat /etc/truba/lists/
 for f in geoip.dat geosite.dat; do sha256sum /etc/truba/lists/$f | awk '{print $1"  "FILENAME}' FILENAME=$f > /etc/truba/lists/$f.sha256sum; done
@@ -234,6 +237,11 @@ NEXT="$(truba status | jsonfilter -e '@.lists.next')"
 check "status: следующий запуск обновления — в ближайшие сутки" sh -c "N=$NEXT; T=\$(date +%s); [ \"\$N\" -gt \"\$T\" ] && [ \"\$N\" -le \$((T + 86400)) ]"
 check "status: следующий запуск — в 12:00 UTC" sh -c "[ \"$(date +%z)\" != +0000 ] || [ \$(( $NEXT % 86400 )) -eq 43200 ]"
 check "mosdns запущен" pidof mosdns
+check "status: mosdns — инстанс службы truba в procd" test "$(truba status | jsonfilter -e '@.mosdns')" = true
+# Контрольные суммы и предыдущие версии — только в lists: status опрашивается раз в 5 с.
+truba lists > /tmp/lists.json
+check "lists: контрольная сумма geoip.dat" sh -c "jsonfilter -i /tmp/lists.json -e '@.geoip.sha256' | grep -qE '^[0-9a-f]{64}$'"
+check "status: без контрольных сумм и предыдущих версий" sh -c "truba status > /tmp/st0.json && [ -z \"\$(jsonfilter -i /tmp/st0.json -e '@.lists.geoip.sha256')\" ] && ! grep -q prev_geoip /tmp/st0.json"
 check "mosdns слушает 5335" sh -c "netstat -lnu 2>/dev/null | grep -q ':5335' || ss -lnu | grep -q ':5335'"
 # API статистики — на соседнем порту и только на 127.0.0.1: там же отладка mosdns (/debug/pprof).
 check "API mosdns: счётчики кэша на 127.0.0.1:5336" sh -c "curl -s -m 2 http://127.0.0.1:5336/metrics | grep -q '^mosdns_cache_query_total'"
@@ -277,6 +285,27 @@ no_ping() { ! ping -c 2 -W 2 10.77.77.1; }
 check "контроль: без цепочки output Туннель при OpenClash уходит в прокси" no_ping
 openclash_off
 nft -f /var/etc/truba/truba.nft
+
+echo "== Проверка NAT: STUN через Туннель"
+# Два STUN-сервера в netns vps отвечают IP Трубы и портом источника; .83 и .84 молчат.
+# По очереди молчащие стоили бы по 4,5 с каждый, разом — одно окно повторов.
+for a in 81 82; do
+	ip -n vps addr add 203.0.113.$a/32 dev lo
+	ip netns exec vps ucode /repo/tests/router/stun_server.uc 203.0.113.$a 3478 198.51.100.2 >/dev/null 2>&1 &
+done
+for a in 81 82 83 84; do uci add_list truba.main.stun="203.0.113.$a:3478"; done
+uci commit truba
+sleep 1
+T0=$(date +%s); truba nat-test > /tmp/nat.json; T1=$(date +%s)
+head -c 700 /tmp/nat.json; echo
+nat() { jsonfilter -i /tmp/nat.json -e "$1"; }
+check "nat-test: ответили два сервера из четырёх" test "$(nat '@.answered')" = 2
+check "nat-test: внешний IP — IP Трубы, порт сохранён" sh -c "[ '$(nat '@.ip_is_vps')' = true ] && [ '$(nat '@.port_preserved')' = true ]"
+check "nat-test: отображение одинаково для разных серверов" test "$(nat '@.consistent')" = true
+check "nat-test: итог OK" test "$(nat '@.ok')" = true
+check "nat-test: молчащий сервер — тайм-аут" test "$(nat '@.servers[3].error')" = timeout
+check "nat-test: серверы опрашиваются разом (не дольше 7 с, было $((T1 - T0)) с)" test $((T1 - T0)) -le 7
+check "status: итог проверки NAT для «Обзора»" test "$(truba status | jsonfilter -e '@.nat.ok')" = true
 
 echo "== учёт трафика устройств (Маршрутизация вкл)"
 bytes() { nft list counter inet truba "$1" 2>/dev/null | sed -n 's/.*bytes \([0-9]*\).*/\1/p'; }
@@ -455,9 +484,17 @@ check "ping_rtt: задержка до Трубы через Туннель" sh 
 check "ping_rtt: нет ответа → null" sh -c "echo '$RTT' | grep -q ' null$'"
 OLD_WD_INTERVAL="$(uci -q get truba.watchdog.interval)"
 uci set truba.watchdog.enabled='1'; uci set truba.watchdog.interval='10'; uci commit truba
+rm -f /var/run/truba/nat.json   # как после перезагрузки: итога проверки NAT ещё нет
 check "reload (не дольше 90 с)" bounded 90 /etc/init.d/truba reload
 wd_probes() { [ "$(jsonfilter -i /var/run/truba/health.json -e '@.probes[0]' 2>/dev/null | cut -d. -f1)" -ge 0 ] 2>/dev/null; }
 check "watchdog: задержка и окно проверок в health.json" wait_for 15 wd_probes
+# STUN-серверы из раздела «Проверка NAT» ещё отвечают.
+nat_auto() { [ "$(jsonfilter -i /var/run/truba/nat.json -e '@.auto' 2>/dev/null)" = true ]; }
+check "watchdog: проверка NAT запущена сама, Туннель в порядке" wait_for 20 nat_auto
+check "watchdog: итог автоматической проверки NAT — OK" test "$(jsonfilter -i /var/run/truba/nat.json -e '@.ok')" = true
+NAT_TIME="$(jsonfilter -i /var/run/truba/nat.json -e '@.time')"
+sleep 12   # следующий цикл: итог свежее «в порядке с» — повтора нет
+check "watchdog: без нового подъёма Туннеля NAT не перепроверяется" test "$(jsonfilter -i /var/run/truba/nat.json -e '@.time')" = "$NAT_TIME"
 check "watchdog: health.json в /var/run (оперативная память)" sh -c "jsonfilter -i /var/run/truba/health.json -e '@.rtt' && [ \"\$(jsonfilter -i /var/run/truba/health.json -e '@.interval')\" = 10 ]"
 check "status: health.probes для «Обзора»" sh -c "truba status | jsonfilter -e '@.health.probes[0]'"
 # Обновление пакета меняет код, но не команду инстанса: reload должен перезапустить watchdog.
@@ -475,6 +512,7 @@ wd_fresh() { [ "$(jsonfilter -i /var/run/truba/health.json -e '@.since')" != 100
 check "устаревшая запись: «в порядке с» начинается заново" wait_for 20 wd_fresh
 check "устаревшая запись: окно проверок не взято" sh -c "[ \$(jsonfilter -i /var/run/truba/health.json -e '@.probes[*]' | wc -l) -le 1 ]"
 if [ -n "$OLD_WD_INTERVAL" ]; then uci set truba.watchdog.interval="$OLD_WD_INTERVAL"; else uci -q delete truba.watchdog.interval; fi
+uci -q delete truba.main.stun
 uci set truba.watchdog.enabled='0'; uci commit truba
 check "reload (не дольше 90 с)" bounded 90 /etc/init.d/truba reload; sleep 2
 

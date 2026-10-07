@@ -27,7 +27,7 @@ function buildVersions() {
 	r.el = E('div', {}, [
 		E('h3', {}, _('Versions')),
 		r.busy,
-		E('table', { 'class': 'truba-traffic truba-versions' }, [
+		E('table', { 'class': 'truba-grid truba-versions' }, [
 			E('tr', {}, [
 				E('th', {}, _('File')), E('th', {}, _('Current version')),
 				E('th', {}, _('Previous version')), E('th', {}, _('Last check'))
@@ -40,11 +40,12 @@ function buildVersions() {
 	return r;
 }
 
-function updateVersions(r, st) {
-	const l = st.lists || {}, last = l.last;
+function updateVersions(r, l) {
+	l = l || {};
+	const last = l.last;
 	if (r.updating !== !!l.updating) {
 		r.updating = !!l.updating;
-		r.busy.replaceChildren(r.updating ? E('em', { 'class': 'spinning' }, _('Update in progress…')) : NBSP);
+		r.busy.replaceChildren(r.updating ? common.busy(_('Update in progress…')) : NBSP);
 	}
 	// Нет версии — «отсутствует» обычным текстом, а не моноширинным, как контрольная сумма.
 	const ver = (c, v) => {
@@ -63,12 +64,12 @@ function updateVersions(r, st) {
 
 return view.extend({
 	load: function() {
-		return common.callStatus();
+		return common.callLists();
 	},
 
-	render: function(st) {
+	render: function(lists) {
 		const versions = buildVersions();
-		updateVersions(versions, st);
+		updateVersions(versions, lists);
 
 		const m = new form.Map('truba', _('DNS & lists'),
 			_('Router DNS goes through mosdns: it recognises geosite categories, picks the upstream and puts resolved IPs into the routing sets.'));
@@ -143,7 +144,7 @@ return view.extend({
 		// проверке зависимостей «включает» его заново.
 		o.render = () => Promise.resolve(E('div', { 'class': 'cbi-value', 'data-field': o.cbid('lists') }, [
 			versions.el,
-			E('div', { 'style': 'display:flex;gap:.5em;flex-wrap:wrap' }, [
+			E('div', { 'class': 'truba-toolbar' }, [
 				E('button', { 'class': 'btn cbi-button-action', 'type': 'button', 'click': ui.createHandlerFn(this, () =>
 					common.callUpdateLists(false).then(() => {
 						versions.kicked = Date.now();   // опрос раз в 5 с, пока обновление не начнётся
@@ -168,7 +169,7 @@ return view.extend({
 			if (!fast && Date.now() - polled < SLOW_POLL)
 				return Promise.resolve();
 			polled = Date.now();
-			return common.callStatus().then((st) => updateVersions(versions, st));
+			return common.callLists().then((l) => updateVersions(versions, l));
 		}, 5);
 
 		return m.render();

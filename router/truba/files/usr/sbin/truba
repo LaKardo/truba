@@ -23,11 +23,13 @@ function usage() {
 		'  update-lists [-f]  скачать Наборы правил (-f — применить даже без изменений)\n' +
 		'  rollback-lists     вернуть предыдущие Наборы правил\n' +
 		'  check <домен|IP> [MAC]  какая Категория и Действие сработают\n' +
-		'  status             состояние в JSON\n' +
+		'  status             состояние для «Обзора» в JSON\n' +
+		'  lists              версии Наборов правил в JSON\n' +
 		'  categories         Категории и Действия в JSON\n' +
 		'  sets               размеры наборов в JSON\n' +
 		'  reset-rules <all|selective>  Стартовые настройки Режима\n' +
-		'  nat-test           проверка внешнего IP и сохранения порта через Трубу\n' +
+		'  nat-test [auto]    проверка внешнего IP и сохранения порта через Трубу\n' +
+		'                     (auto — запуск от watchdog после подъёма Туннеля)\n' +
 		'  watchdog           цикл контроля Туннеля (запускает procd)\n');
 	exit(2);
 }
@@ -68,6 +70,10 @@ case 'status':
 	out(K.status());
 	break;
 
+case 'lists':
+	out(K.lists());
+	break;
+
 case 'categories':
 	out(K.categories());
 	break;
@@ -81,7 +87,7 @@ case 'reset-rules':
 	break;
 
 case 'nat-test':
-	out(NAT.run());
+	out(NAT.run(args[0] == 'auto'));
 	break;
 
 case 'watchdog':

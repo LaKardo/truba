@@ -4,6 +4,7 @@
 'require uci';
 
 const callStatus = rpc.declare({ object: 'truba', method: 'status', expect: { '': {} } });
+const callLists = rpc.declare({ object: 'truba', method: 'lists', expect: { '': {} } });
 const callCategories = rpc.declare({ object: 'truba', method: 'categories', expect: { '': {} } });
 const callSets = rpc.declare({ object: 'truba', method: 'sets', expect: { '': {} } });
 const callCheck = rpc.declare({ object: 'truba', method: 'check', params: [ 'target', 'mac' ], expect: { '': {} } });
@@ -27,6 +28,9 @@ const ACTION_LABELS = {
 	block: _('Block')
 };
 
+// Цвет Действия — один на всех вкладках: значки, точки, график.
+const ACTION_LEVELS = { tunnel: 'info', direct: 'ok', block: 'err' };
+
 const REASON_LABELS = {
 	local: _('local network or the Truba itself — never routed'),
 	geoip_block: _('geoip category with action Block'),
@@ -44,6 +48,21 @@ const WARNING_LABELS = {
 	zones_without_devices: _('The selected firewall zones have no active devices.'),
 	tunnel_not_configured: _('The tunnel is not configured yet — import the configuration on the Tunnel tab.')
 };
+
+// Почему «Проверка NAT» не дала результата (поле error итога).
+const NAT_ERRORS = {
+	not_configured: _('the tunnel is not configured'),
+	tunnel_down: _('the tunnel is down'),
+	socket: _('cannot open a socket'),
+	no_answer: _('no STUN server answered')
+};
+
+// Тексты, которые показывают несколько вкладок.
+const UPNP_MISSING = _('UPnP is enabled, but miniupnpd is not installed: install luci-app-upnp.');
+
+function missingText(list) {
+	return _('Configured but missing from the current rule set (ignored): %s').format(list.join(', '));
+}
 
 function fmtBytes(n) {
 	n = +n || 0;
@@ -90,8 +109,14 @@ function pill(level, text) {
 	return E('span', { 'class': 'truba-badge ' + (level || '') }, text);
 }
 
-function badge(ok, yes, no) {
-	return pill(ok ? 'ok' : 'err', ok ? yes : no);
+// Идёт загрузка или проверка.
+function busy(text) {
+	return E('em', { 'class': 'spinning' }, text);
+}
+
+// Пустой список или нет данных.
+function empty(text) {
+	return E('em', { 'class': 'truba-muted' }, text);
 }
 
 // Обновить текст, только если он изменился: без лишних перерисовок.
@@ -126,7 +151,8 @@ function tunnelIface() {
 }
 
 return baseclass.extend({
-	callStatus, callCategories, callSets, callCheck, callNatTest, callUpdateLists, callRollbackLists, callLog, callLeases,
-	ACTION_LABELS, REASON_LABELS, WARNING_LABELS, NBSP,
-	fmtBytes, fmtRate, fmtAge, fmtTime, fmtDate, fmtNum, pill, badge, setText, setLevel, setResult, tunnelIface
+	callStatus, callLists, callCategories, callSets, callCheck, callNatTest, callUpdateLists, callRollbackLists, callLog, callLeases,
+	ACTION_LABELS, ACTION_LEVELS, REASON_LABELS, WARNING_LABELS, NAT_ERRORS, UPNP_MISSING, NBSP,
+	fmtBytes, fmtRate, fmtAge, fmtTime, fmtDate, fmtNum, pill, busy, empty, missingText,
+	setText, setLevel, setResult, tunnelIface
 });

@@ -66,6 +66,30 @@ msgid "The tunnel is not configured yet — import the configuration on the Tunn
 msgstr ""
 
 #: htdocs/luci-static/resources/truba/common.js
+msgid "the tunnel is not configured"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/common.js
+msgid "the tunnel is down"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/common.js
+msgid "cannot open a socket"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/common.js
+msgid "no STUN server answered"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/common.js
+msgid "UPnP is enabled, but miniupnpd is not installed: install luci-app-upnp."
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/common.js
+msgid "Configured but missing from the current rule set (ignored): %s"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/common.js
 msgid "bit/s"
 msgstr ""
 
@@ -95,6 +119,22 @@ msgstr ""
 
 #: htdocs/luci-static/resources/truba/common.js
 msgid "%d h ago"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/common.js
+msgid "%s (via %s)"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/common.js
+msgid "updated"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/common.js
+msgid "no changes"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/common.js
+msgid "failed — %s"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/diagnostics.js
@@ -207,22 +247,6 @@ msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/dns.js
 msgid "Update in progress…"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/dns.js
-msgid "%s (via %s)"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/dns.js
-msgid "updated"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/dns.js
-msgid "no changes"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/dns.js
-msgid "failed — %s"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/dns.js
@@ -398,10 +422,6 @@ msgid "Package luci-app-upnp is not installed."
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/inbound.js
-msgid "UPnP is enabled, but miniupnpd is not installed: install luci-app-upnp."
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/inbound.js
 msgid "UPnP is enabled, but miniupnpd is not running."
 msgstr ""
 
@@ -415,6 +435,30 @@ msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/inbound.js
 msgid "enabled"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/inbound.js
+msgid "Inbound via Truba"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/inbound.js
+msgid "Counted since"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/inbound.js
+msgid "To devices"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/inbound.js
+msgid "From devices"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/inbound.js
+msgid "New connections"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/inbound.js
+msgid "Replies always go back through the tunnel, even to Russian clients."
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/inbound.js
@@ -469,18 +513,6 @@ msgstr ""
 msgid "Choose source zone «truba»."
 msgstr ""
 
-#: htdocs/luci-static/resources/view/truba/inbound.js
-msgid "Since %s:"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/inbound.js
-msgid "%s inbound connections via the tunnel; %s to devices, %s from devices."
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/inbound.js
-msgid "Replies always go back through the tunnel, even to Russian clients."
-msgstr ""
-
 #: htdocs/luci-static/resources/view/truba/overview.js
 msgid "10 min ago"
 msgstr ""
@@ -518,10 +550,6 @@ msgid "working"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/overview.js
-msgid "Category %s is configured but missing from the current rule set — the rule is ignored."
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/overview.js
 msgid "Error while applying rules: %s"
 msgstr ""
 
@@ -534,7 +562,7 @@ msgid "OpenClash runs in fake-ip mode: «Check NAT» may report a problem althou
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/overview.js
-msgid "UPnP is enabled on the Inbound tab, but miniupnpd is not installed: install luci-app-upnp."
+msgid "The last NAT check found a problem: see the «NAT check» card."
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/overview.js
@@ -543,6 +571,14 @@ msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/overview.js
 msgid "The last rule set check failed: %s"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/overview.js
+msgid "Check NAT"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/overview.js
+msgid "packets dropped"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/overview.js
@@ -578,6 +614,42 @@ msgid "since the interface came up, including the router's own traffic"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/overview.js
+msgid "NAT check"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/overview.js
+msgid "Result"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/overview.js
+msgid "External address"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/overview.js
+msgid "External IP is the Truba IP"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/overview.js
+msgid "Port preserved"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/overview.js
+msgid "Same mapping for different servers"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/overview.js
+msgid "Checked"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/overview.js
+msgid "STUN servers"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/overview.js
+msgid "This checks the Truba layer only. For the full RFC 5780 test run NatTypeTester on a PC in the home network whose device policy is «All via tunnel»."
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/overview.js
 msgid "DNS classifier (mosdns)"
 msgstr ""
 
@@ -598,15 +670,59 @@ msgid "Device traffic"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/overview.js
-msgid "To devices"
+msgid "yes"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/overview.js
-msgid "From devices"
+msgid "no"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/overview.js
-msgid "Inbound via Truba"
+msgid "not run yet"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/overview.js
+msgid "not checked: %s"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/overview.js
+msgid "Truba layer OK"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/overview.js
+msgid "problem"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/overview.js
+msgid "nothing to compare: one server answered"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/overview.js
+msgid "runs by itself after the tunnel comes up"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/overview.js
+msgid "automatically after the tunnel came up"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/overview.js
+msgid "manually"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/overview.js
+msgid "name not resolved"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/overview.js
+msgid "no answer"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/overview.js
+msgid "%d ms"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/overview.js
+msgid "Testing…"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/overview.js
@@ -639,10 +755,6 @@ msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/overview.js
 msgid "the watchdog is off"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/overview.js
-msgid "%d ms"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/overview.js
@@ -730,15 +842,15 @@ msgid "Traffic of devices in the routed zones. The router's own traffic (DNS, li
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/overview.js
-msgid "New connections"
+msgid "%s per min"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/overview.js
-msgid "Blocked"
+msgid "No outgoing connections yet."
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/overview.js
-msgid "packets"
+msgid "Outgoing connections: %d%% via tunnel, %d%% direct"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/overview.js
@@ -747,46 +859,6 @@ msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/overview.js
 msgid "IPs from DNS: %s"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/overview.js
-msgid "Test failed: %s"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/overview.js
-msgid "OK"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/overview.js
-msgid "problem"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/overview.js
-msgid "External IP: %s (Truba IP: %s), local port %s"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/overview.js
-msgid "External IP is the Truba IP"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/overview.js
-msgid "yes"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/overview.js
-msgid "no"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/overview.js
-msgid "Port preserved"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/overview.js
-msgid "Same mapping for different servers"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/overview.js
-msgid "This checks the Truba layer only. For the full RFC 5780 test run NatTypeTester on a PC in the home network whose device policy is «All via tunnel»."
 msgstr ""
 
 #: menu.d
@@ -807,18 +879,6 @@ msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/overview.js
 msgid "Distributes traffic by actions. When off, everything goes direct, but inbound connections via the Truba IP keep working."
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/overview.js
-msgid "NAT check"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/overview.js
-msgid "Testing…"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/overview.js
-msgid "Check NAT"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/routing.js
@@ -927,10 +987,6 @@ msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/routing.js
 msgid "By mode = Direct. Only categories with action Tunnel go through the tunnel."
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/routing.js
-msgid "Configured but missing from the current rule set (ignored): "
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/routing.js

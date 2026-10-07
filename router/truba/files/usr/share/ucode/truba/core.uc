@@ -3,6 +3,8 @@
 
 import { readfile, writefile, stat, unlink, rename } from 'fs';
 import { cursor } from 'uci';
+import { connect } from 'ubus';
+import * as socket from 'socket';
 import * as C from 'truba.const';
 import * as U from 'truba.util';
 import * as D from 'truba.dat';
@@ -373,12 +375,16 @@ export function rollback_lists() {
 	return { swapped };
 };
 
-function list_info(dir, file) {
+// sums — с контрольной суммой: она нужна только вкладке «DNS и списки».
+function list_info(dir, file, sums) {
 	let p = dir + '/' + file;
 	let st = stat(p);
 	if (!st)
 		return null;
-	return { sha256: sha_from_sumfile(p + '.sha256sum') ?? U.sha256_file(p), mtime: st.mtime, size: st.size };
+	let res = { mtime: st.mtime, size: st.size };
+	if (sums)
+		res.sha256 = sha_from_sumfile(p + '.sha256sum') ?? U.sha256_file(p);
+	return res;
 }
 
 // ---- Состояние ----
@@ -415,10 +421,20 @@ function neighbours() {
 	return res;
 }
 
+// Работает ли служба procd (или её инстанс) — по ubus, без pidof. mosdns — инстанс
+// службы truba: чужой mosdns, запущенный отдельно, за Трубу не считается.
+function running(ub, service, instance) {
+	let r = ub?.call('service', 'list', { name: service });
+	for (let name, inst in r?.[service]?.instances ?? {})
+		if ((instance == null || name == instance) && inst.running)
+			return true;
+	return false;
+}
+
 // UPnP на Туннеле: включён ли в Трубе, стоит ли miniupnpd, работает ли, его пробросы.
-function upnp_info(cfg) {
+function upnp_info(cfg, ub) {
 	let res = { enabled: cfg.upnp, installed: stat('/etc/init.d/miniupnpd') != null,
-	            running: system('pidof miniupnpd >/dev/null 2>&1') == 0, leases: [] };
+	            running: running(ub, 'miniupnpd'), leases: [] };
 	let c = cursor();
 	let file = (stat('/etc/config/upnpd') && c.load('upnpd')) ? c.get('upnpd', 'config', 'upnp_lease_file') : null;
 	// Строка: ПРОТОКОЛ:внешний порт:IP устройства:порт устройства:срок (unix):описание
@@ -431,12 +447,38 @@ function upnp_info(cfg) {
 	return res;
 }
 
+// GET по HTTP/1.0 к локальному API — прямо из ucode, без curl и оболочки: status
+// вызывается раз в 5 с. Тело ответа 200 или null (нет ответа, тайм-аут, обрыв).
+function http_get(addr, path, timeout) {
+	let i = rindex(addr, ':');
+	let s = socket.connect(substr(addr, 0, i), substr(addr, i + 1), { socktype: socket.SOCK_STREAM }, timeout);
+	if (!s)
+		return null;
+	let out = '', done = false, end = U.now_ms() + timeout;
+	if (s.send(sprintf('GET %s HTTP/1.0\r\nHost: %s\r\n\r\n', path, addr))) {
+		while (true) {
+			let left = end - U.now_ms();
+			let pr = (left > 0) ? socket.poll(int(left), [ s, socket.POLLIN ]) : null;
+			let chunk = length(pr ?? []) ? s.recv(65536) : null;
+			if (chunk == null)
+				break;
+			if (chunk == '') {
+				done = true;
+				break;
+			}
+			out += chunk;
+		}
+	}
+	s.close();
+	let b = index(out, '\r\n\r\n');
+	return (done && b >= 0 && match(out, /^HTTP\/1\.[01] 200 /)) ? substr(out, b + 4) : null;
+}
+
 // Счётчики кэша mosdns из его API: query — запросов, hit — ответов из кэша (вместе с
 // истёкшими), lazy_hit — истёкших, size — записей сейчас. Отсчёт — с запуска mosdns.
 function dns_cache(api, cfg) {
-	let r = U.run(sprintf("curl -s -m 1 http://%s/metrics | grep '^mosdns_cache_'", api));
 	let res = {};
-	for (let l in split(r.out, '\n')) {
+	for (let l in split(http_get(api, '/metrics', 1000) ?? '', '\n')) {
 		let m = match(l, /^mosdns_cache_(query_total|hit_total|lazy_hit_total|size_current)(\{[^}]*\})? ([0-9.e+]+)$/);
 		if (m)
 			res[replace(m[1], /_(total|current)$/, '')] = int(+m[3]);
@@ -466,13 +508,16 @@ function awg_peer(dev) {
 	};
 }
 
+// Состояние для «Обзора»: его опрашивают раз в 5 с, поэтому здесь только то, что
+// «Обзор» показывает, и без лишних процессов. Версии списков — lists().
 export function status() {
 	let cfg = F.load();
 	let tinfo = F.tunnel_info(cfg.iface);
 	let st = N.iface_up(cfg.iface);
 	let applied = U.read_json(C.APPLIED_FILE, null);
 	let raw = counters_raw();
-	return {
+	let ub = connect();
+	let res = {
 		routing: cfg.routing,
 		mode: cfg.mode,
 		killswitch: cfg.killswitch,
@@ -497,19 +542,33 @@ export function status() {
 		counters: counters(raw),
 		traffic: traffic(raw),
 		neighbours: neighbours(),
-		upnp: upnp_info(cfg),
-		mosdns: system('pidof mosdns >/dev/null 2>&1') == 0,
+		upnp: upnp_info(cfg, ub),
+		mosdns: running(ub, 'truba', 'mosdns'),
 		// Адрес API — тот, с которым mosdns запущена (его может не быть, если порт занят).
 		dns_cache: (cfg.routing && applied?.dns_api) ? dns_cache(applied.dns_api, cfg) : null,
+		// Итог последней «Проверки NAT» — кнопкой или watchdog после подъёма Туннеля.
+		nat: U.read_json(C.NAT_FILE, null),
 		lists: {
 			geoip: list_info(C.LISTS_DIR, C.DAT_FILES.geoip),
 			geosite: list_info(C.LISTS_DIR, C.DAT_FILES.geosite),
-			prev_geoip: list_info(C.PREV_DIR, C.DAT_FILES.geoip),
-			prev_geosite: list_info(C.PREV_DIR, C.DAT_FILES.geosite),
 			last: U.read_json(C.LISTS_STATE, null),
 			updating: stat(C.RUN_DIR + '/update.pid') != null,
 			next: N.cron_next(),
 		},
+	};
+	ub?.disconnect();
+	return res;
+};
+
+// Версии Наборов правил для вкладки «DNS и списки»: текущие и предыдущие, с контрольными суммами.
+export function lists() {
+	return {
+		geoip: list_info(C.LISTS_DIR, C.DAT_FILES.geoip, true),
+		geosite: list_info(C.LISTS_DIR, C.DAT_FILES.geosite, true),
+		prev_geoip: list_info(C.PREV_DIR, C.DAT_FILES.geoip, true),
+		prev_geosite: list_info(C.PREV_DIR, C.DAT_FILES.geosite, true),
+		last: U.read_json(C.LISTS_STATE, null),
+		updating: stat(C.RUN_DIR + '/update.pid') != null,
 	};
 };
 

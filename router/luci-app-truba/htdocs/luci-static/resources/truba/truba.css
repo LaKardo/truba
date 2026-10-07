@@ -26,6 +26,7 @@
 .truba-dot.ok::before   { color: var(--success-color-high, #2e7d32); }
 .truba-dot.warn::before { color: var(--warn-color-high, #f9a825); }
 .truba-dot.err::before  { color: var(--error-color-high, #c62828); }
+.truba-dot.info::before { color: var(--primary-color-high, #1565c0); }
 
 /* Сводка над карточками: высота не зависит от данных, предупреждения раскрываются по клику. */
 .truba-summary {
@@ -76,17 +77,18 @@
 .truba-kv th { width: 38%; color: var(--text-color-medium, #666); }
 .truba-kv tr:last-child > * { border-bottom: 0; }
 
-/* Трафик по Действиям: всего и скорость сейчас — две строки в ячейке. */
-.truba-traffic { width: 100%; table-layout: fixed; border-collapse: collapse; }
-.truba-traffic th, .truba-traffic td {
+/* Числовая таблица: трафик по Действиям, версии списков. Значение и пояснение под ним —
+   две строки в ячейке. */
+.truba-grid { width: 100%; table-layout: fixed; border-collapse: collapse; }
+.truba-grid th, .truba-grid td {
 	padding: .4em .5em;
 	text-align: right;
 	vertical-align: top;
 	border-bottom: 1px solid var(--border-color-low, #e5e5e5);
 }
-.truba-traffic th { font-weight: normal; color: var(--text-color-medium, #666); }
-.truba-traffic th:first-child, .truba-traffic td:first-child { width: 34%; text-align: left; padding-left: 0; }
-.truba-traffic td span { display: block; white-space: nowrap; }
+.truba-grid th { font-weight: normal; color: var(--text-color-medium, #666); }
+.truba-grid th:first-child, .truba-grid td:first-child { width: 34%; text-align: left; padding-left: 0; }
+.truba-grid td span { display: block; white-space: nowrap; }
 
 /* Версии Наборов правил: всё по левому краю, контрольная сумма переносится в узкой колонке. */
 .truba-versions th, .truba-versions td { text-align: left; }
@@ -116,5 +118,33 @@
 .truba-legend i.direct { border-top-color: var(--success-color-high, #2e7d32); }
 .truba-legend i.up { border-top-style: dashed; }
 
+/* Доля новых соединений: Туннель — Напрямую, цвета как на графике. */
+.truba-share {
+	display: flex;
+	height: .5em;
+	margin: .25em 0 .5em;
+	border-radius: 3px;
+	overflow: hidden;
+	background: var(--border-color-low, #e5e5e5);
+}
+.truba-share .tunnel { background: var(--primary-color-high, #1565c0); }
+.truba-share .direct { background: var(--success-color-high, #2e7d32); }
+
 /* Строка, которая меняет текст, но не высоту (например, «идёт обновление»). */
 .truba-line { min-height: 1.6em; }
+
+/* Строка полей и кнопок; на телефоне переносится. */
+.truba-toolbar { display: flex; flex-wrap: wrap; gap: .5em 1em; align-items: center; margin: .5em 0; }
+.truba-toolbar .truba-grow { flex: 1 1 18em; min-width: 0; }
+
+/* Журнал и текст конфигурации — моноширинным шрифтом. */
+.truba-log { max-height: 30em; overflow: auto; white-space: pre-wrap; }
+.truba-conf { width: 100%; font-family: monospace; }
+
+/* Заголовок результата проверки домена: «цель → Действие». */
+.truba-target { font-size: 1.2em; }
+
+/* Подробности «Проверки NAT» по серверам. */
+.truba-details { margin-top: .5em; }
+.truba-details summary { cursor: pointer; color: var(--text-color-medium, #666); }
+.truba-details ul { margin: .25em 0 0; }

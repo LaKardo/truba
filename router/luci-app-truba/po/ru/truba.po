@@ -400,35 +400,17 @@ msgstr "работает"
 msgid "not running"
 msgstr "не запущен"
 
-msgid "Blocked"
-msgstr "Заблокировано"
-
-msgid "packets"
-msgstr "пакетов"
-
 msgid "Inbound via Truba"
 msgstr "Входящие через Трубу"
 
 msgid "missing"
 msgstr "нет"
 
-msgid "Category %s is configured but missing from the current rule set — the rule is ignored."
-msgstr "Категория %s задана в настройках, но её нет в текущем Наборе правил — правило пропускается."
-
 msgid "Error while applying rules: %s"
 msgstr "Ошибка при применении правил: %s"
 
-msgid "Test failed: %s"
-msgstr "Проверка не удалась: %s"
-
-msgid "OK"
-msgstr "в порядке"
-
 msgid "problem"
 msgstr "проблема"
-
-msgid "External IP: %s (Truba IP: %s), local port %s"
-msgstr "Внешний IP: %s (IP Трубы: %s), локальный порт %s"
 
 msgid "External IP is the Truba IP"
 msgstr "Внешний IP — это IP Трубы"
@@ -522,9 +504,6 @@ msgstr "«По режиму» = Туннель. Узкие Категории п
 
 msgid "By mode = Direct. Only categories with action Tunnel go through the tunnel."
 msgstr "«По режиму» = Напрямую. Через Туннель идут только Категории с Действием «Туннель»."
-
-msgid "Configured but missing from the current rule set (ignored): "
-msgstr "Заданы в настройках, но отсутствуют в текущем Наборе правил (пропускаются): "
 
 msgid "only with an explicit action"
 msgstr "только с явным Действием"
@@ -664,12 +643,6 @@ msgstr "Истекает"
 msgid "No active mappings."
 msgstr "Пробросов нет."
 
-msgid "Since %s:"
-msgstr "С %s:"
-
-msgid "%s inbound connections via the tunnel; %s to devices, %s from devices."
-msgstr "входящих соединений через Туннель — %s; к устройствам %s, от устройств %s."
-
 msgid "Replies always go back through the tunnel, even to Russian clients."
 msgstr "Ответы всегда возвращаются через Туннель, даже российским клиентам."
 
@@ -696,9 +669,6 @@ msgstr "Включено программное ускорение (Сеть →
 
 msgid "OpenClash runs in fake-ip mode: «Check NAT» may report a problem although full cone NAT works."
 msgstr "OpenClash работает в режиме fake-ip: «Проверить NAT» может показать проблему, хотя Full cone NAT работает."
-
-msgid "UPnP is enabled on the Inbound tab, but miniupnpd is not installed: install luci-app-upnp."
-msgstr "UPnP включён на вкладке «Входящие», но miniupnpd не установлен: поставьте luci-app-upnp."
 
 msgid "Device traffic"
 msgstr "Трафик устройств"
@@ -831,3 +801,75 @@ msgstr "подсетей geoip: %s"
 
 msgid "IPs from DNS: %s"
 msgstr "IP из DNS: %s"
+
+msgid "the tunnel is not configured"
+msgstr "Туннель не настроен"
+
+msgid "the tunnel is down"
+msgstr "Туннель не работает"
+
+msgid "cannot open a socket"
+msgstr "не удалось открыть сокет"
+
+msgid "no STUN server answered"
+msgstr "ни один STUN-сервер не ответил"
+
+msgid "Configured but missing from the current rule set (ignored): %s"
+msgstr "Заданы в настройках, но отсутствуют в текущем Наборе правил (пропускаются): %s"
+
+msgid "Counted since"
+msgstr "Отсчёт с"
+
+msgid "The last NAT check found a problem: see the «NAT check» card."
+msgstr "Последняя проверка NAT нашла проблему: см. карточку «Проверка NAT»."
+
+msgid "packets dropped"
+msgstr "пакетов отброшено"
+
+msgid "Result"
+msgstr "Итог"
+
+msgid "External address"
+msgstr "Внешний адрес"
+
+msgid "Checked"
+msgstr "Проверено"
+
+msgid "STUN servers"
+msgstr "STUN-серверы"
+
+msgid "not run yet"
+msgstr "ещё не запускалась"
+
+msgid "not checked: %s"
+msgstr "не проверено: %s"
+
+msgid "Truba layer OK"
+msgstr "Труба в порядке"
+
+msgid "nothing to compare: one server answered"
+msgstr "не с чем сравнить: ответил один сервер"
+
+msgid "runs by itself after the tunnel comes up"
+msgstr "запустится сама после подъёма Туннеля"
+
+msgid "automatically after the tunnel came up"
+msgstr "автоматически после подъёма Туннеля"
+
+msgid "manually"
+msgstr "вручную"
+
+msgid "name not resolved"
+msgstr "имя не найдено"
+
+msgid "no answer"
+msgstr "нет ответа"
+
+msgid "%s per min"
+msgstr "%s в мин"
+
+msgid "No outgoing connections yet."
+msgstr "Исходящих соединений пока нет."
+
+msgid "Outgoing connections: %d%% via tunnel, %d%% direct"
+msgstr "Исходящие соединения: %d%% через Туннель, %d%% напрямую"

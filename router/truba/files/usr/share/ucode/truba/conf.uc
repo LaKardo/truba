@@ -32,6 +32,8 @@ export function load() {
 		zones: length(U.to_list(m.zone)) ? U.to_list(m.zone) : [ 'lan' ],
 		dns_hijack: bool(m.dns_hijack, true),
 		upnp: bool(m.upnp, false),
+		// STUN-серверы «Проверки NAT» («host:port»); пусто — стандартные из truba.nattest.
+		stun: U.to_list(m.stun),
 		rules: [],
 		devices: [],
 		dns: {

@@ -4,8 +4,7 @@
 'require truba.common as common';
 
 function actionBadge(a) {
-	const levels = { tunnel: 'info', direct: 'ok', block: 'err' };
-	return common.pill(levels[a] || '', common.ACTION_LABELS[a] || a);
+	return common.pill(common.ACTION_LEVELS[a] || '', common.ACTION_LABELS[a] || a);
 }
 
 function renderCheck(r) {
@@ -13,7 +12,7 @@ function renderCheck(r) {
 		return E('p', {}, _('Error: %s').format((r && r.error) || 'no answer'));
 
 	const parts = [
-		E('p', { 'style': 'font-size:1.2em' }, [ E('strong', {}, r.target), ' → ', actionBadge(r.action) ]),
+		E('p', { 'class': 'truba-target' }, [ E('strong', {}, r.target), ' → ', actionBadge(r.action) ]),
 		E('p', {}, _('Why: %s').format(common.REASON_LABELS[r.reason] || r.reason))
 	];
 
@@ -28,9 +27,9 @@ function renderCheck(r) {
 		].concat(hits.map((h) => E('tr', { 'class': 'tr' }, [
 			E('td', { 'class': 'td' }, (r.decisive && r.decisive.tag == h.tag) ? E('strong', {}, h.tag + ' ✓') : h.tag),
 			E('td', { 'class': 'td' }, E('code', {}, h.entry)),
-			E('td', { 'class': 'td' }, String(h.count)),
+			E('td', { 'class': 'td' }, common.fmtNum(h.count)),
 			E('td', { 'class': 'td' }, common.ACTION_LABELS[h.action] || h.action)
-		])))) : E('p', {}, E('em', {}, _('none'))));
+		])))) : E('p', {}, common.empty(_('none'))));
 		if (r.decisive)
 			parts.push(E('p', {}, _('Decisive category (the narrowest one with an explicit action): %s').format(r.decisive.tag)));
 	}
@@ -60,18 +59,18 @@ return view.extend({
 
 	render: function(leasesData) {
 		const leases = (leasesData && leasesData.dhcp_leases) || [];
-		const input = E('input', { 'type': 'text', 'class': 'cbi-input-text', 'style': 'min-width:22em',
+		const input = E('input', { 'type': 'text', 'class': 'cbi-input-text truba-grow',
 			'placeholder': _('domain or IPv4, e.g. gosuslugi.ru') });
 		const dev = E('select', { 'class': 'cbi-input-select' }, [ E('option', { 'value': '' }, _('— any device —')) ].concat(
 			leases.filter((l) => l.macaddr).map((l) => E('option', { 'value': l.macaddr }, '%s (%s)'.format(l.hostname || l.ipaddr || '?', l.macaddr)))));
 		const out = E('div');
-		const logBox = E('pre', { 'style': 'max-height:30em;overflow:auto;white-space:pre-wrap' });
+		const logBox = E('pre', { 'class': 'truba-log' });
 
 		const runCheck = () => {
 			const t = input.value.trim();
 			if (!t)
 				return;
-			out.replaceChildren(E('em', { 'class': 'spinning' }, _('Checking…')));
+			out.replaceChildren(common.busy(_('Checking…')));
 			// Без устройства аргумент mac не передаётся вовсе: rpcd отклоняет null вместо строки.
 			const call = dev.value ? common.callCheck(t, dev.value) : common.callCheck(t);
 			return call.then((r) => out.replaceChildren(renderCheck(r)));
@@ -87,7 +86,7 @@ return view.extend({
 				E('h3', {}, _('Check domain / IP')),
 				E('p', { 'class': 'cbi-section-descr' },
 					_('Shows which category and action apply and why. A domain is resolved through the router, the same way a device would.')),
-				E('div', { 'style': 'display:flex;gap:.5em;flex-wrap:wrap' }, [
+				E('div', { 'class': 'truba-toolbar' }, [
 					input, dev,
 					E('button', { 'class': 'btn cbi-button-action', 'click': ui.createHandlerFn(this, runCheck) }, _('Check'))
 				]),
@@ -95,7 +94,7 @@ return view.extend({
 			]),
 			E('div', { 'class': 'cbi-section' }, [
 				E('h3', {}, _('Log: Truba and mosdns')),
-				E('button', { 'class': 'btn cbi-button', 'click': ui.createHandlerFn(this, loadLog) }, _('Refresh')),
+				E('div', { 'class': 'truba-toolbar' }, E('button', { 'class': 'btn cbi-button', 'click': ui.createHandlerFn(this, loadLog) }, _('Refresh'))),
 				logBox
 			])
 		]);

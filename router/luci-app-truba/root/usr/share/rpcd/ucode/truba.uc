@@ -28,6 +28,12 @@ const methods = {
 		}
 	},
 
+	lists: {
+		call: function() {
+			return truba('lists');
+		}
+	},
+
 	categories: {
 		call: function() {
 			return truba('categories');
