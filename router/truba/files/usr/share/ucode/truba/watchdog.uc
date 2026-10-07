@@ -32,6 +32,20 @@ export function ping_rtt(dev, target) {
 // Окно последних проверок для «Обзора»: задержка и потери за ~10 минут при интервале 30 с.
 const PROBE_WINDOW = 20;
 
+// «Проверка NAT» сама: после подъёма Туннеля (итог старше «в порядке с») и после
+// перезагрузки (итога нет). Если ни один сервер не ответил — повтор не чаще раза в
+// NAT_RETRY с: при загрузке DNS может ещё не работать. Запущенную проверку (до ~5 с)
+// ждём NAT_WAIT с, а не запускаем вторую.
+const NAT_RETRY = 600, NAT_WAIT = 60;
+let nat_started = 0;
+
+function nat_due(since) {
+	if (time() - nat_started < NAT_WAIT)
+		return false;
+	let n = U.read_json(C.NAT_FILE, null);
+	return !n || n.time < since || (n.error && time() - n.time >= NAT_RETRY);
+}
+
 export function run() {
 	let cfg = F.load();
 	if (!cfg.watchdog.enabled)
@@ -105,6 +119,11 @@ export function run() {
 			if (ping_ok && age != null && age <= w.handshake_max) {
 				fails = 0;
 				set_state('healthy', sprintf('handshake %d с назад', age), rec);
+				// В фоне: проверка ждёт ответов до 4,5 с, а цикл не должен.
+				if (nat_due(since)) {
+					nat_started = time();
+					system('( /usr/sbin/truba nat-test auto >/dev/null 2>&1 & )');
+				}
 			}
 			else {
 				fails++;

@@ -28,12 +28,18 @@ function saveHist() {
 	try { sessionStorage.setItem(STORE, JSON.stringify(hist)); } catch (e) { }
 }
 
+// Строки таблицы «Трафик устройств» и цвет точки перед названием.
+const KINDS = [ 'tunnel', 'direct', 'inbound' ];
+const KIND_LEVELS = { tunnel: common.ACTION_LEVELS.tunnel, direct: common.ACTION_LEVELS.direct, inbound: '' };
+
 // Скорость по разнице с прошлым опросом. null — сравнивать не с чем: первый опрос,
 // долгий перерыв или счётчики начаты заново (служба перезапущена, интерфейс переподнят).
+// conn — новых соединений в секунду (счётчики c_tunnel, c_direct, c_inbound).
 function takeRates(st) {
-	const awg = st.tunnel?.awg || {}, tr = st.traffic || {};
+	const awg = st.tunnel?.awg || {}, tr = st.traffic || {}, c = st.counters || {};
 	const cur = { t: Date.now() / 1000, since: st.applied?.counters_since ?? null, rx: awg.rx ?? null, tx: awg.tx ?? null,
-		tr: { tunnel: tr.tunnel || {}, direct: tr.direct || {}, inbound: tr.inbound || {} } };
+		tr: { tunnel: tr.tunnel || {}, direct: tr.direct || {}, inbound: tr.inbound || {} },
+		conn: { tunnel: c.tunnel?.packets ?? null, direct: c.direct?.packets ?? null, inbound: c.inbound?.packets ?? null } };
 	const p = hist.last;
 	hist.last = cur;
 	const dt = p ? cur.t - p.t : 0;
@@ -41,8 +47,8 @@ function takeRates(st) {
 	if (p && dt >= 1 && dt <= 60 && p.since == cur.since) {
 		const d = (a, b) => (a != null && b != null && a >= b) ? (a - b) / dt : null;
 		r = {};
-		for (let k of [ 'tunnel', 'direct', 'inbound' ])
-			r[k] = { down: d(cur.tr[k].down, p.tr[k]?.down), up: d(cur.tr[k].up, p.tr[k]?.up) };
+		for (let k of KINDS)
+			r[k] = { down: d(cur.tr[k].down, p.tr[k]?.down), up: d(cur.tr[k].up, p.tr[k]?.up), conn: d(cur.conn[k], p.conn?.[k]) };
 	}
 	hist.points.push({ t: cur.t, v: r ? [ r.tunnel.down, r.tunnel.up, r.direct.down, r.direct.up ] : null });
 	hist.points = hist.points.filter((x) => x.t > cur.t - WINDOW);
@@ -170,8 +176,8 @@ function warnings(st) {
 	const res = [];
 	for (let w of (a.warnings || []))
 		res.push(common.WARNING_LABELS[w] || w);
-	for (let m of (a.missing || []))
-		res.push(_('Category %s is configured but missing from the current rule set — the rule is ignored.').format(m));
+	if ((a.missing || []).length)
+		res.push(common.missingText(a.missing));
 	if (a.error)
 		res.push(_('Error while applying rules: %s').format(a.error));
 	if (nb.offload)
@@ -179,7 +185,10 @@ function warnings(st) {
 	if (nb.openclash_fakeip)
 		res.push(_('OpenClash runs in fake-ip mode: «Check NAT» may report a problem although full cone NAT works.'));
 	if (up.enabled && !up.installed)
-		res.push(_('UPnP is enabled on the Inbound tab, but miniupnpd is not installed: install luci-app-upnp.'));
+		res.push(common.UPNP_MISSING);
+	// Ошибки «не настроен» и «не работает» уже видны по состоянию Туннеля.
+	if (st.nat && !st.nat.error && !st.nat.ok)
+		res.push(_('The last NAT check found a problem: see the «NAT check» card.'));
 	// Автообновление идёт раз в сутки; проверка старше 36 ч — cron не запускал его или он падал.
 	if (st.routing && uci.get('truba', 'lists', 'auto_update') != '0' && !st.lists?.updating) {
 		const failed = failedSets(last);
@@ -233,17 +242,35 @@ function buildPage() {
 	r.dSets = span('truba-num');
 	r.dSetsNote = note();
 
+	// Проверка NAT: строки постоянны, меняются значения; список серверов — по клику.
+	r.nat = { busy: false, key: null };
+	r.nat.state = span('truba-badge');
+	r.nat.addr = span('truba-num');
+	r.nat.vps = span('truba-dot');
+	r.nat.port = span('truba-dot');
+	r.nat.same = span('truba-dot');
+	r.nat.when = span();
+	r.nat.servers = E('ul');
+	r.nat.btn = E('button', { 'class': 'btn cbi-button', 'type': 'button', 'click': ui.createHandlerFn(r, () => runNat(r)) },
+		_('Check NAT'));
+
 	r.trDescr = E('p', { 'class': 'cbi-section-descr' });
 	r.tr = {};
-	const trRow = (label, k) => {
-		const cell = () => {
-			const total = span('truba-num'), rate = span('truba-muted truba-num');
-			return { total, rate, el: E('td', {}, [ total, rate ]) };
-		};
-		r.tr[k] = { down: cell(), up: cell() };
-		return E('tr', {}, [ E('td', {}, label), r.tr[k].down.el, r.tr[k].up.el ]);
+	// Ячейка: итог и под ним скорость (или пояснение).
+	const cell = () => {
+		const total = span('truba-num'), rate = span('truba-muted truba-num');
+		return { total, rate, el: E('td', {}, [ total, rate ]) };
 	};
-	r.conns = E('p', { 'class': 'truba-muted truba-num' });
+	const label = (level, text) => E('td', {}, E('span', { 'class': 'truba-dot ' + level }, text));
+	const trRow = (text, k) => {
+		r.tr[k] = { down: cell(), up: cell(), conn: cell() };
+		return E('tr', {}, [ label(KIND_LEVELS[k], text), r.tr[k].down.el, r.tr[k].up.el, r.tr[k].conn.el ]);
+	};
+	// Блок — отброшенные пакеты, а не соединения: трафика у них нет.
+	r.block = cell();
+	r.block.rate.textContent = _('packets dropped');
+	r.shareText = E('div', { 'class': 'truba-muted truba-num' }, NBSP);
+	r.share = { tunnel: span('tunnel'), direct: span('direct') };
 	r.chart = makeChart();
 
 	r.el = E('div', {}, [
@@ -265,6 +292,21 @@ function buildPage() {
 				])
 			]),
 			E('div', { 'class': 'cbi-section' }, [
+				E('h3', {}, _('NAT check')),
+				kv([
+					[ _('Result'), r.nat.state ],
+					[ _('External address'), r.nat.addr ],
+					[ _('External IP is the Truba IP'), r.nat.vps ],
+					[ _('Port preserved'), r.nat.port ],
+					[ _('Same mapping for different servers'), r.nat.same ],
+					[ _('Checked'), r.nat.when ]
+				]),
+				E('details', { 'class': 'truba-details' }, [ E('summary', {}, _('STUN servers')), r.nat.servers ]),
+				E('div', { 'class': 'truba-toolbar' }, [ r.nat.btn ]),
+				E('p', { 'class': 'truba-muted' },
+					_('This checks the Truba layer only. For the full RFC 5780 test run NatTypeTester on a PC in the home network whose device policy is «All via tunnel».'))
+			]),
+			E('div', { 'class': 'cbi-section' }, [
 				E('h3', {}, _('DNS & lists')),
 				kv([
 					[ _('DNS classifier (mosdns)'), r.dMosdns ],
@@ -281,20 +323,70 @@ function buildPage() {
 			E('h3', {}, _('Device traffic')),
 			r.trDescr,
 			r.chart.el,
-			E('table', { 'class': 'truba-traffic' }, [
+			E('table', { 'class': 'truba-grid' }, [
 				E('tr', {}, [
 					E('th', {}, _('Action')),
 					E('th', {}, '↓ ' + _('To devices')),
-					E('th', {}, '↑ ' + _('From devices'))
+					E('th', {}, '↑ ' + _('From devices')),
+					E('th', {}, _('New connections'))
 				]),
 				trRow(_('Tunnel'), 'tunnel'),
 				trRow(_('Direct'), 'direct'),
-				trRow(_('Inbound via Truba'), 'inbound')
+				trRow(_('Inbound via Truba'), 'inbound'),
+				E('tr', {}, [ label(common.ACTION_LEVELS.block, _('Block')), E('td', {}, '—'), E('td', {}, '—'), r.block.el ])
 			]),
-			r.conns
+			E('div', { 'class': 'truba-share' }, [ r.share.tunnel, r.share.direct ]),
+			r.shareText
 		])
 	]);
 	return r;
+}
+
+// Итог «Проверки NAT»: из status (последняя проверка) или сразу после нажатия кнопки.
+function paintNat(r, n, wdOn) {
+	const x = r.nat;
+	const yesNo = (el, v, unknown) => setState(el, v == null ? '' : v ? 'ok' : 'err', v == null ? unknown : v ? _('yes') : _('no'));
+	if (!n || n.error) {
+		if (!n)
+			setState(x.state, '', _('not run yet'));
+		else
+			setState(x.state, (n.error == 'tunnel_down' || n.error == 'not_configured') ? 'warn' : 'err',
+				_('not checked: %s').format(common.NAT_ERRORS[n.error] || n.error));
+		common.setText(x.addr, '—');
+		for (let el of [ x.vps, x.port, x.same ])
+			setState(el, '', '—');
+	}
+	else {
+		setState(x.state, n.ok ? 'ok' : 'err', n.ok ? _('Truba layer OK') : _('problem'));
+		common.setText(x.addr, '%s:%d'.format(n.external_ip, n.external_port));
+		yesNo(x.vps, n.ip_is_vps);
+		yesNo(x.port, n.port_preserved);
+		yesNo(x.same, n.consistent, _('nothing to compare: one server answered'));
+	}
+	common.setText(x.when, !n
+		? (wdOn ? _('runs by itself after the tunnel comes up') : _('never'))
+		: '%s · %s'.format(common.fmtTime(n.time), n.auto ? _('automatically after the tunnel came up') : _('manually')));
+
+	// Список серверов меняется только с новой проверкой.
+	const key = n ? String(n.time) + (n.error || '') : '';
+	if (x.key !== key) {
+		x.key = key;
+		const why = { dns: _('name not resolved'), timeout: _('no answer') };
+		x.servers.replaceChildren(...((n?.servers || []).map((s) => E('li', { 'class': 'truba-num' }, s.mapped
+			? '%s — %s:%d, %s'.format(s.server, s.mapped.address, s.mapped.port, _('%d ms').format(s.rtt))
+			: '%s — %s'.format(s.server, why[s.error] || s.error || '—')))));
+		if (!x.servers.childNodes.length)
+			x.servers.appendChild(E('li', {}, common.empty(_('none'))));
+	}
+}
+
+function runNat(r) {
+	r.nat.busy = true;
+	setState(r.nat.state, '', _('Testing…'));
+	return common.callNatTest()
+		.then((n) => paintNat(r, n, true))
+		.catch((e) => paintNat(r, { time: Date.now() / 1000, error: e.message }, true))
+		.finally(() => { r.nat.busy = false; });
 }
 
 function paintWarnings(r) {
@@ -411,16 +503,28 @@ function update(r, st, rates) {
 		? _('Traffic of devices in the routed zones since %s. The router\'s own traffic (DNS, list downloads) is not included.').format(common.fmtTime(since))
 		: _('Traffic of devices in the routed zones. The router\'s own traffic (DNS, list downloads) is not included.'));
 	const tr = st.traffic || {};
-	for (let k of [ 'tunnel', 'direct', 'inbound' ])
+	for (let k of KINDS) {
 		for (let dir of [ 'down', 'up' ]) {
 			const cell = r.tr[k][dir], rate = rates?.[k]?.[dir];
 			common.setText(cell.total, common.fmtBytes(tr[k]?.[dir]));
 			common.setText(cell.rate, rate != null ? common.fmtRate(rate) : '—');
 		}
-	common.setText(r.conns, '%s: %s %s · %s %s · %s %s · %s %s %s'.format(_('New connections'),
-		_('Tunnel'), common.fmtNum(c.tunnel?.packets), _('Direct'), common.fmtNum(c.direct?.packets),
-		_('Inbound via Truba'), common.fmtNum(c.inbound?.packets),
-		_('Blocked'), common.fmtNum(c.block?.packets), _('packets')));
+		const conn = r.tr[k].conn, rate = rates?.[k]?.conn;
+		common.setText(conn.total, common.fmtNum(c[k]?.packets));
+		common.setText(conn.rate, rate != null ? _('%s per min').format(common.fmtNum(Math.round(rate * 60))) : '—');
+	}
+	common.setText(r.block.total, common.fmtNum(c.block?.packets));
+
+	// Доля исходящих соединений устройств: насколько Режим и Категории уводят в Туннель.
+	const nt = c.tunnel?.packets || 0, nd = c.direct?.packets || 0;
+	const pct = (nt + nd) ? Math.round(nt * 100 / (nt + nd)) : null;
+	r.share.tunnel.style.width = (pct ?? 0) + '%';
+	r.share.direct.style.width = (pct == null ? 0 : 100 - pct) + '%';
+	common.setText(r.shareText, pct == null ? _('No outgoing connections yet.')
+		: _('Outgoing connections: %d%% via tunnel, %d%% direct').format(pct, 100 - pct));
+
+	if (!r.nat.busy)
+		paintNat(r, st.nat, wdOn);
 	drawChart(r.chart);
 }
 
@@ -438,22 +542,6 @@ function updateSets(r, s) {
 	common.setText(r.dSetsNote, _('IPs from DNS: %s').format(parts([ [ 'tunnel', d?.tunnel ], [ 'direct', d?.direct ] ])));
 }
 
-function renderNat(r) {
-	if (r.error)
-		return E('p', {}, _('Test failed: %s').format(r.error));
-	return E('div', {}, [
-		E('p', {}, [ common.badge(r.ok, _('OK'), _('problem')), ' ',
-			_('External IP: %s (Truba IP: %s), local port %s').format(r.external_ip || '—', r.vps_ip || '—', r.local_port) ]),
-		E('ul', {}, [
-			E('li', {}, [ _('External IP is the Truba IP'), ': ', r.ip_is_vps ? _('yes') : _('no') ]),
-			E('li', {}, [ _('Port preserved'), ': ', r.port_preserved ? _('yes') : _('no') ]),
-			E('li', {}, [ _('Same mapping for different servers'), ': ', r.consistent ? _('yes') : _('no') ])
-		]),
-		E('p', { 'class': 'cbi-value-description' },
-			_('This checks the Truba layer only. For the full RFC 5780 test run NatTypeTester on a PC in the home network whose device policy is «All via tunnel».'))
-	]);
-}
-
 return view.extend({
 	load: function() {
 		return Promise.all([ common.callStatus(), common.callSets().catch(() => null), uci.load('network'), uci.load('truba') ]);
@@ -464,7 +552,6 @@ return view.extend({
 		const page = buildPage();
 		update(page, data[0], takeRates(data[0]));
 		updateSets(page, data[1]);
-		const natBox = E('div');
 
 		const m = new form.Map('truba', _('Truba'),
 			_('Home network through your own VPS: the VPS gives the router its public IP, the router decides what goes through the tunnel.'));
@@ -488,20 +575,6 @@ return view.extend({
 		poll.add(() => common.callStatus().then((st) => update(page, st, takeRates(st))), POLL);
 		poll.add(() => common.callSets().then((s) => updateSets(page, s)).catch(() => {}), SETS_POLL);
 
-		return m.render().then((mapEl) => E('div', {}, [
-			mapEl,
-			page.el,
-			E('div', { 'class': 'cbi-section' }, [
-				E('h3', {}, _('NAT check')),
-				E('button', {
-					'class': 'btn cbi-button',
-					'click': ui.createHandlerFn(this, () => {
-						natBox.replaceChildren(E('em', { 'class': 'spinning' }, _('Testing…')));
-						return common.callNatTest().then((r) => natBox.replaceChildren(renderNat(r)));
-					})
-				}, _('Check NAT')),
-				natBox
-			])
-		]));
+		return m.render().then((mapEl) => E('div', {}, [ mapEl, page.el ]));
 	}
 });

@@ -28,6 +28,12 @@ export function run(cmd) {
 	return { code, out };
 };
 
+// Монотонное время в миллисекундах — для тайм-аутов внутри одного вызова.
+export function now_ms() {
+	let c = clock(true);
+	return c[0] * 1000 + c[1] / 1000000;
+};
+
 export function mkdirp(path) {
 	let parts = split(path, '/'), cur = '';
 	for (let p in parts) {

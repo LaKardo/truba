@@ -54,7 +54,7 @@ function renderTable(mode, cats, filterBox) {
 		return E('tr', { 'class': 'tr', 'data-search': (c.set + ':' + c.tag).toLowerCase(), 'data-action': sel.value }, [
 			E('td', { 'class': 'td' }, c.set),
 			E('td', { 'class': 'td' }, E('strong', {}, c.tag)),
-			E('td', { 'class': 'td' }, String(c.count)),
+			E('td', { 'class': 'td' }, common.fmtNum(c.count)),
 			E('td', { 'class': 'td' }, E('small', {}, typesText(c))),
 			E('td', { 'class': 'td' }, E('small', {}, (c.subset_of || []).join(', ') || '—')),
 			E('td', { 'class': 'td' }, sel)
@@ -175,12 +175,10 @@ return view.extend({
 				E('p', { 'class': 'cbi-section-descr' }, mode == 'all'
 					? _('By mode = Tunnel. Narrower categories are checked first; on a tie: Block → Tunnel → Direct. A domain category wins over a geoip category.')
 					: _('By mode = Direct. Only categories with action Tunnel go through the tunnel.')),
-				missing.length ? E('div', { 'class': 'alert-message warning' }, [
-					_('Configured but missing from the current rule set (ignored): '),
-					missing.map((r) => '%s:%s'.format(r.set, r.tag)).join(', ')
-				]) : '',
+				missing.length ? E('div', { 'class': 'alert-message warning' },
+					common.missingText(missing.map((r) => '%s:%s'.format(r.set, r.tag)))) : '',
 				cats.length ? '' : E('div', { 'class': 'alert-message' }, _('Rule sets are not downloaded yet — see the DNS & lists tab.')),
-				E('div', { 'style': 'display:flex;gap:1em;align-items:center;margin:.5em 0' }, [
+				E('div', { 'class': 'truba-toolbar' }, [
 					filterBox.text,
 					E('label', {}, [ filterBox.only, ' ', _('only with an explicit action') ]),
 					E('button', { 'class': 'btn cbi-button-reset', 'click': ui.createHandlerFn(this, 'handleResetRules', mode, info.starting || []) },

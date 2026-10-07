@@ -106,7 +106,7 @@ return view.extend({
 
 	handleImport: function(iface) {
 		const ta = E('textarea', {
-			'class': 'cbi-input-textarea', 'style': 'width:100%;font-family:monospace', 'rows': 16,
+			'class': 'cbi-input-textarea truba-conf', 'rows': 16,
 			'placeholder': '[Interface]\nPrivateKey = …\nAddress = 10.77.77.2/30\n…\n\n[Peer]\nPublicKey = …\nEndpoint = …'
 		});
 		const file = E('input', { 'type': 'file', 'accept': '.conf,text/plain', 'change': (ev) => {
