@@ -10,7 +10,7 @@ fail() { echo "FAIL  $*"; FAILS=$((FAILS + 1)); }
 SCRIPT=${1:-/repo/vps/install-vps.sh}
 
 export DEBIAN_FRONTEND=noninteractive LANG=C.UTF-8 LC_ALL=C.UTF-8
-apt-get update -qq >/dev/null && apt-get install -y -qq shellcheck nftables >/dev/null
+apt-get update -qq >/dev/null && apt-get install -y -qq shellcheck nftables iproute2 >/dev/null
 
 if shellcheck -s bash "$SCRIPT"; then ok "shellcheck"; else fail "shellcheck"; fi
 if bash -n "$SCRIPT"; then ok "bash -n"; else fail "bash -n"; fi
@@ -76,11 +76,14 @@ fi
 
 # sysctl: без загрузки nf_conntrack при старте systemd-sysctl пропускает nf_conntrack_max.
 SYSCTL_FILE="$STATE_DIR/90-truba.conf"; MODULES_FILE="$STATE_DIR/modules-load-truba.conf"
-modprobe() { :; }; sysctl() { :; }
+modprobe() { :; }; sysctl() { :; }; tc() { echo "$*" > "$STATE_DIR/tc.txt"; }
 write_sysctl
-unset -f modprobe sysctl
+unset -f modprobe sysctl tc
 grep -q 'nf_conntrack_max = 262144' "$SYSCTL_FILE" && ok "sysctl: nf_conntrack_max" || fail "sysctl nf_conntrack_max"
 grep -qx 'nf_conntrack' "$MODULES_FILE" && ok "nf_conntrack загружается при старте" || fail "modules-load nf_conntrack"
+# fq держит на поток 100 пакетов, а Туннель для неё — один поток: на пиках скачивание вставало.
+grep -q 'default_qdisc = fq_codel$' "$SYSCTL_FILE" && ok "sysctl: очередь fq_codel, не fq" || fail "sysctl: default_qdisc"
+grep -qx 'qdisc replace dev eth0 root fq_codel' "$STATE_DIR/tc.txt" && ok "очередь WAN заменяется сразу, без перезагрузки" || fail "tc: очередь WAN"
 
 # Конфиги AWG
 AWG_PROTO=2; gen_params
@@ -90,7 +93,23 @@ write_awg_conf; write_router_conf
 grep -q "^AllowedIPs = 10.77.77.2/32" "$AWG_CONF" && ok "VPS: пир — только Роутер" || fail "VPS AllowedIPs"
 grep -q "^Endpoint = 203.0.113.10:51820" "$ROUTER_CONF" && ok "Роутер: Endpoint" || fail "Роутер Endpoint"
 grep -q "^PersistentKeepalive = 25" "$ROUTER_CONF" && ok "Роутер: keepalive 25" || fail "keepalive"
-grep -q "^MTU = 1380" "$ROUTER_CONF" && ok "Роутер: MTU 1380" || fail "MTU"
+grep -q "^MTU = 1380" "$ROUTER_CONF" && ok "Роутер: MTU 1380 при сети VPS 1500" || fail "MTU"
+# MTU Туннеля — от сети VPS: пакет Туннеля с обёрткой (до 87 байт) помещается в неё целиком.
+mtu_both() { grep -qx "MTU = $1" "$AWG_CONF" && grep -qx "MTU = $1" "$ROUTER_CONF"; }
+if ip link add trubamtu0 type dummy 2>/dev/null; then
+	WAN_IF=trubamtu0
+	ip link set trubamtu0 mtu 1400; write_awg_conf; write_router_conf
+	mtu_both 1313 && ok "сеть VPS 1400: MTU 1313 у обеих сторон" || fail "сеть 1400: $(grep '^MTU' "$ROUTER_CONF")"
+	ip link set trubamtu0 mtu 9000; write_awg_conf; write_router_conf
+	mtu_both 1380 && ok "сеть VPS 9000: MTU не больше 1380" || fail "сеть 9000: $(grep '^MTU' "$ROUTER_CONF")"
+	ip link del trubamtu0
+else
+	# С одним NET_ADMIN модуль dummy не загрузить; в tests/run.sh all его загружает тест роутера.
+	echo "skip  MTU по сети VPS: нет модуля dummy на хосте"
+fi
+WAN_IF=nonexistent0; write_router_conf
+grep -qx "MTU = 1380" "$ROUTER_CONF" && ok "интерфейса нет: MTU 1380" || fail "нет интерфейса: $(grep '^MTU' "$ROUTER_CONF")"
+WAN_IF=eth0; write_awg_conf; write_router_conf
 [ "$(grep -c '^S[1-4] = ' "$ROUTER_CONF")" -eq 4 ] && ok "Роутер: S1–S4" || fail "S1-S4"
 diff <(grep -E '^(S[1-4]|H[1-4]) = ' "$AWG_CONF") <(grep -E '^(S[1-4]|H[1-4]) = ' "$ROUTER_CONF") >/dev/null \
 	&& ok "S1–S4 и H1–H4 совпадают у сторон" || fail "S/H различаются"
