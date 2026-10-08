@@ -142,7 +142,7 @@ return view.extend({
 
 		o = s.taboption('general', form.DynamicList, 'direct_upstream', _('For «Direct»'),
 			_('Used for categories with action Direct, for the router\'s own hosts (NTP, list mirrors) and, in mode «Selective», for everything else.'));
-		o.default = [ 'tls://common.dot.dns.yandex.net@77.88.8.8' ];
+		o.default = [ 'tls://common.dot.dns.yandex.net@77.88.8.8', 'tls://common.dot.dns.yandex.net@77.88.8.1' ];
 
 		// Перехват хранится в секции main, но по смыслу — здесь.
 		o = s.taboption('general', form.Flag, 'dns_hijack', _('Intercept DNS (port 53)'),

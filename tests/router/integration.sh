@@ -202,8 +202,20 @@ EOF
 echo "== uci-defaults"
 OFFLOAD_BEFORE="$(uci -q get firewall.@defaults[0].flow_offloading)"
 uci set truba.lists.update_utc='04:00'; uci commit truba   # прежнее значение по умолчанию
+# Прежний DNS «Напрямую» по умолчанию — один сервер.
+uci -q delete truba.dns.direct_upstream; uci add_list truba.dns.direct_upstream='tls://common.dot.dns.yandex.net@77.88.8.8'; uci commit truba
 sh /etc/uci-defaults/90-truba
 check "время обновления списков: прежнее 04:00 → 12:00 UTC" test "$(uci -q get truba.lists.update_utc)" = 12:00
+check "DNS «Напрямую»: к прежнему серверу добавлен второй" test "$(uci -q get truba.dns.direct_upstream)" = "tls://common.dot.dns.yandex.net@77.88.8.8 tls://common.dot.dns.yandex.net@77.88.8.1"
+sh /etc/uci-defaults/90-truba
+check "DNS «Напрямую»: повторный запуск не добавляет третий" test "$(uci -q get truba.dns.direct_upstream | wc -w)" -eq 2
+# Свои серверы пользователя не трогаются.
+uci -q delete truba.dns.direct_upstream; uci add_list truba.dns.direct_upstream='https://77.88.8.8/dns-query'; uci commit truba
+sh /etc/uci-defaults/90-truba
+check "DNS «Напрямую»: свой сервер пользователя не трогается" test "$(uci -q get truba.dns.direct_upstream)" = "https://77.88.8.8/dns-query"
+uci -q delete truba.dns.direct_upstream
+for u in tls://common.dot.dns.yandex.net@77.88.8.8 tls://common.dot.dns.yandex.net@77.88.8.1; do uci add_list truba.dns.direct_upstream="$u"; done
+uci commit truba
 check "зона truba создана" test "$(uci -q get firewall.truba.name)" = truba
 check "форвардинг lan→truba" test "$(uci -q get firewall.lan_truba.dest)" = truba
 check "fullcone включён" test "$(uci -q get firewall.@defaults[0].fullcone)" = 1

@@ -482,6 +482,7 @@ plugins:
     args:
       upstreams:
         - { addr: "tls://common.dot.dns.yandex.net", dial_addr: "77.88.8.8" }
+        - { addr: "tls://common.dot.dns.yandex.net", dial_addr: "77.88.8.1" }   # второй: обрыв одного соединения не оставляет запросы без ответа
 
   # Ленивый кэш: истёкшая запись отдаётся сразу с TTL 5 с и проходит дальше по цепочке (nftset тоже),
   # а свежий ответ запрашивается в фоне по тем же правилам. Повторные запросы не ждут DNS.
@@ -616,6 +617,7 @@ config dns 'dns'
 	list   tunnel_upstream 'https://1.1.1.1/dns-query'
 	list   tunnel_upstream 'https://8.8.8.8/dns-query'
 	list   direct_upstream 'tls://common.dot.dns.yandex.net@77.88.8.8'
+	list   direct_upstream 'tls://common.dot.dns.yandex.net@77.88.8.1'
 	option port            '5335'
 	option ttl_max         '300'
 	option cache_size      '65536'

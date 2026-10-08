@@ -7,7 +7,9 @@ import * as U from 'truba.util';
 import * as C from 'truba.const';
 
 const DEFAULT_TUNNEL_DNS = [ 'https://1.1.1.1/dns-query', 'https://8.8.8.8/dns-query' ];
-const DEFAULT_DIRECT_DNS = [ 'tls://common.dot.dns.yandex.net@77.88.8.8' ];
+// Два сервера: mosdns спрашивает оба разом и берёт первый ответ, поэтому обрыв одного
+// соединения не оставляет запросы без ответа (на живом роутере DoH 77.88.8.8 изредка рвался).
+const DEFAULT_DIRECT_DNS = [ 'tls://common.dot.dns.yandex.net@77.88.8.8', 'tls://common.dot.dns.yandex.net@77.88.8.1' ];
 
 function bool(v, dflt) {
 	if (v == null)
