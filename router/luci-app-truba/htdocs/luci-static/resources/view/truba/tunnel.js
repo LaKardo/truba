@@ -1,9 +1,143 @@
 'use strict';
 'require view';
 'require form';
+'require poll';
 'require uci';
 'require ui';
 'require truba.common as common';
+
+// ---- Состояние Туннеля: строки постоянны, опрос раз в 5 с меняет только значения ----
+
+const SVGNS = 'http://www.w3.org/2000/svg';
+const SW = 200, SH = 50;
+
+function buildState() {
+	const r = {};
+	const span = (cls) => E('span', cls ? { 'class': cls } : {});
+	r.state = span('truba-badge');
+	r.hs = span('truba-dot');
+	r.rtt = span('truba-dot truba-num');
+	r.loss = span('truba-dot truba-num');
+	r.big = span('truba-dot');
+	r.wd = span();
+	r.table = span();
+	r.iface = span('truba-num');
+	r.scale = span('truba-num');
+	const svg = document.createElementNS(SVGNS, 'svg');
+	svg.setAttribute('viewBox', '0 0 %d %d'.format(SW, SH));
+	svg.setAttribute('preserveAspectRatio', 'none');
+	svg.setAttribute('aria-hidden', 'true');
+	r.spark = document.createElementNS(SVGNS, 'path');
+	r.spark.setAttribute('class', 'line tunnel');
+	svg.appendChild(r.spark);
+
+	const kv = (rows) => E('table', { 'class': 'truba-kv' }, rows.map(([ label, value ]) =>
+		E('tr', {}, [ E('th', { 'scope': 'row' }, label), E('td', {}, value) ])));
+	r.el = E('div', { 'class': 'cbi-section' }, [
+		E('h3', {}, [ _('State'), ' ', r.state ]),
+		E('div', { 'class': 'truba-cards' }, [
+			kv([
+				[ _('Last handshake'), r.hs ],
+				[ _('Latency to the Truba'), r.rtt ],
+				[ _('Packet loss'), r.loss ],
+				[ _('Full-size packets'), r.big ],
+				[ _('Tunnel watchdog'), r.wd ],
+				[ _('Tunnel route table'), r.table ],
+				[ _('Interface traffic'), [ r.iface,
+					E('div', { 'class': 'truba-muted' }, _('since the interface came up, including the router\'s own traffic')) ] ]
+			]),
+			E('div', {}, [
+				E('div', { 'class': 'truba-legend' }, _('Latency over 10 min')),
+				E('div', { 'class': 'truba-chart small' }, svg),
+				E('div', { 'class': 'truba-chart-axis' }, [ E('span', {}, _('10 min ago')), r.scale, E('span', {}, _('now')) ]),
+				E('p', { 'class': 'truba-muted' }, _('Points are the watchdog checks; a gap is a lost ping.'))
+			])
+		])
+	]);
+	return r;
+}
+
+// Мини-график задержки по окну проверок watchdog; null — потерянный ping, разрыв линии.
+function drawSpark(r, probes) {
+	const got = probes.filter((x) => x != null);
+	if (!got.length) {
+		r.spark.setAttribute('d', '');
+		common.setText(r.scale, '');
+		return;
+	}
+	let lo = Math.min.apply(null, got), hi = Math.max.apply(null, got);
+	const pad = Math.max((hi - lo) * 0.2, 1);
+	lo = Math.max(0, lo - pad);
+	hi += pad;
+	const n = probes.length;
+	const X = (i) => (n > 1 ? i * SW / (n - 1) : SW / 2).toFixed(1);
+	const Y = (v) => (SH - (v - lo) / (hi - lo) * SH).toFixed(1);
+	let d = '', pen = false;
+	probes.forEach((v, i) => {
+		if (v == null) {
+			pen = false;
+			return;
+		}
+		d += (pen ? 'L' : 'M') + X(i) + ',' + Y(v);
+		pen = true;
+	});
+	r.spark.setAttribute('d', d);
+	common.setText(r.scale, _('%d–%d ms').format(Math.round(lo), Math.round(hi)));
+}
+
+function setState(el, level, text) {
+	common.setLevel(el, level);
+	common.setText(el, text);
+}
+
+function updateState(r, st) {
+	const t = st.tunnel || {}, awg = t.awg || {}, h = st.health || {};
+	const wdOn = uci.get('truba', 'watchdog', 'enabled') != '0';
+	const [ level, text ] = common.tunnelState(st);
+	setState(r.state, level, text);
+
+	const age = awg.handshake ? awg.handshake_age : null;
+	setState(r.hs, age == null ? 'err' : age > 300 ? 'err' : age > 180 ? 'warn' : 'ok', common.fmtAge(age));
+
+	// Окно пустое — проверок ещё не было (или не с чем: нет адреса для ping): не «нет ответа».
+	const probes = Array.isArray(h.probes) ? h.probes : [];
+	if (!wdOn || !probes.length || !t.up) {
+		const why = !wdOn ? _('the watchdog is off') : '—';
+		setState(r.rtt, '', why);
+		setState(r.loss, '', why);
+		setState(r.big, '', why);
+		drawSpark(r, []);
+	}
+	else {
+		const got = probes.filter((x) => x != null);
+		const avg = got.length ? got.reduce((s, x) => s + x, 0) / got.length : null;
+		setState(r.rtt, h.rtt != null ? 'ok' : 'err', h.rtt != null
+			? _('%d ms').format(Math.round(h.rtt)) + (avg != null ? ' · ' + _('average %d ms').format(Math.round(avg)) : '')
+			: _('no reply'));
+		const lost = probes.length - got.length;
+		const pct = Math.round(lost * 100 / probes.length);
+		setState(r.loss, !lost ? 'ok' : pct < 20 ? 'warn' : 'err',
+			_('%d%% over %d min').format(pct, Math.max(1, Math.round(probes.length * (h.interval || 30) / 60))));
+		const b = h.big;
+		if (!b)
+			setState(r.big, '', _('not checked yet'));
+		else
+			setState(r.big, b.ok ? 'ok' : 'err', b.ok
+				? _('get through · %d bytes, the whole MTU').format(b.size)
+				: _('lost (%d of %d) · %d bytes: lower the MTU').format(b.sent - b.received, b.sent, b.size));
+		drawSpark(r, probes);
+	}
+
+	common.setText(r.wd, h.state
+		? '%s %s'.format(h.state == 'healthy' ? _('healthy since') : _('down since'), common.fmtTime(h.since))
+		: _('no data'));
+	const table = (st.table || '').trim();
+	common.setText(r.table, !st.service ? _('service stopped')
+		: /blackhole/.test(table) ? _('emergency block (tunnel traffic is dropped)')
+		: /default dev/.test(table) ? _('via tunnel')
+		: _('fallback to direct (no tunnel route)'));
+	common.setText(r.iface, awg.rx != null ? '↓ %s · ↑ %s'.format(common.fmtBytes(awg.rx), common.fmtBytes(awg.tx)) : '—');
+}
 
 // Ключи .conf (без регистра) → опции UCI протокола amneziawg.
 const IFACE_KEYS = {
@@ -101,7 +235,7 @@ function applyConf(iface, conf) {
 
 return view.extend({
 	load: function() {
-		return Promise.all([ uci.load('truba'), uci.load('network'), uci.load('firewall') ]);
+		return Promise.all([ uci.load('truba'), uci.load('network'), uci.load('firewall'), common.callStatus() ]);
 	},
 
 	handleImport: function(iface) {
@@ -139,12 +273,14 @@ return view.extend({
 		]);
 	},
 
-	render: function() {
+	render: function(data) {
 		const iface = common.tunnelIface();
 		const exists = !!uci.get('network', iface);
+		const state = buildState();
+		updateState(state, data[3] || {});
+		poll.add(() => common.callStatus().then((st) => updateState(state, st)), 5);
 
-		const mn = new form.Map('network', _('Tunnel'),
-			_('AmneziaWG interface %s. Settings are stored in the standard network configuration and are also visible in Network → Interfaces.').format(iface));
+		const mn = new form.Map('network');
 
 		let s, o;
 		if (exists) {
@@ -158,7 +294,8 @@ return view.extend({
 			o.rmempty = false;
 			o = s.taboption('general', form.DynamicList, 'addresses', _('Tunnel address'));
 			o.datatype = 'cidr';
-			o = s.taboption('general', form.Value, 'mtu', _('MTU'));
+			o = s.taboption('general', form.Value, 'mtu', _('MTU'),
+				_('install-vps.sh picks it for the VPS network. If full-size packets do not get through (see State above), lower it on both sides.'));
 			// install-vps.sh подбирает MTU под сеть VPS: при сети уже 1367 он ниже 1280.
 			o.datatype = 'range(576,1500)';
 			o.placeholder = '1380';
@@ -215,7 +352,7 @@ return view.extend({
 
 		const mt = new form.Map('truba');
 		s = mt.section(form.NamedSection, 'watchdog', 'watchdog', _('Tunnel watchdog'),
-			_('Pings the Truba inside the tunnel and checks the handshake age; restarts the interface after repeated failures. While the tunnel is down, the emergency block (Routing tab) applies.'));
+			_('Pings the Truba inside the tunnel and checks the handshake age; restarts the interface after repeated failures. Every 5 minutes it also checks that full-size packets get through.'));
 		s.addremove = false;
 		o = s.option(form.Flag, 'enabled', _('Enabled'));
 		o.default = '1';
@@ -233,15 +370,32 @@ return view.extend({
 			_('Empty — the Truba address inside the tunnel. An internet address would not answer while the emergency block is active.'));
 		o.datatype = 'ip4addr';
 		o.optional = true;
+		// Что делать, пока Туннель не отвечает, — рядом с тем, как это определяется.
+		// Хранится в секции main, как и раньше.
+		o = s.option(form.Flag, 'killswitch', _('Emergency block'),
+			_('While the tunnel is down, traffic with action Tunnel is dropped instead of going direct.'));
+		o.ucisection = 'main';
+		o.default = '1';
+		o.rmempty = false;
 
-		return Promise.all([ mn.render(), mt.render() ]).then((els) => E('div', {}, [
-			E('div', { 'class': 'cbi-section' }, [
-				E('p', {}, exists
-					? _('To replace keys and parameters, import a new configuration.')
+		const importBlock = E('div', { 'class': 'cbi-section' }, [
+			E('h3', {}, _('Connection')),
+			E('div', { 'class': 'truba-toolbar' }, [
+				E('span', { 'class': 'truba-grow' }, exists
+					? _('Keys and parameters come from router.conf made by install-vps.sh on the VPS. To replace them, import a new file.')
 					: E('strong', {}, _('The tunnel is not configured yet. Run install-vps.sh on the VPS and import the resulting router.conf.'))),
 				E('button', { 'class': 'btn cbi-button-action', 'click': ui.createHandlerFn(this, 'handleImport', iface) },
 					_('Import .conf'))
-			]),
+			])
+		]);
+		// Заголовок страницы — свой, а не формы: после «Сохранить» LuCI перерисовывает форму
+		// целиком, и вставленное в неё состояние пропало бы.
+		return Promise.all([ mn.render(), mt.render() ]).then((els) => E('div', {}, [
+			E('h2', { 'name': 'content' }, _('Tunnel')),
+			E('div', { 'class': 'cbi-map-descr' },
+				_('AmneziaWG interface %s. Settings are stored in the standard network configuration and are also visible in Network → Interfaces.').format(iface)),
+			state.el,
+			importBlock,
 			els[0], els[1]
 		]));
 	}
