@@ -22,6 +22,9 @@ function parseLog(text) {
 			return { time: '', src: '', level: 'info', text: l };
 		let level = /^(emerg|alert|crit|err)$/.test(m[4]) ? 'err' : /^warn/.test(m[4]) ? 'warn' : 'info';
 		let msg = m[6];
+		// busybox crond пишет каждый запуск задачи (обновление списков) с уровнем ошибки.
+		if (m[5] == 'crond' && /^USER \S+ pid \d+ cmd /.test(msg))
+			level = 'info';
 		if (m[5] == 'mosdns') {
 			const p = msg.split('\t');
 			if (p.length >= 3 && /^\d{4}-\d\d-\d\dT/.test(p[0])) {

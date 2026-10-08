@@ -145,7 +145,7 @@ function drawChart(c) {
 // Наборы, которые последняя проверка не смогла скачать: «geoip: причина».
 function failedSets(last) {
 	const sets = last?.sets || {};
-	return Object.keys(sets).filter((k) => !sets[k].ok).map((k) => '%s: %s'.format(k, (sets[k].errors || []).join('; ') || '?'));
+	return Object.keys(sets).filter((k) => !sets[k].ok).map((k) => '%s: %s'.format(k, (sets[k].errors || []).map(common.setError).join('; ') || '?'));
 }
 
 // Автообновление идёт раз в сутки; проверка старше 36 ч — cron не запускал его или он падал.

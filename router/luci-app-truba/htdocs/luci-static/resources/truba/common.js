@@ -138,13 +138,22 @@ function setLevel(el, level) {
 // Неразрывный пробел: пустая строка ячейки сохраняет высоту.
 const NBSP = String.fromCharCode(160);
 
+// Откуда скачан Набор правил и почему не скачался: бэкенд пишет «tunnel», «direct»,
+// «mirror» и ошибки вида «tunnel: download failed».
+const VIA_LABELS = { tunnel: _('via the tunnel'), direct: _('directly'), mirror: _('from the mirror') };
+const SET_ERRORS = { 'download failed': _('download failed'), 'sha256 mismatch': _('checksum mismatch') };
+function setError(e) {
+	const m = String(e).match(/^(\w+): (.+)$/);
+	return m ? '%s: %s'.format(VIA_LABELS[m[1]] || m[1], SET_ERRORS[m[2]] || m[2]) : String(e);
+}
+
 // Итог проверки одного Набора правил (запись lists.last.sets[…]).
 function setResult(s) {
 	if (!s)
 		return '—';
 	return s.ok
-		? _('%s (via %s)').format(s.changed ? _('updated') : _('no changes'), s.via)
-		: _('failed — %s').format((s.errors || []).join('; ') || '?');
+		? '%s, %s'.format(s.changed ? _('updated') : _('no changes'), VIA_LABELS[s.via] || s.via)
+		: _('failed — %s').format((s.errors || []).map(setError).join('; ') || '?');
 }
 
 function tunnelIface() {
@@ -183,5 +192,5 @@ return baseclass.extend({
 	callStatus, callLists, callCategories, callSets, callCheck, callNatTest, callTunnelTest, callUpdateLists, callRollbackLists, callLog, callLeases,
 	ACTION_LABELS, ACTION_LEVELS, REASON_LABELS, WARNING_LABELS, NAT_ERRORS, UPNP_MISSING, NBSP, TABS,
 	fmtBytes, fmtRate, fmtAge, fmtTime, fmtDate, fmtNum, pill, busy, empty, missingText,
-	setText, setLevel, setResult, tunnelIface, tunnelState, tabUrl
+	setText, setLevel, setResult, setError, tunnelIface, tunnelState, tabUrl
 });

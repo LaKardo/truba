@@ -122,7 +122,23 @@ msgid "%d h ago"
 msgstr ""
 
 #: htdocs/luci-static/resources/truba/common.js
-msgid "%s (via %s)"
+msgid "via the tunnel"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/common.js
+msgid "directly"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/common.js
+msgid "from the mirror"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/common.js
+msgid "download failed"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/common.js
+msgid "checksum mismatch"
 msgstr ""
 
 #: htdocs/luci-static/resources/truba/common.js

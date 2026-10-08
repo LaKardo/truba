@@ -658,9 +658,6 @@ msgstr "Наборы правил ещё не скачаны — см. вкла�
 msgid "Last check"
 msgstr "Последняя проверка"
 
-msgid "%s (via %s)"
-msgstr "%s (через %s)"
-
 msgid "failed — %s"
 msgstr "ошибка — %s"
 
@@ -1041,3 +1038,18 @@ msgstr "Нет ответов"
 
 msgid "The Truba does not answer inside the tunnel: see the State on the Tunnel tab."
 msgstr "Труба не отвечает внутри Туннеля: см. «Состояние» на вкладке «Туннель»."
+
+msgid "via the tunnel"
+msgstr "через Туннель"
+
+msgid "directly"
+msgstr "напрямую"
+
+msgid "from the mirror"
+msgstr "с зеркала"
+
+msgid "download failed"
+msgstr "не скачался"
+
+msgid "checksum mismatch"
+msgstr "не сошлась контрольная сумма"
