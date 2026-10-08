@@ -315,6 +315,25 @@ check "nat-test: молчащий сервер — тайм-аут" test "$(nat 
 check "nat-test: серверы опрашиваются разом (не дольше 7 с, было $((T1 - T0)) с)" test $((T1 - T0)) -le 7
 check "status: итог проверки NAT для «Обзора»" test "$(truba status | jsonfilter -e '@.nat.ok')" = true
 
+echo "== Проверка Туннеля: пакеты трёх размеров"
+TUN_MTU="$(cat /sys/class/net/awg0/mtu)"
+truba tunnel-test > /tmp/tt.json; head -c 500 /tmp/tt.json; echo
+tt() { jsonfilter -i /tmp/tt.json -e "$1"; }
+check "tunnel-test: три размера, последний — весь MTU ($TUN_MTU)" sh -c "[ \"\$(jsonfilter -i /tmp/tt.json -e '@.results[*].size' | wc -l)\" -eq 3 ] && [ \"\$(jsonfilter -i /tmp/tt.json -e '@.results[2].size')\" = '$TUN_MTU' ]"
+check "tunnel-test: все размеры проходят" test "$(tt '@.ok')" = true
+check "tunnel-test: задержка посчитана" sh -c "jsonfilter -i /tmp/tt.json -e '@.results[2].avg' | grep -qE '^[0-9.]+$'"
+check "tunnel-test: временные файлы убраны" sh -c "! ls -d /tmp/truba-tt.* 2>/dev/null"
+# Путь, который теряет крупные пакеты (так было с VPS в сети 1400): Труба отбрасывает
+# пакеты Туннеля длиннее 1300 байт. Обычный ping при этом проходит.
+ip netns exec vps nft add table inet bigdrop
+ip netns exec vps nft add chain inet bigdrop in '{ type filter hook prerouting priority -300; }'
+ip netns exec vps nft add rule inet bigdrop in iifname ul1 meta l4proto udp meta length gt 1300 drop
+truba tunnel-test > /tmp/tt2.json; head -c 300 /tmp/tt2.json; echo
+check "tunnel-test: путь теряет крупные пакеты — итог не OK" test "$(jsonfilter -i /tmp/tt2.json -e '@.ok')" = false
+check "tunnel-test: мелкие пакеты при этом проходят" test "$(jsonfilter -i /tmp/tt2.json -e '@.results[0].ok')" = true
+check "tunnel-test: пакеты во весь MTU — нет" test "$(jsonfilter -i /tmp/tt2.json -e '@.results[2].ok')" = false
+ip netns exec vps nft delete table inet bigdrop
+
 echo "== учёт трафика устройств (Маршрутизация вкл)"
 bytes() { nft list counter inet truba "$1" 2>/dev/null | sed -n 's/.*bytes \([0-9]*\).*/\1/p'; }
 gt0() { [ "$(bytes "$1")" -gt 0 ] 2>/dev/null; }
@@ -500,6 +519,11 @@ check "watchdog: задержка и окно проверок в health.json" w
 nat_auto() { [ "$(jsonfilter -i /var/run/truba/nat.json -e '@.auto' 2>/dev/null)" = true ]; }
 check "watchdog: проверка NAT запущена сама, Туннель в порядке" wait_for 20 nat_auto
 check "watchdog: итог автоматической проверки NAT — OK" test "$(jsonfilter -i /var/run/truba/nat.json -e '@.ok')" = true
+# Крупные пакеты — сразу после подъёма Туннеля: ping во весь MTU проходит.
+big_ok() { [ "$(jsonfilter -i /var/run/truba/health.json -e '@.big.ok' 2>/dev/null)" = true ]; }
+check "watchdog: крупные пакеты проходят" wait_for 20 big_ok
+check "watchdog: крупные пакеты — размер во весь MTU" test "$(jsonfilter -i /var/run/truba/health.json -e '@.big.size')" = "$TUN_MTU"
+check "status: health.big для вкладки «Туннель»" test "$(truba status | jsonfilter -e '@.health.big.ok')" = true
 NAT_TIME="$(jsonfilter -i /var/run/truba/nat.json -e '@.time')"
 sleep 12   # следующий цикл: итог свежее «в порядке с» — повтора нет
 check "watchdog: без нового подъёма Туннеля NAT не перепроверяется" test "$(jsonfilter -i /var/run/truba/nat.json -e '@.time')" = "$NAT_TIME"

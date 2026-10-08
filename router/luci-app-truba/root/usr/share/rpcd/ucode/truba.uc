@@ -66,6 +66,12 @@ const methods = {
 		}
 	},
 
+	tunnel_test: {
+		call: function() {
+			return truba('tunnel-test');
+		}
+	},
+
 	update_lists: {
 		args: { force: false },
 		call: function(req) {

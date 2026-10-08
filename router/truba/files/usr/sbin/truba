@@ -30,6 +30,7 @@ function usage() {
 		'  reset-rules <all|selective>  Стартовые настройки Режима\n' +
 		'  nat-test [auto]    проверка внешнего IP и сохранения порта через Трубу\n' +
 		'                     (auto — запуск от watchdog после подъёма Туннеля)\n' +
+		'  tunnel-test        ping Трубы пакетами трёх размеров, до полного MTU Туннеля\n' +
 		'  watchdog           цикл контроля Туннеля (запускает procd)\n');
 	exit(2);
 }
@@ -88,6 +89,10 @@ case 'reset-rules':
 
 case 'nat-test':
 	out(NAT.run(args[0] == 'auto'));
+	break;
+
+case 'tunnel-test':
+	out(WD.tunnel_test());
 	break;
 
 case 'watchdog':

@@ -2,6 +2,7 @@
 'use strict';
 
 import * as uloop from 'uloop';
+import { readfile } from 'fs';
 import * as C from 'truba.const';
 import * as U from 'truba.util';
 import * as F from 'truba.conf';
@@ -32,6 +33,67 @@ export function ping_rtt(dev, target) {
 // Окно последних проверок для «Обзора»: задержка и потери за ~10 минут при интервале 30 с.
 const PROBE_WINDOW = 20;
 
+function iface_mtu(dev) {
+	return int(trim(readfile('/sys/class/net/' + dev + '/mtu') ?? '0'));
+}
+
+// Итог ping: сколько отправлено и получено, средняя задержка (мс) или null.
+function ping_stats(out) {
+	let m = match(out, /([0-9]+) packets transmitted, ([0-9]+) packets received/);
+	let a = match(out, /= [0-9.]+\/([0-9.]+)\//);
+	return { sent: m ? int(m[1]) : 0, received: m ? int(m[2]) : 0, avg: a ? +a[1] : null };
+}
+
+// Крупные пакеты: ping Трубы пакетом во весь MTU Туннеля. Обычный ping мелкий и не видит
+// пути, который теряет полноразмерные пакеты (MTU, фрагменты): при нём сайты открываются
+// с задержкой, а загрузки замирают на секунды. size — размер пакета в байтах (= MTU).
+export function big_probe(dev, target) {
+	let mtu = iface_mtu(dev);
+	if (mtu < 576)
+		return null;
+	let s = ping_stats(U.run(sprintf('ping -c 3 -W 2 -s %d -I %s %s', mtu - 28, U.shq(dev), U.shq(target))).out);
+	return { ok: s.received >= 2, sent: s.sent, received: s.received, size: mtu, time: time() };
+};
+
+// Крупные пакеты проверяются раз в BIG_EVERY проверок (5 мин при интервале 30 с) и сразу
+// после подъёма Туннеля: ping пакетом во весь MTU дороже обычного.
+const BIG_EVERY = 10;
+
+// «Проверка Туннеля» на «Диагностике»: ping Трубы пакетами трёх размеров разом.
+// Размеры — IP-пакета в байтах: обычный ping, средний и во весь MTU Туннеля.
+export function tunnel_test() {
+	let cfg = F.load();
+	let tinfo = F.tunnel_info(cfg.iface);
+	if (!tinfo.exists)
+		return { error: 'not_configured' };
+	let st = N.iface_up(cfg.iface);
+	if (tinfo.disabled || !st.up)
+		return { error: 'tunnel_down' };
+	let target = length(cfg.watchdog.probe) ? cfg.watchdog.probe : tinfo.peer;
+	if (!target)
+		return { error: 'no_target' };
+	let mtu = iface_mtu(st.device);
+	let sizes = [ 84 ];
+	if (mtu > 1028)
+		push(sizes, 1028);
+	if (mtu > 84)
+		push(sizes, mtu);
+	let dir = trim(U.run('mktemp -d /tmp/truba-tt.XXXXXX').out);
+	let cmd = '';
+	for (let s in sizes)
+		cmd += sprintf('ping -c 5 -W 2 -s %d -I %s %s > %s/%d 2>&1 & ', s - 28, U.shq(st.device), U.shq(target), dir, s);
+	U.run(cmd + 'wait');
+	let results = map(sizes, (s) => {
+		let r = ping_stats(readfile(dir + '/' + s) ?? '');
+		r.size = s;
+		// Один потерянный из пяти — ещё не потери крупных пакетов.
+		r.ok = r.received >= r.sent - 1 && r.sent > 0;
+		return r;
+	});
+	system([ 'rm', '-rf', dir ]);
+	return { target, mtu, time: time(), results, ok: length(filter(results, (r) => !r.ok)) == 0 };
+};
+
 // «Проверка NAT» сама: после подъёма Туннеля (итог старше «в порядке с») и после
 // перезагрузки (итога нет). Если ни один сервер не ответил — повтор не чаще раза в
 // NAT_RETRY с: при загрузке DNS может ещё не работать. Запущенную проверку (до ~5 с)
@@ -60,6 +122,7 @@ export function run() {
 	let state = prev?.state ?? 'healthy';
 	let since = (fresh && prev.since) ? prev.since : time(), fails = 0;
 	let probes = (fresh && type(prev.probes) == 'array') ? slice(prev.probes, -PROBE_WINDOW) : [];   // задержки, мс; null — потеря
+	let big = fresh ? prev.big : null, big_n = 0;   // итог big_probe
 	let timer;
 
 	let probed = (rtt) => {
@@ -91,7 +154,7 @@ export function run() {
 		let w = cfg.watchdog;
 		let tinfo = F.tunnel_info(cfg.iface);
 		let st = N.iface_up(cfg.iface);
-		let rec = { state, since, fails, last_check: time(), interval: w.interval, handshake_age: null, ping: null, rtt: null };
+		let rec = { state, since, fails, last_check: time(), interval: w.interval, handshake_age: null, ping: null, rtt: null, big };
 
 		if (tinfo.disabled) {
 			fails = 0;
@@ -124,6 +187,11 @@ export function run() {
 					nat_started = time();
 					system('( /usr/sbin/truba nat-test auto >/dev/null 2>&1 & )');
 				}
+				// Итога нет или он старше подъёма Туннеля — проверить сейчас, иначе раз в BIG_EVERY.
+				if (probe && (big == null || big.time < since || ++big_n >= BIG_EVERY)) {
+					big_n = 0;
+					big = big_probe(st.device, probe);
+				}
 			}
 			else {
 				fails++;
@@ -142,6 +210,7 @@ export function run() {
 		rec.since = since;
 		rec.fails = fails;
 		rec.probes = probes;
+		rec.big = big;
 		U.mkdirp(C.RUN_DIR);
 		U.write_json(C.HEALTH_FILE, rec);
 		timer.set(w.interval * 1000);

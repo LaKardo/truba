@@ -9,6 +9,7 @@ const callCategories = rpc.declare({ object: 'truba', method: 'categories', expe
 const callSets = rpc.declare({ object: 'truba', method: 'sets', expect: { '': {} } });
 const callCheck = rpc.declare({ object: 'truba', method: 'check', params: [ 'target', 'mac' ], expect: { '': {} } });
 const callNatTest = rpc.declare({ object: 'truba', method: 'nat_test', expect: { '': {} } });
+const callTunnelTest = rpc.declare({ object: 'truba', method: 'tunnel_test', expect: { '': {} } });
 const callUpdateLists = rpc.declare({ object: 'truba', method: 'update_lists', params: [ 'force' ], expect: { '': {} } });
 const callRollbackLists = rpc.declare({ object: 'truba', method: 'rollback_lists', expect: { '': {} } });
 const callLog = rpc.declare({ object: 'truba', method: 'log', params: [ 'lines' ], expect: { log: '' } });
@@ -150,9 +151,37 @@ function tunnelIface() {
 	return uci.get('truba', 'main', 'iface') || 'awg0';
 }
 
+// Состояние Туннеля по status: [уровень, текст] — для плитки «Обзора» и вкладки «Туннель».
+function tunnelState(st) {
+	const t = st.tunnel || {}, h = st.health || {};
+	if (!st.service)
+		return [ 'err', _('service stopped') ];
+	if (!t.configured)
+		return [ 'warn', _('not configured') ];
+	if (t.disabled)
+		return [ 'warn', _('disabled') ];
+	if (!t.up)
+		return [ 'err', _('down') ];
+	if (h.state == 'down')
+		return [ 'err', _('not responding') ];
+	return [ 'ok', _('working') ];
+}
+
+// Вкладки Трубы: адрес и название — для ссылок из плиток и предупреждений «Обзора».
+const TABS = {
+	tunnel: _('Tunnel'),
+	routing: _('Routing'),
+	dns: _('DNS & lists'),
+	inbound: _('Inbound'),
+	diagnostics: _('Diagnostics')
+};
+function tabUrl(tab) {
+	return L.url('admin/services/truba/' + tab);
+}
+
 return baseclass.extend({
-	callStatus, callLists, callCategories, callSets, callCheck, callNatTest, callUpdateLists, callRollbackLists, callLog, callLeases,
-	ACTION_LABELS, ACTION_LEVELS, REASON_LABELS, WARNING_LABELS, NAT_ERRORS, UPNP_MISSING, NBSP,
+	callStatus, callLists, callCategories, callSets, callCheck, callNatTest, callTunnelTest, callUpdateLists, callRollbackLists, callLog, callLeases,
+	ACTION_LABELS, ACTION_LEVELS, REASON_LABELS, WARNING_LABELS, NAT_ERRORS, UPNP_MISSING, NBSP, TABS,
 	fmtBytes, fmtRate, fmtAge, fmtTime, fmtDate, fmtNum, pill, busy, empty, missingText,
-	setText, setLevel, setResult, tunnelIface
+	setText, setLevel, setResult, tunnelIface, tunnelState, tabUrl
 });
