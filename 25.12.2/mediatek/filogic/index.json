@@ -4,10 +4,10 @@
   "packages": {
     "amneziawg-tools": "3.1.20260812-r1",
     "kmod-amneziawg": "6.12.103.3.1.20260906-r1",
-    "luci-app-truba": "1.0.0-r9",
+    "luci-app-truba": "1.0.0-r11",
     "luci-i18n-amneziawg-ru": "3.1.0-r1",
-    "luci-i18n-truba-ru": "1.0.0-r9",
+    "luci-i18n-truba-ru": "1.0.0-r11",
     "luci-proto-amneziawg": "3.1.0-r1",
-    "truba": "1.0.0-r12"
+    "truba": "1.0.0-r14"
   }
 }
