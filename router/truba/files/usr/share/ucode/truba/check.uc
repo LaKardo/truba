@@ -129,34 +129,37 @@ function resolve(domain) {
 	return uniq(ips);
 }
 
-// kern — наборы из ядра (bypass4, gs_tunnel4, gs_direct4: их наполняют интерфейсы и mosdns).
-// Наборы geoip выводятся из Категорий адреса и плана: в ядре каждый из них — объединение
-// CIDR Категорий с этим Действием; при выключенной Маршрутизации их нет.
-function ip_verdict(cfg, plan, ip, n, geoip, kern, mac) {
-	let gi = (a) => cfg.routing && any_of(geoip, plan.geoip[a] ?? []);
-	let action = null, reason = null;
-	let sets = {
-		bypass: in_ranges(kern.bypass4, n),
-		gi_block: gi('block'),
-		gs_tunnel: in_ranges(kern.gs_tunnel4, n),
-		gs_direct: in_ranges(kern.gs_direct4, n),
-		gi_tunnel: gi('tunnel'),
-		gi_direct: gi('direct'),
-	};
+// Решение для адреса — по тому же Приоритету (P.PRIORITY), из которого строится цепочка
+// classify. kern — наборы из ядра (bypass4, gs_tunnel4, gs_direct4: их наполняют интерфейсы
+// и mosdns). Наборы geoip выводятся из Категорий адреса и плана: в ядре каждый из них —
+// объединение CIDR Категорий с этим Действием; при выключенной Маршрутизации их нет.
+// Политики устройств — по MAC из настроек.
+export function ip_verdict(cfg, plan, ip, n, geoip, kern, mac) {
 	let dev = mac ? filter(cfg.devices, d => d.mac == lc(mac))[0] : null;
+	let member = (p) => {
+		if (p.match == 'mac')
+			return dev?.policy == p.action;
+		if (substr(p.set, 0, 3) == 'gi_')
+			return cfg.routing && any_of(geoip, plan.geoip[p.action] ?? []);
+		return in_ranges(kern[p.set] ?? [], n);
+	};
 
-	if (sets.bypass) { action = 'direct'; reason = 'local'; }
-	else if (sets.gi_block) { action = 'block'; reason = 'geoip_block'; }
-	else if (dev?.policy == 'direct') { action = 'direct'; reason = 'device'; }
-	else if (dev?.policy == 'tunnel') { action = 'tunnel'; reason = 'device'; }
-	else if (sets.gs_tunnel) { action = 'tunnel'; reason = 'geosite_ip'; }
-	else if (sets.gs_direct) { action = 'direct'; reason = 'geosite_ip'; }
-	else if (sets.gi_tunnel) { action = 'tunnel'; reason = 'geoip'; }
-	else if (sets.gi_direct) { action = 'direct'; reason = 'geoip'; }
-	else { action = plan.mode_default; reason = 'mode'; }
+	let sets = { bypass: in_ranges(kern.bypass4 ?? [], n) };
+	for (let p in P.PRIORITY)
+		if (p.key)
+			sets[p.key] = member(p);
 
-	return { ip, geoip, sets, device: dev?.name, action, reason };
-}
+	// Адреса домашней сети и Трубы (bypass4) цепочка prerouting пропускает до classify.
+	let hit = sets.bypass ? { action: 'direct', reason: 'local' } : null;
+	for (let p in P.PRIORITY) {
+		if (hit)
+			break;
+		if (p.key ? sets[p.key] : member(p))
+			hit = p;
+	}
+
+	return { ip, geoip, sets, device: dev?.name, action: hit?.action ?? plan.mode_default, reason: hit?.reason ?? 'mode' };
+};
 
 function verdicts(cfg, plan, cats, ips, mac) {
 	if (!length(ips))

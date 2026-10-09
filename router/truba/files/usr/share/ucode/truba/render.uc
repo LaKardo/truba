@@ -3,6 +3,9 @@
 
 import * as C from 'truba.const';
 import * as D from 'truba.dat';
+import * as P from 'truba.plan';
+
+const ACTION_MARK = { tunnel: C.MARK_TUNNEL, direct: C.MARK_DIRECT };
 
 function hex(n) {
 	return sprintf('0x%08x', n);
@@ -200,15 +203,12 @@ export function nft_full(cfg, plan, ctx) {
 	s += '\t\t' + ct_is(C.MARK_DIRECT) + ' ' + set_meta(C.MARK_DIRECT) + ' return\n';
 	s += '\t}\n\n';
 
-	// Приоритет: Блок → Политика устройства → geosite (Туннель > Напрямую) → geoip → Режим.
+	// Приоритет (P.PRIORITY): Блок → Политика устройства → geosite (Туннель > Напрямую) → geoip → Режим.
 	s += '\tchain classify {\n';
-	s += '\t\tip daddr @gi_block4 counter name c_block drop\n';
-	s += '\t\tether saddr @dev_direct ' + set_meta(C.MARK_DIRECT) + ' return\n';
-	s += '\t\tether saddr @dev_tunnel ' + set_meta(C.MARK_TUNNEL) + ' return\n';
-	s += '\t\tip daddr @gs_tunnel4 ' + set_meta(C.MARK_TUNNEL) + ' return\n';
-	s += '\t\tip daddr @gs_direct4 ' + set_meta(C.MARK_DIRECT) + ' return\n';
-	s += '\t\tip daddr @gi_tunnel4 ' + set_meta(C.MARK_TUNNEL) + ' return\n';
-	s += '\t\tip daddr @gi_direct4 ' + set_meta(C.MARK_DIRECT) + ' return\n';
+	for (let p in P.PRIORITY) {
+		s += '\t\t' + ((p.match == 'mac') ? 'ether saddr @' : 'ip daddr @') + p.set + ' ';
+		s += (p.action == 'block') ? 'counter name c_block drop\n' : set_meta(ACTION_MARK[p.action]) + ' return\n';
+	}
 	s += '\t\t' + set_meta(dflt) + '\n';
 	s += '\t}\n';
 	s += persist_chain();

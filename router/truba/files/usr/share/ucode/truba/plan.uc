@@ -5,6 +5,21 @@ import * as C from 'truba.const';
 
 const RANK = { block: 0, tunnel: 1, direct: 2 };
 
+// Приоритет для нового соединения устройства — после адресов домашней сети (bypass4), до
+// Режима. Один источник и для цепочки classify (truba.render), и для «Проверить домен/IP»
+// (truba.check): порядок в правилах nftables и в объяснении не разойдётся.
+// match — что сравнивается с набором: адрес назначения (ip) или MAC устройства (mac);
+// key — имя признака в ответе check (sets), reason — причина решения там же.
+export const PRIORITY = [
+	{ set: 'gi_block4',  match: 'ip',  action: 'block',  reason: 'geoip_block', key: 'gi_block' },
+	{ set: 'dev_direct', match: 'mac', action: 'direct', reason: 'device' },
+	{ set: 'dev_tunnel', match: 'mac', action: 'tunnel', reason: 'device' },
+	{ set: 'gs_tunnel4', match: 'ip',  action: 'tunnel', reason: 'geosite_ip',  key: 'gs_tunnel' },
+	{ set: 'gs_direct4', match: 'ip',  action: 'direct', reason: 'geosite_ip',  key: 'gs_direct' },
+	{ set: 'gi_tunnel4', match: 'ip',  action: 'tunnel', reason: 'geoip',       key: 'gi_tunnel' },
+	{ set: 'gi_direct4', match: 'ip',  action: 'direct', reason: 'geoip',       key: 'gi_direct' },
+];
+
 // Стартовые настройки: Действия Категорий при установке и по кнопке сброса.
 export const STARTING = [
 	{ mode: 'all',       set: 'geoip',   tag: 'ru',                 action: 'direct' },
