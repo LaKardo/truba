@@ -125,13 +125,17 @@ function set_decl(name, typ, flags, elems) {
 }
 
 // ctx: { lan_if[], bypass4[], gs_tunnel4[], gs_direct4[], dev_tunnel[], dev_direct[], socket_mark, counters }.
-// Заполняет ctx.set_sizes — число подсетей geoip по Действиям: из ядра огромный набор читать дорого.
+// Заполняет ctx.set_sizes — число подсетей geoip по Действиям: из ядра огромный набор читать дорого,
+// и ctx.gi — сами подсети: копия правил (ADR 0006) строится из того же ctx без нового чтения.
 export function nft_full(cfg, plan, ctx) {
-	let gi = { block: [], tunnel: [], direct: [] };
-	for (let a in [ 'block', 'tunnel', 'direct' ])
-		for (let tag in plan.geoip[a])
-			for (let cidr in D.geoip_cidrs(tag))
-				push(gi[a], cidr);
+	let gi = ctx.gi;
+	if (!gi) {
+		gi = ctx.gi = { block: [], tunnel: [], direct: [] };
+		for (let a in [ 'block', 'tunnel', 'direct' ])
+			for (let tag in plan.geoip[a])
+				for (let cidr in D.geoip_cidrs(tag))
+					push(gi[a], cidr);
+	}
 	ctx.set_sizes = { block: length(gi.block), tunnel: length(gi.tunnel), direct: length(gi.direct) };
 
 	let iface = q(cfg.iface);
@@ -230,7 +234,8 @@ function upstream(u, mark) {
 }
 
 // JSON — подмножество YAML, mosdns читает его как обычный конфиг.
-export function mosdns(cfg, plan, router_hosts) {
+// gsdir — каталог списков доменов (по умолчанию распакованные в DATA_DIR).
+export function mosdns(cfg, plan, router_hosts, gsdir) {
 	let P = [];
 	let main = [];
 
@@ -247,7 +252,7 @@ export function mosdns(cfg, plan, router_hosts) {
 	let i = 0;
 	for (let g in plan.geosite) {
 		let tag = sprintf('c_%d', i++);
-		push(P, { tag, type: 'domain_set', args: { files: [ D.geosite_file(g.tag) ] } });
+		push(P, { tag, type: 'domain_set', args: { files: [ D.geosite_file(g.tag, gsdir) ] } });
 		let ex = (g.action == 'block') ? 'reject 3' : ((g.action == 'tunnel') ? 'goto flow_tunnel' : 'goto flow_direct');
 		push(main, { matches: [ 'qname $' + tag ], exec: ex });
 	}

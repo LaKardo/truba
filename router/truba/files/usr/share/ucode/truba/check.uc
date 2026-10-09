@@ -172,14 +172,16 @@ function verdicts(cfg, plan, cats, ips, mac) {
 
 export function check(target, mac) {
 	let cfg = F.load();
-	let dat = U.read_json(C.CATS_FILE, null) ?? D.ensure();
-	let cats = dat?.cats ?? [];
+	target = lc(trim(target ?? ''));
+	let dat = D.cached();
+	if (!dat)
+		return { target, error: 'busy' };   // списки распаковывает apply
+	let cats = dat.cats ?? [];
 	let plan = P.compute(cfg, cats);
 	let actions = {};
 	for (let g in plan.geosite)
 		actions[g.tag] = g.action;
 
-	target = lc(trim(target ?? ''));
 	let res = { target, mode: cfg.mode, mode_default: plan.mode_default };
 
 	if (U.is_ipv4(target)) {

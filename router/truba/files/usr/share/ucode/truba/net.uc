@@ -2,18 +2,15 @@
 'use strict';
 
 import { cursor } from 'uci';
-import { connect } from 'ubus';
 import { readfile, stat, unlink } from 'fs';
 import * as C from 'truba.const';
 import * as U from 'truba.util';
 
 const T = '' + C.RT_TABLE;
 
-export function iface_up(iface) {
-	let ub = connect();
-	let st = ub ? ub.call('network.interface.' + iface, 'status', {}) : null;
-	if (ub)
-		ub.disconnect();
+// ub — уже открытое соединение ubus (необязательно).
+export function iface_up(iface, ub) {
+	let st = U.ubus_call(ub, 'network.interface.' + iface, 'status');
 	return { up: !!st?.up, device: st?.l3_device ?? st?.device ?? iface };
 };
 

@@ -235,7 +235,9 @@ return view.extend({
 					? _('By mode = Tunnel. Narrower categories are checked first; on a tie: Block → Tunnel → Direct. A domain category wins over a geoip category.')
 					: _('By mode = Direct. Only categories with action Tunnel go through the tunnel.')),
 				missingBox,
-				cats.length ? '' : E('div', { 'class': 'alert-message' }, _('Rule sets are not downloaded yet — see the DNS & lists tab.')),
+				cats.length ? '' : E('div', { 'class': 'alert-message' }, info.busy
+					? _('Rule sets are being unpacked — reload the page in a minute.')
+					: _('Rule sets are not downloaded yet — see the DNS & lists tab.')),
 				E('div', { 'class': 'truba-toolbar' }, [
 					filterBox.text,
 					E('div', { 'class': 'truba-chips truba-grow', 'role': 'group', 'aria-label': _('Filter by action') }, chips),

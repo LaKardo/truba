@@ -61,7 +61,7 @@ const BIG_EVERY = 10;
 
 // «Проверка Туннеля» на «Диагностике»: ping Трубы пакетами трёх размеров разом.
 // Размеры — IP-пакета в байтах: обычный ping, средний и во весь MTU Туннеля.
-export function tunnel_test() {
+function run_tunnel_test() {
 	let cfg = F.load();
 	let tinfo = F.tunnel_info(cfg.iface);
 	if (!tinfo.exists)
@@ -92,6 +92,16 @@ export function tunnel_test() {
 	});
 	system([ 'rm', '-rf', dir ]);
 	return { target, mtu, time: time(), results, ok: length(filter(results, (r) => !r.ok)) == 0 };
+}
+
+// Итог сохраняется в TT_FILE: rpcd запускает проверку в фоне (она идёт секунды, а rpcd
+// обслуживает вызовы по одному), и интерфейс забирает итог оттуда.
+export function tunnel_test() {
+	let res = run_tunnel_test();
+	res.time ??= time();
+	U.mkdirp(C.RUN_DIR);
+	U.write_json(C.TT_FILE, res);
+	return res;
 };
 
 // «Проверка NAT» сама: после подъёма Туннеля (итог старше «в порядке с») и после

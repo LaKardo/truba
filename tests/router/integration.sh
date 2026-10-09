@@ -346,6 +346,26 @@ check "tunnel-test: мелкие пакеты при этом проходят" 
 check "tunnel-test: пакеты во весь MTU — нет" test "$(jsonfilter -i /tmp/tt2.json -e '@.results[2].ok')" = false
 ip netns exec vps nft delete table inet bigdrop
 
+echo "== rpcd: долгие проверки идут в фоне и не держат остальные вызовы LuCI"
+# rpcd обслуживает вызовы по одному: пока он ждал проверку (до ~5 с), стоял весь LuCI.
+mkdir -p /usr/share/rpcd/ucode
+cp /repo/router/luci-app-truba/root/usr/share/rpcd/ucode/truba.uc /usr/share/rpcd/ucode/truba.uc
+/etc/init.d/rpcd restart >/dev/null 2>&1
+check "rpcd: объект truba" wait_for 10 ubus list truba
+T0=$(date +%s); ubus call truba tunnel_test > /tmp/rt.json; T1=$(date +%s)
+check "rpcd: tunnel_test отвечает сразу (было $((T1 - T0)) с)" test $((T1 - T0)) -le 1
+STARTED="$(jsonfilter -i /tmp/rt.json -e '@.started')"
+T0=$(date +%s); ubus call luci-rpc getHostHints >/dev/null 2>&1; T1=$(date +%s)
+check "rpcd: пока идёт проверка, другие вызовы не ждут (было $((T1 - T0)) с)" test $((T1 - T0)) -le 2
+tt_done() { [ "$(ubus call truba tunnel_result | jsonfilter -e '@.time')" -ge "$STARTED" ] 2>/dev/null; }
+check "rpcd: итог проверки Туннеля появился" wait_for 20 tt_done
+check "rpcd: итог проверки Туннеля — все размеры проходят" test "$(ubus call truba tunnel_result | jsonfilter -e '@.ok')" = true
+ubus call truba nat_test > /tmp/rn.json
+STARTED="$(jsonfilter -i /tmp/rn.json -e '@.started')"
+nat_done() { [ "$(ubus call truba nat_result | jsonfilter -e '@.time')" -ge "$STARTED" ] 2>/dev/null; }
+check "rpcd: итог проверки NAT появился" wait_for 20 nat_done
+check "rpcd: итог проверки NAT — OK" test "$(ubus call truba nat_result | jsonfilter -e '@.ok')" = true
+
 echo "== учёт трафика устройств (Маршрутизация вкл)"
 bytes() { nft list counter inet truba "$1" 2>/dev/null | sed -n 's/.*bytes \([0-9]*\).*/\1/p'; }
 gt0() { [ "$(bytes "$1")" -gt 0 ] 2>/dev/null; }
@@ -512,6 +532,104 @@ else
 	check "gs_direct4 сохранён при перезагрузке правил" sh -c "nft list set inet truba gs_direct4 | grep -q 198.51.100.7"
 fi
 
+echo "== Неверные настройки пропускаются, а не ломают применение"
+# Опечатки из консоли: MAC не давал загрузить таблицу nft, схема адреса DNS — запустить mosdns,
+# адрес для ping делал Туннель «неработающим» навсегда.
+SAVED_TUNNEL_DNS="$(uci -q get truba.dns.tunnel_upstream)"
+uci -q batch <<-'EOF'
+	add truba device
+	set truba.@device[-1].name='typo'
+	set truba.@device[-1].mac='AA:BB:CC:DD:EE'
+	set truba.@device[-1].policy='tunnel'
+	add_list truba.dns.tunnel_upstream='htps://1.1.1.1/dns-query'
+	set truba.watchdog.probe='10.77.77.l'
+	commit truba
+EOF
+check "reload (не дольше 90 с)" bounded 90 /etc/init.d/truba reload; sleep 3
+check "неверные настройки: применено без ошибки" sh -c "! grep -q '\"error\"' /var/run/truba/applied.json"
+check "неверные настройки: перечислены для «Обзора»" sh -c "[ \"\$(jsonfilter -i /var/run/truba/applied.json -e '@.invalid[*].key' | sort | xargs)\" = 'device.mac dns.tunnel_upstream watchdog.probe' ]"
+check "MAC с опечаткой не попал в набор, верный остался" sh -c "nft list set inet truba dev_tunnel | grep -qi 'aa:bb:cc:dd:ee:ff' && ! nft list set inet truba dev_tunnel | grep -qiE 'aa:bb:cc:dd:ee( |,|$)'"
+check "адрес DNS с опечаткой не попал в конфиг mosdns, верные остались" sh -c "! grep -q htps /var/etc/truba/mosdns.json && grep -q 'https://1.1.1.1/dns-query' /var/etc/truba/mosdns.json"
+check "неверные настройки: mosdns слушает 5335" sh -c "netstat -lnu | grep -q '127.0.0.1:5335 '"
+uci -q delete truba.dns.tunnel_upstream; uci add_list truba.dns.tunnel_upstream='htps://x'; uci commit truba
+check "reload (не дольше 90 с)" bounded 90 /etc/init.d/truba reload; sleep 3
+check "все адреса DNS неверные — стандартные, а не mosdns без серверов" grep -q 'https://8.8.8.8/dns-query' /var/etc/truba/mosdns.json
+uci -q delete truba.@device[-1]
+uci -q delete truba.dns.tunnel_upstream
+for u in $SAVED_TUNNEL_DNS; do uci add_list truba.dns.tunnel_upstream="$u"; done
+uci set truba.watchdog.probe=''
+uci commit truba
+check "reload (не дольше 90 с)" bounded 90 /etc/init.d/truba reload; sleep 3
+check "настройки исправлены: пропущенных нет" sh -c "[ -z \"\$(jsonfilter -i /var/run/truba/applied.json -e '@.invalid[*]')\" ]"
+
+echo "== Ошибка применения: служба и DNS сети продолжают работать (ADR 0006)"
+# Обёртка nft отказывается загружать новую таблицу Трубы, пока есть /tmp/nft-fail, — как при
+# ошибке в правилах или нехватке памяти ядра. Остальное, в том числе загрузку последней
+# удачной копии, выполняет настоящий nft.
+NFT_BIN="$(command -v nft)"
+mv "$NFT_BIN" "$NFT_BIN.real"
+cat > "$NFT_BIN" <<-EOF
+	#!/bin/sh
+	if [ -f /tmp/nft-fail ]; then
+		for a in "\$@"; do
+			[ "\$a" = /var/etc/truba/truba.nft ] && { echo 'Error: simulated failure' >&2; exit 1; }
+		done
+	fi
+	exec $NFT_BIN.real "\$@"
+EOF
+chmod +x "$NFT_BIN"
+# Шаг не дольше 90 с; код возврата самой команды не важен: проверки — после.
+finished() { bounded 90 "$@"; [ $? -ne 124 ]; }
+ads_blocked() { nslookup "$ADS" 127.0.0.1 2>&1 | grep -qiE 'NXDOMAIN|can.t find'; }
+
+check "копия правил сохранена на флеше" sh -c "[ -s /etc/truba/good/truba.nft ] && [ -s /etc/truba/good/mosdns.json ] && [ -s /etc/truba/good/meta.json ]"
+check "копия: без накопленных счётчиков и без IP из DNS" sh -c "! grep -q 'packets [1-9]' /etc/truba/good/truba.nft && ! grep -A3 'set gs_direct4' /etc/truba/good/truba.nft | grep -q elements"
+check "копия: mosdns без API, со своими списками доменов" sh -c "! grep -q '\"api\"' /etc/truba/good/mosdns.json && grep -q '/etc/truba/good/geosite/category-ads.txt' /etc/truba/good/mosdns.json && [ -s /etc/truba/good/geosite/category-ads.txt ]"
+GOOD_INODE="$(ls -i /etc/truba/good/truba.nft | awk '{print $1}')"
+uci set truba.watchdog.enabled='1'; uci commit truba
+check "reload (не дольше 90 с)" bounded 90 /etc/init.d/truba reload; sleep 3
+check "копия не переписывается, пока ничего не изменилось (флеш)" test "$(ls -i /etc/truba/good/truba.nft | awk '{print $1}')" = "$GOOD_INODE"
+
+# Сбой при работе: новая таблица (Режим «Выборочный») не загружается.
+MOSDNS_PID="$(pidof mosdns)"
+touch /tmp/nft-fail
+uci set truba.main.mode='selective'; uci commit truba
+check "reload при ошибке nft завершился" finished /etc/init.d/truba reload; sleep 3
+check "ошибка nft записана для «Обзора»" sh -c "jsonfilter -i /var/run/truba/applied.json -e '@.error' | grep -q 'simulated failure'"
+check "ошибка: действуют правила, загруженные до неё" test "$(jsonfilter -i /var/run/truba/applied.json -e '@.fallback')" = kept
+check "ошибка: в ядре прежняя таблица (Режим «Всё в туннель»)" sh -c "nft list chain inet truba classify | tail -3 | grep -qE 'meta mark set meta mark & 0xff0[0-9a-f]ffff \| 0x00010000'"
+check "ошибка: applied.json описывает действующую таблицу" test "$(jsonfilter -i /var/run/truba/applied.json -e '@.mode')" = all
+check "ошибка: mosdns не остановлен и не перезапущен" test "$(pidof mosdns)" = "$MOSDNS_PID"
+check "ошибка: watchdog работает" pgrep -f 'truba watchdo[g]'
+check "ошибка: dnsmasq по-прежнему → mosdns" sh -c "uci -q get dhcp.@dnsmasq[0].server | grep -q '127.0.0.1#5335'"
+check "ошибка: DNS сети отвечает (Блок $ADS → NXDOMAIN)" ads_blocked
+
+# Загрузка Роутера: таблицы в ядре нет, /var пуст (tmpfs), а применить настройки не удаётся.
+/etc/init.d/truba stop; sleep 1
+rm -rf /var/run/truba /var/etc/truba /var/lib/truba
+check "старт при ошибке nft завершился" finished /etc/init.d/truba start; sleep 4
+check "загрузка: последняя удачная копия" test "$(jsonfilter -i /var/run/truba/applied.json -e '@.fallback')" = last_good
+check "загрузка: таблица из копии, подсети geoip на месте" sh -c "nft list set inet truba gi_direct4 | grep -q '5\.'"
+check "загрузка: mosdns с конфигом и списками копии" sh -c "pidof mosdns && grep -q '/etc/truba/good/geosite/' /var/etc/truba/mosdns.json"
+check "загрузка: dnsmasq → mosdns" sh -c "uci -q get dhcp.@dnsmasq[0].server | grep -q '127.0.0.1#5335'"
+check "загрузка: DNS сети отвечает (Блок $ADS → NXDOMAIN)" wait_for 10 ads_blocked
+check "загрузка: правила ip и таблица Туннеля" sh -c "ip rule show | grep -q 'lookup 77' && ip route show table 77 | grep -q 'default dev awg0'"
+
+# Загрузка без копии (её ещё ни разу не было): правил Трубы нет — и DNS идёт напрямую.
+/etc/init.d/truba stop; sleep 1
+rm -rf /var/run/truba /var/etc/truba /var/lib/truba /etc/truba/good
+check "старт без копии при ошибке nft завершился" finished /etc/init.d/truba start; sleep 4
+check "без копии: правил Трубы нет" sh -c "[ \"\$(jsonfilter -i /var/run/truba/applied.json -e '@.fallback')\" = none ] && ! nft list table inet truba"
+check "без копии: DNS напрямую, dnsmasq без mosdns" sh -c "! uci -q get dhcp.@dnsmasq[0].server | grep -q 5335"
+check "без копии: mosdns не запущен" sh -c "! pidof mosdns"
+
+rm -f /tmp/nft-fail
+uci set truba.main.mode='all'; uci set truba.watchdog.enabled='0'; uci commit truba
+check "reload после устранения ошибки (не дольше 90 с)" bounded 90 /etc/init.d/truba reload; sleep 3
+check "после устранения: применено без ошибки" sh -c "! grep -q '\"error\"' /var/run/truba/applied.json"
+check "после устранения: mosdns работает, копия снова есть" sh -c "pidof mosdns && [ -s /etc/truba/good/meta.json ]"
+mv "$NFT_BIN.real" "$NFT_BIN"
+
 echo "== Контроль Туннеля: задержка и потери для «Обзора»"
 # 192.0.2.200 уходит в Туннель, но Труба его не пересылает — ответа нет.
 cat > /tmp/rtt.uc <<-'EOF'
@@ -599,9 +717,12 @@ echo "== update-lists: скачивание в /tmp (tmpfs) и перенос н
 # На роутере /tmp — tmpfs, а /etc — overlay: rename между ними не работает (EXDEV).
 mount | grep -q ' on /tmp type tmpfs' && echo "/tmp — tmpfs, как на роутере" || echo "внимание: /tmp не tmpfs, перенос между ФС не проверяется"
 mkdir -p /root/src
+src_sum() { (cd /root/src && sha256sum "$1" > "$1.sha256sum"); }
 for f in geoip.dat geosite.dat; do
 	cp "/dat/$f" "/root/src/$f"
-	(cd /root/src && sha256sum "$f" > "$f.sha256sum")
+	# Другая, но правильная версия (дописана Категория): update-lists видит новый файл.
+	ucode /repo/tests/router/dat_append.uc "${f%.dat}" "/root/src/$f" zztest
+	src_sum "$f"
 done
 uci -q batch <<-'EOF'
 	set truba.lists.via_tunnel='0'
@@ -627,6 +748,40 @@ check "rollback-lists и его reload завершились" wait_idle 60
 unstick
 check "rollback-lists: оба набора" grep -q 'geosite.dat' /tmp/rb.json
 check "rollback-lists: текущие на месте" test -s /etc/truba/lists/geoip.dat
+
+echo "== update-lists -f без изменений: предыдущая версия остаётся версией для отката"
+for f in geoip.dat geosite.dat; do cp "/etc/truba/lists/$f" "/root/src/$f"; src_sum "$f"; done
+PREV_SHA="$(sha256sum < /etc/truba/lists/prev/geosite.dat)"
+APPLIED_T="$(jsonfilter -i /var/run/truba/applied.json -e '@.time')"
+sleep 1
+/usr/sbin/truba update-lists -f > /tmp/ul2.json 2>&1 &
+check "update-lists -f и его reload завершились" wait_idle 60
+unstick
+check "-f без изменений: предыдущая версия на месте" test "$(sha256sum < /etc/truba/lists/prev/geosite.dat)" = "$PREV_SHA"
+check "-f без изменений: настройки применены заново" sh -c "[ \"\$(jsonfilter -i /var/run/truba/applied.json -e '@.time')\" -gt $APPLIED_T ]"
+
+echo "== update-lists: файл, который не разбирается, не заменяет текущий"
+# Контрольная сумма у источника честная: файл скачан целиком, но поврежден (или нового формата).
+CUR_SHA="$(sha256sum < /etc/truba/lists/geosite.dat)"
+head -c 1500000 /dat/geosite.dat > /root/src/geosite.dat; src_sum geosite.dat
+/usr/sbin/truba update-lists > /tmp/ul3.json 2>&1 &
+check "update-lists с нечитаемым файлом завершился" wait_idle 60
+unstick
+check "нечитаемый geosite не принят (parse failed)" sh -c "jsonfilter -i /etc/truba/state/lists.json -e '@.sets.geosite.errors[*]' | grep -q 'parse failed'"
+check "нечитаемый geosite: текущий не заменён" test "$(sha256sum < /etc/truba/lists/geosite.dat)" = "$CUR_SHA"
+check "нечитаемый geosite: mosdns работает" pidof mosdns
+cp /dat/geosite.dat /root/src/geosite.dat; src_sum geosite.dat
+
+echo "== apply: текущие списки не читаются — возвращаются предыдущие"
+# Так могло остаться от версий, которые не проверяли скачанное.
+head -c 1500000 /dat/geosite.dat > /tmp/broken.dat
+mv /tmp/broken.dat /etc/truba/lists/geosite.dat
+(cd /etc/truba/lists && sha256sum geosite.dat > geosite.dat.sha256sum)
+check "reload (не дольше 90 с)" bounded 90 /etc/init.d/truba reload; sleep 3
+check "нечитаемые списки: применено без ошибки" sh -c "! grep -q '\"error\"' /var/run/truba/applied.json"
+check "нечитаемые списки: предупреждение для «Обзора»" grep -q lists_rolled_back /var/run/truba/applied.json
+check "нечитаемые списки: текущим стал предыдущий" test "$(wc -c < /etc/truba/lists/geosite.dat)" -gt 1500000
+check "нечитаемые списки: mosdns работает" pidof mosdns
 
 echo "== свежая установка без списков: apply сам скачивает их в фоне"
 # Так было на роутере: фоновый update-lists наследовал блокировки apply и rc.common,
@@ -655,6 +810,7 @@ echo "== uninstall"
 sh /usr/share/truba/uninstall.sh
 check "зона truba удалена" test -z "$(uci -q get firewall.truba)"
 check "аппаратное ускорение возвращено" test "$(uci -q get firewall.@defaults[0].flow_offloading_hw)" = 1
+check "последняя удачная копия правил удалена" test ! -e /etc/truba/good
 
 echo
 [ "$FAILS" -eq 0 ] && echo "ALL OK" || echo "$FAILS FAILED"

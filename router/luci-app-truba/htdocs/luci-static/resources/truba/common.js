@@ -9,7 +9,9 @@ const callCategories = rpc.declare({ object: 'truba', method: 'categories', expe
 const callSets = rpc.declare({ object: 'truba', method: 'sets', expect: { '': {} } });
 const callCheck = rpc.declare({ object: 'truba', method: 'check', params: [ 'target', 'mac' ], expect: { '': {} } });
 const callNatTest = rpc.declare({ object: 'truba', method: 'nat_test', expect: { '': {} } });
+const callNatResult = rpc.declare({ object: 'truba', method: 'nat_result', expect: { '': {} } });
 const callTunnelTest = rpc.declare({ object: 'truba', method: 'tunnel_test', expect: { '': {} } });
+const callTunnelResult = rpc.declare({ object: 'truba', method: 'tunnel_result', expect: { '': {} } });
 const callUpdateLists = rpc.declare({ object: 'truba', method: 'update_lists', params: [ 'force' ], expect: { '': {} } });
 const callRollbackLists = rpc.declare({ object: 'truba', method: 'rollback_lists', expect: { '': {} } });
 const callLog = rpc.declare({ object: 'truba', method: 'log', params: [ 'lines' ], expect: { log: '' } });
@@ -47,7 +49,8 @@ const REASON_LABELS = {
 const WARNING_LABELS = {
 	lists_missing: _('Rule sets are not downloaded yet — only the mode default applies. Download is in progress.'),
 	zones_without_devices: _('The selected firewall zones have no active devices.'),
-	tunnel_not_configured: _('The tunnel is not configured yet — import the configuration on the Tunnel tab.')
+	tunnel_not_configured: _('The tunnel is not configured yet — import the configuration on the Tunnel tab.'),
+	lists_rolled_back: _('The current rule sets could not be read, so the previous ones were restored.')
 };
 
 // Почему «Проверка NAT» не дала результата (поле error итога).
@@ -55,8 +58,35 @@ const NAT_ERRORS = {
 	not_configured: _('the tunnel is not configured'),
 	tunnel_down: _('the tunnel is down'),
 	socket: _('cannot open a socket'),
-	no_answer: _('no STUN server answered')
+	no_answer: _('no STUN server answered'),
+	timeout: _('no result in time')
 };
+
+// Неверные значения настроек, которые служба пропустила (applied.invalid), — вкладка, где их исправить.
+const INVALID_TABS = { device: 'routing', dns: 'dns', lists: 'dns', watchdog: 'tunnel', main: 'tunnel' };
+
+function invalidTab(list) {
+	return INVALID_TABS[String(list[0]?.key || '').split('.')[0]] || 'routing';
+}
+
+// Долгая проверка (NAT, Туннель): rpcd запускает её в фоне и отвечает сразу, а итог —
+// первый, у которого время не раньше запуска. limit — сколько секунд ждать.
+function runInBackground(start, result, limit) {
+	return start().then((s) => {
+		const since = s.started || 0, until = Date.now() + limit * 1000;
+		const wait = () => new Promise((resolve) => setTimeout(resolve, 1000)).then(() => result()).then((r) =>
+			(r && r.time >= since) ? r : (Date.now() < until) ? wait() : { time: Date.now() / 1000, error: 'timeout' });
+		return wait();
+	});
+}
+
+function runNatTest() {
+	return runInBackground(callNatTest, callNatResult, 20);
+}
+
+function runTunnelTest() {
+	return runInBackground(callTunnelTest, callTunnelResult, 30);
+}
 
 // Тексты, которые показывают несколько вкладок.
 const UPNP_MISSING = _('UPnP is enabled, but miniupnpd is not installed: install luci-app-upnp.');
@@ -141,7 +171,8 @@ const NBSP = String.fromCharCode(160);
 // Откуда скачан Набор правил и почему не скачался: бэкенд пишет «tunnel», «direct»,
 // «mirror» и ошибки вида «tunnel: download failed».
 const VIA_LABELS = { tunnel: _('via the tunnel'), direct: _('directly'), mirror: _('from the mirror') };
-const SET_ERRORS = { 'download failed': _('download failed'), 'sha256 mismatch': _('checksum mismatch') };
+const SET_ERRORS = { 'download failed': _('download failed'), 'sha256 mismatch': _('checksum mismatch'),
+	'parse failed': _('the file cannot be read, the current one is kept') };
 function setError(e) {
 	const m = String(e).match(/^(\w+): (.+)$/);
 	return m ? '%s: %s'.format(VIA_LABELS[m[1]] || m[1], SET_ERRORS[m[2]] || m[2]) : String(e);
@@ -189,8 +220,9 @@ function tabUrl(tab) {
 }
 
 return baseclass.extend({
-	callStatus, callLists, callCategories, callSets, callCheck, callNatTest, callTunnelTest, callUpdateLists, callRollbackLists, callLog, callLeases,
+	callStatus, callLists, callCategories, callSets, callCheck, callUpdateLists, callRollbackLists, callLog, callLeases,
+	runNatTest, runTunnelTest,
 	ACTION_LABELS, ACTION_LEVELS, REASON_LABELS, WARNING_LABELS, NAT_ERRORS, UPNP_MISSING, NBSP, TABS,
 	fmtBytes, fmtRate, fmtAge, fmtTime, fmtDate, fmtNum, pill, busy, empty, missingText,
-	setText, setLevel, setResult, setError, tunnelIface, tunnelState, tabUrl
+	setText, setLevel, setResult, setError, tunnelIface, tunnelState, tabUrl, invalidTab
 });

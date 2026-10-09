@@ -1,7 +1,8 @@
 // Общие помощники: журнал, файлы, JSON, команды, IPv4.
 'use strict';
 
-import { readfile, writefile, rename, mkdir, stat, popen, unlink, open } from 'fs';
+import { readfile, rename, mkdir, stat, popen, unlink, open } from 'fs';
+import { connect } from 'ubus';
 
 export function log(level, msg) {
 	system([ 'logger', '-t', 'truba', '-p', 'daemon.' + level, msg ]);
@@ -26,6 +27,15 @@ export function run(cmd) {
 	let code = m ? int(m[1]) : -1;
 	out = replace(out, /@@rc=[0-9]+\n?$/, '');
 	return { code, out };
+};
+
+// Вызов ubus по переданному соединению (ub) или по своему: status опрашивается раз в 5 с,
+// и ему хватает одного соединения на все вызовы.
+export function ubus_call(ub, obj, method, args) {
+	let own = (ub == null) ? connect() : null;
+	let res = (ub ?? own)?.call(obj, method, args ?? {});
+	own?.disconnect();
+	return res;
 };
 
 // Монотонное время в миллисекундах — для тайм-аутов внутри одного вызова.
@@ -92,12 +102,22 @@ export function sha256_file(path) {
 	return m ? m[1] : null;
 };
 
-export function sha256_str(s) {
-	let tmp = '/tmp/truba-hash.' + time();
-	writefile(tmp, s);
-	let h = sha256_file(tmp);
-	unlink(tmp);
-	return h;
+// Контрольная сумма из файла «.sha256sum» (первое поле) или null.
+export function sha_from_sumfile(path) {
+	let m = match(readfile(path) ?? '', /^([0-9a-fA-F]{64})/);
+	return m ? lc(m[1]) : null;
+};
+
+// Записать, только если содержимое другое: флеш не изнашивается одинаковыми записями.
+export function write_if_changed(path, data) {
+	if (data == null || readfile(path) == data)
+		return false;
+	return write_atomic(path, data);
+};
+
+// Текст исключения: ucode передаёт в catch объект { type, message, stacktrace }.
+export function errmsg(e) {
+	return (type(e) == 'object') ? (e.message ?? sprintf('%J', e)) : ('' + e);
 };
 
 // IPv4 «a.b.c.d» → целое число или null.
@@ -146,16 +166,27 @@ export function to_list(v) {
 // Простая блокировка на файле: держится, пока открыт дескриптор.
 // 'e' (O_CLOEXEC): иначе дескриптор наследуют дочерние процессы (фоновый
 // update-lists), блокировка переживает apply, и следующий apply ждёт её вечно.
-export function lock(name) {
+// nowait — не ждать: null, если блокировку держит другой процесс.
+export function lock(name, nowait) {
 	mkdirp('/var/lock');
 	let fd = open('/var/lock/' + name + '.lock', 'we');
 	if (!fd)
 		return null;
-	if (!fd.lock('x')) {
+	if (!fd.lock(nowait ? 'xn' : 'x')) {
 		fd.close();
 		return null;
 	}
 	return fd;
+};
+
+// Держит ли блокировку другой процесс. В отличие от файла-флага, она снимается сама,
+// даже если процесс убит: «идёт обновление» не залипает навсегда.
+export function lock_busy(name) {
+	let fd = lock(name, true);
+	if (!fd)
+		return true;
+	fd.close();
+	return false;
 };
 
 export function file_mtime(path) {
