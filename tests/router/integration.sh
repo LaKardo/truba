@@ -668,7 +668,7 @@ finished() { bounded 90 "$@"; [ $? -ne 124 ]; }
 ads_blocked() { nslookup "$ADS" 127.0.0.1 2>&1 | grep -qiE 'NXDOMAIN|can.t find'; }
 
 check "копия правил сохранена на флеше" sh -c "[ -s /etc/truba/good/truba.nft ] && [ -s /etc/truba/good/mosdns.json ] && [ -s /etc/truba/good/meta.json ]"
-check "копия: без накопленных счётчиков и без IP из DNS" sh -c "! grep -q 'packets [1-9]' /etc/truba/good/truba.nft && ! grep -A3 'set gs_direct4' /etc/truba/good/truba.nft | grep -q elements"
+check "копия: без накопленных счётчиков и без IP из DNS" sh -c "! grep -q 'packets [1-9]' /etc/truba/good/truba.nft && ! sed -n '/set gs_direct4/,/}/p' /etc/truba/good/truba.nft | grep -q elements"
 check "копия: mosdns без API, со своими списками доменов" sh -c "! grep -q '\"api\"' /etc/truba/good/mosdns.json && grep -q '/etc/truba/good/geosite/category-ads.txt' /etc/truba/good/mosdns.json && [ -s /etc/truba/good/geosite/category-ads.txt ]"
 GOOD_INODE="$(ls -i /etc/truba/good/truba.nft | awk '{print $1}')"
 uci set truba.watchdog.enabled='1'; uci commit truba

@@ -27,7 +27,8 @@ hostpath() { (cd "$1" && { pwd -W 2>/dev/null || pwd; }); }
 dat_dir() {
 	[ -z "${DAT_DIR:-}" ] || return 0
 	local d
-	d=$(mktemp -d)
+	# Сразу путь для хоста: curl в Git Bash — программа Windows, /tmp она не знает.
+	d=$(hostpath "$(mktemp -d)")
 	if [ -n "${DAT_FRESH:-}" ]; then
 		curl -fsSL -o "$d/geoip.dat" https://raw.githubusercontent.com/kirilllavrov/geoip-builder/release/geoip.dat || return 1
 		curl -fsSL -o "$d/geosite.dat" https://raw.githubusercontent.com/kirilllavrov/geosite-builder/release/geosite.dat || return 1
@@ -39,7 +40,7 @@ dat_dir() {
 		printf '%s  %s\n%s  %s\n' "$GEOIP_SHA256" "$d/geoip.dat" "$GEOSITE_SHA256" "$d/geosite.dat" | sha256sum -c --quiet - || return 1
 		export TRUBA_SNAPSHOT=${TRUBA_SNAPSHOT:-$SNAPSHOT}
 	fi
-	DAT_DIR=$(hostpath "$d")
+	DAT_DIR=$d
 }
 
 # Образ с зависимостями Роутера — заранее: под procd у контейнера нет сети.
