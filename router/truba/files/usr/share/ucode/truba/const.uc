@@ -28,6 +28,9 @@ export const HEALTH_FILE = '/var/run/truba/health.json';
 export const APPLIED_FILE = '/var/run/truba/applied.json';
 export const NAT_FILE    = '/var/run/truba/nat.json';
 export const TT_FILE     = '/var/run/truba/tunnel-test.json';
+// История скорости для графика «Обзора» (truba.stats): точки по 5 с за час и поминутные за сутки.
+export const RATES_FILE     = '/var/run/truba/rates.json';
+export const RATES_MIN_FILE = '/var/run/truba/rates-min.json';
 export const LISTS_STATE = '/etc/truba/state/lists.json';
 export const DNSMASQ_BACKUP = '/etc/truba/state/dnsmasq.json';
 export const UPNP_BACKUP = '/etc/truba/state/upnpd.json';

@@ -14,6 +14,8 @@ const callTunnelTest = rpc.declare({ object: 'truba', method: 'tunnel_test', exp
 const callTunnelResult = rpc.declare({ object: 'truba', method: 'tunnel_result', expect: { '': {} } });
 const callUpdateLists = rpc.declare({ object: 'truba', method: 'update_lists', params: [ 'force' ], expect: { '': {} } });
 const callRollbackLists = rpc.declare({ object: 'truba', method: 'rollback_lists', expect: { '': {} } });
+// История скорости с Роутера (её пишет процесс truba stats): точки новее since за span секунд.
+const callRates = rpc.declare({ object: 'truba', method: 'rates', params: [ 'span', 'since' ], expect: { '': {} } });
 const callLog = rpc.declare({ object: 'truba', method: 'log', params: [ 'lines' ], expect: { log: '' } });
 const callLeases = rpc.declare({ object: 'luci-rpc', method: 'getDHCPLeases', expect: { '': {} } });
 
@@ -220,7 +222,7 @@ function tabUrl(tab) {
 }
 
 return baseclass.extend({
-	callStatus, callLists, callCategories, callSets, callCheck, callUpdateLists, callRollbackLists, callLog, callLeases,
+	callStatus, callLists, callCategories, callSets, callCheck, callUpdateLists, callRollbackLists, callRates, callLog, callLeases,
 	runNatTest, runTunnelTest,
 	ACTION_LABELS, ACTION_LEVELS, REASON_LABELS, WARNING_LABELS, NAT_ERRORS, UPNP_MISSING, NBSP, TABS,
 	fmtBytes, fmtRate, fmtAge, fmtTime, fmtDate, fmtNum, pill, busy, empty, missingText,

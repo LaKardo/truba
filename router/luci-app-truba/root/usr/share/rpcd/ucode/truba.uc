@@ -102,6 +102,20 @@ const methods = {
 		}
 	},
 
+	// История скорости для графика «Обзора» (её пишет процесс truba stats): точки новее
+	// since за последние span секунд; срок больше часа — поминутные средние. now — время
+	// Роутера: по нему интерфейс строит ось, часы компьютера могут расходиться с ним.
+	rates: {
+		args: { span: 600, since: 0 },
+		call: function(req) {
+			let span = int(req.args?.span ?? 600), since = int(req.args?.since ?? 0);
+			let f = result((span > 3600) ? '/var/run/truba/rates-min.json' : '/var/run/truba/rates.json');
+			let now = time(), from = (since > now - span) ? since : now - span;
+			let points = filter((type(f.points) == 'array') ? f.points : [], (p) => type(p) == 'array' && p[0] > from);
+			return { now, step: f.step ?? null, points };
+		}
+	},
+
 	update_lists: {
 		args: { force: false },
 		call: function(req) {

@@ -33,7 +33,8 @@ function usage() {
 		'  nat-test [auto]    проверка внешнего IP и сохранения порта через Трубу\n' +
 		'                     (auto — запуск от watchdog после подъёма Туннеля)\n' +
 		'  tunnel-test        ping Трубы пакетами трёх размеров, до полного MTU Туннеля\n' +
-		'  watchdog           цикл контроля Туннеля (запускает procd)\n');
+		'  watchdog           цикл контроля Туннеля (запускает procd)\n' +
+		'  stats              цикл записи истории скорости для «Обзора» (запускает procd)\n');
 	exit(2);
 }
 
@@ -99,6 +100,10 @@ case 'tunnel-test':
 
 case 'watchdog':
 	load('watchdog').run();
+	break;
+
+case 'stats':
+	load('stats').run();
 	break;
 
 default:

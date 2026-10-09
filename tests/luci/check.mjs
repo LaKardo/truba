@@ -49,6 +49,19 @@ if (process.argv.includes('--pot')) {
 	process.exit(0);
 }
 
+// Вызовы ubus из интерфейса: каждый метод truba есть в rpcd-плагине и в ACL. Иначе LuCI
+// получает «Access denied» или «Method not found» — и только на живом Роутере.
+const acl = JSON.parse(readFileSync(join(root, 'root/usr/share/rpcd/acl.d/luci-app-truba.json'), 'utf8'))['luci-app-truba'];
+const allowed = new Set([ ...(acl.read?.ubus?.truba || []), ...(acl.write?.ubus?.truba || []) ]);
+const plugin = readFileSync(join(root, 'root/usr/share/rpcd/ucode/truba.uc'), 'utf8');
+const provided = new Set([ ...plugin.matchAll(/^\t(\w+): \{$/gm) ].map((m) => m[1]));
+for (const f of files) {
+	for (const m of readFileSync(f, 'utf8').matchAll(/object: 'truba', method: '(\w+)'/g)) {
+		if (!provided.has(m[1])) { console.log(`FAIL  метода truba.${m[1]} нет в rpcd-плагине (${rel(f)})`); fails++; }
+		if (!allowed.has(m[1])) { console.log(`FAIL  метода truba.${m[1]} нет в ACL (${rel(f)})`); fails++; }
+	}
+}
+
 const po = readFileSync(join(root, 'po/ru/truba.po'), 'utf8');
 const translated = new Map();
 const blocks = po.split(/\n\s*\n/);

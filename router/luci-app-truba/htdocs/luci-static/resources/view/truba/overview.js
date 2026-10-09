@@ -10,60 +10,83 @@
 // поэтому таблицы не пересчитывают ширину колонок и ничего не прыгает.
 
 const POLL = 5;          // состояние — раз в 5 с
-const WINDOW = 600;      // график — последние 10 минут
-const STORE = 'truba.rates';
 const NBSP = common.NBSP;
-
-// История скорости — в sessionStorage браузера: переживает переход по вкладкам LuCI
-// (это перезагрузка страницы), но не закрытие вкладки. На Роутере ничего не хранится.
-let hist = { last: null, points: [] };
-try {
-	const h = JSON.parse(sessionStorage.getItem(STORE));
-	if (h && Array.isArray(h.points))
-		hist = h;
-}
-catch (e) { }
-
-function saveHist() {
-	try { sessionStorage.setItem(STORE, JSON.stringify(hist)); } catch (e) { }
-}
 
 // Строки таблицы «Трафик устройств» и цвет точки перед названием.
 const KINDS = [ 'tunnel', 'direct', 'inbound' ];
 const KIND_LEVELS = { tunnel: common.ACTION_LEVELS.tunnel, direct: common.ACTION_LEVELS.direct, inbound: 'inbound' };
 
-// Скорость по разнице с прошлым опросом. null — сравнивать не с чем: первый опрос,
-// долгий перерыв или счётчики начаты заново (служба перезапущена, интерфейс переподнят).
-// conn — новых соединений в секунду (счётчики c_tunnel, c_direct, c_inbound).
-function takeRates(st) {
-	const tr = st.traffic || {}, c = st.counters || {};
-	const cur = { t: Date.now() / 1000, since: st.applied?.counters_since ?? null,
-		tr: { tunnel: tr.tunnel || {}, direct: tr.direct || {}, inbound: tr.inbound || {} },
-		conn: { tunnel: c.tunnel?.packets ?? null, direct: c.direct?.packets ?? null, inbound: c.inbound?.packets ?? null } };
-	const p = hist.last;
-	hist.last = cur;
-	const dt = p ? cur.t - p.t : 0;
-	let r = null;
-	if (p && dt >= 1 && dt <= 60 && p.since == cur.since) {
-		const d = (a, b) => (a != null && b != null && a >= b) ? (a - b) / dt : null;
-		r = {};
-		for (let k of KINDS)
-			r[k] = { down: d(cur.tr[k].down, p.tr[k]?.down), up: d(cur.tr[k].up, p.tr[k]?.up), conn: d(cur.conn[k], p.conn?.[k]) };
-	}
-	hist.points.push({ t: cur.t, v: r ? [ r.tunnel.down, r.tunnel.up, r.direct.down, r.direct.up ] : null });
-	hist.points = hist.points.filter((x) => x.t > cur.t - WINDOW);
-	saveHist();
-	return r;
+// ---- История скорости ----
+
+// Историю ведёт сам Роутер (процесс truba stats), поэтому она не рвётся, когда вкладка
+// свёрнута или браузер закрыт: страница при открытии забирает её целиком, дальше — только
+// новые точки. Точка: [время Роутера, байт/с — Туннель ↓ ↑, Напрямую ↓ ↑, Входящие ↓ ↑,
+// новых соединений в минуту — Туннель, Напрямую, Входящие]; [время] — разрыв (счётчики
+// начаты заново). fine — точки по 5 с за час, min — поминутные средние за сутки (в них
+// только значения графика), загружаются, когда выбраны 24 ч. now — время Роутера на
+// последнем ответе: ось строится по нему, а не по часам компьютера — они могут расходиться.
+const hist = {
+	fine: { span: 3600, step: POLL, points: [], loaded: false },
+	min: { span: 86400, step: 60, points: [], loaded: false },
+	now: null
+};
+
+// Места значений в точке: к устройствам, от устройств, новых соединений в минуту.
+const COLS = { tunnel: { down: 1, up: 2, conn: 7 }, direct: { down: 3, up: 4, conn: 8 }, inbound: { down: 5, up: 6, conn: 9 } };
+
+// Сроки графика; выбранный запоминается в браузере. Больше часа — поминутные средние.
+const SPANS = [
+	{ span: 600, label: _('10 min'), from: _('10 min ago') },
+	{ span: 3600, label: _('1 h'), from: _('1 h ago') },
+	{ span: 86400, label: _('24 h'), from: _('24 h ago') }
+];
+const SPAN_KEY = 'truba.span';
+let span = 600;
+try {
+	const s = +localStorage.getItem(SPAN_KEY);
+	if (SPANS.some((x) => x.span == s))
+		span = s;
+}
+catch (e) { }
+
+const ring = () => (span > hist.fine.span) ? hist.min : hist.fine;
+const lastT = (h) => h.points.length ? h.points[h.points.length - 1][0] : 0;
+
+// Забрать точки новее уже известных и убрать вышедшие за срок. Ошибка — не беда:
+// следующий опрос заберёт всё пропущенное.
+function fetchRates(h) {
+	const last = lastT(h);
+	return common.callRates(h.span, last).then((res) => {
+		if (!Array.isArray(res?.points))
+			return;
+		// Часы Роутера ушли назад — известные точки «из будущего», историю — заново.
+		if (res.now < last)
+			h.points = [];
+		hist.now = res.now;
+		h.step = res.step || h.step;
+		h.loaded = true;
+		h.points = h.points.concat(res.points.filter((p) => p[0] > last)).filter((p) => p[0] > res.now - h.span);
+	}).catch(() => { });
+}
+
+function fetchHistory() {
+	return Promise.all([ fetchRates(hist.fine), (span > hist.fine.span) ? fetchRates(hist.min) : null ]);
+}
+
+// Последняя точка, если она свежая: значит, история пишется. null — процесс stats не работает.
+function latest() {
+	const p = hist.fine.points[hist.fine.points.length - 1];
+	return (p && hist.now != null && hist.now - p[0] <= 3 * hist.fine.step) ? p : null;
 }
 
 // ---- График ----
 
 const SVGNS = 'http://www.w3.org/2000/svg';
 const CW = 600, CH = 100;
-// Ряды: индекс в точке истории и классы (цвет Действия, пунктир — от устройств).
+// Ряды: место значения в точке и классы (цвет Действия, пунктир — от устройств).
 const SERIES = [
-	{ i: 0, cls: 'tunnel' }, { i: 1, cls: 'tunnel up' },
-	{ i: 2, cls: 'direct' }, { i: 3, cls: 'direct up' }
+	{ i: 1, cls: 'tunnel' }, { i: 2, cls: 'tunnel up' },
+	{ i: 3, cls: 'direct' }, { i: 4, cls: 'direct up' }
 ];
 
 function svgEl(tag, attrs) {
@@ -80,43 +103,62 @@ function scaleTop(peak) {
 	return [ 1, 2, 5, 10 ].find((k) => bits <= k * p) * p / 8;
 }
 
-function makeChart() {
+// onSpan — выбран другой срок.
+function makeChart(onSpan) {
 	const svg = svgEl('svg', { 'viewBox': '0 0 %d %d'.format(CW, CH), 'preserveAspectRatio': 'none', 'aria-hidden': 'true' });
 	for (let y of [ 25, 50, 75 ])
 		svg.appendChild(svgEl('line', { 'class': 'grid', 'x1': 0, 'x2': CW, 'y1': y, 'y2': y }));
 	const paths = SERIES.map((s) => ({
-		area: (s.i % 2 == 0) ? svg.appendChild(svgEl('path', { 'class': 'area ' + s.cls })) : null,
+		area: (s.i % 2 == 1) ? svg.appendChild(svgEl('path', { 'class': 'area ' + s.cls })) : null,
 		line: svg.appendChild(svgEl('path', { 'class': 'line ' + s.cls }))
 	}));
 	const top = E('span', { 'class': 'truba-chart-max truba-num' });
+	const note = E('div', { 'class': 'truba-chart-note' });
+	const box = E('div', { 'class': 'truba-chart' }, [ svg, top, note ]);
+	const from = E('span', {});
+	const buttons = SPANS.map((x) => E('button', { 'type': 'button', 'click': () => onSpan(x.span) }, x.label));
 	const legend = (cls, label) => E('span', {}, [ E('i', { 'class': cls }), label ]);
 	return {
-		paths, top,
+		paths, top, note, box, from, buttons,
 		el: E('div', {}, [
-			E('div', { 'class': 'truba-legend' }, [
-				legend('tunnel', _('Tunnel') + ' ↓'), legend('tunnel up', _('Tunnel') + ' ↑'),
-				legend('direct', _('Direct') + ' ↓'), legend('direct up', _('Direct') + ' ↑')
+			E('div', { 'class': 'truba-chart-head' }, [
+				E('div', { 'class': 'truba-legend' }, [
+					legend('tunnel', _('Tunnel') + ' ↓'), legend('tunnel up', _('Tunnel') + ' ↑'),
+					legend('direct', _('Direct') + ' ↓'), legend('direct up', _('Direct') + ' ↑')
+				]),
+				E('div', { 'class': 'truba-seg', 'role': 'group', 'aria-label': _('Period') }, buttons)
 			]),
-			E('div', { 'class': 'truba-chart' }, [ svg, top ]),
-			E('div', { 'class': 'truba-chart-axis' }, [ E('span', {}, _('10 min ago')), E('span', {}, _('now')) ])
+			box,
+			E('div', { 'class': 'truba-chart-axis' }, [ from, E('span', {}, _('now')) ])
 		])
 	};
 }
 
 function drawChart(c) {
-	const now = Date.now() / 1000, pts = hist.points;
+	const h = ring(), now = hist.now ?? 0;
+	SPANS.forEach((x, k) => {
+		c.buttons[k].classList.toggle('active', x.span == span);
+		c.buttons[k].setAttribute('aria-pressed', String(x.span == span));
+	});
+	common.setText(c.from, SPANS.find((x) => x.span == span).from);
+	// Истории нет — пояснение поверх приглушённого графика: старые точки ещё видны, но не мешают читать.
+	const rec = latest() != null;
+	c.box.classList.toggle('stale', !rec);
+	common.setText(c.note, rec ? '' : _('Speed is not being recorded: the Truba service is not running.'));
+
+	const pts = h.points.filter((p) => p[0] > now - span);
 	let peak = 0;
 	for (let p of pts)
-		for (let v of (p.v || []))
-			if (v > peak)
-				peak = v;
+		for (let s of SERIES)
+			if (p[s.i] > peak)
+				peak = p[s.i];
 	const top = scaleTop(peak);
-	const X = (t) => Math.max(0, (t - now + WINDOW) / WINDOW * CW).toFixed(1);
+	const X = (t) => Math.max(0, (t - now + span) / span * CW).toFixed(1);
 	const Y = (v) => (CH - Math.min(v / top, 1) * CH).toFixed(1);
 
 	SERIES.forEach((s, k) => {
 		let line = '', area = '', seg = [], prevT = null;
-		// Разрыв линии — там, где скорости нет или опрос надолго прерывался.
+		// Разрыв линии — там, где скорости нет или запись прерывалась (служба была остановлена).
 		const flush = () => {
 			if (seg.length > 1) {
 				line += 'M' + seg.join('L');
@@ -125,12 +167,12 @@ function drawChart(c) {
 			seg = [];
 		};
 		for (let p of pts) {
-			const v = p.v ? p.v[s.i] : null;
-			if (v == null || (prevT != null && p.t - prevT > 3 * POLL))
+			const v = p[s.i] ?? null;
+			if (v == null || (prevT != null && p[0] - prevT > 3 * h.step))
 				flush();
 			if (v != null)
-				seg.push(X(p.t) + ',' + Y(v));
-			prevT = p.t;
+				seg.push(X(p[0]) + ',' + Y(v));
+			prevT = p[0];
 		}
 		flush();
 		c.paths[k].line.setAttribute('d', line);
@@ -138,6 +180,15 @@ function drawChart(c) {
 			c.paths[k].area.setAttribute('d', area);
 	});
 	common.setText(c.top, common.fmtRate(top));
+}
+
+// Другой срок: нарисовать то, что уже есть; поминутные средние — забрать при первом выборе суток.
+function setSpan(c, s) {
+	span = s;
+	try { localStorage.setItem(SPAN_KEY, String(s)); } catch (e) { }
+	drawChart(c);
+	if (s > hist.fine.span && !hist.min.loaded)
+		fetchRates(hist.min).then(() => drawChart(c));
 }
 
 // ---- Состояние ----
@@ -261,7 +312,7 @@ function buildPage(iface) {
 	r.block.rate.textContent = _('packets dropped');
 	r.shareText = E('div', { 'class': 'truba-muted truba-num' }, NBSP);
 	r.share = { tunnel: span('tunnel'), direct: span('direct') };
-	r.chart = makeChart();
+	r.chart = makeChart((s) => setSpan(r.chart, s));
 
 	r.el = E('div', {}, [
 		E('div', { 'class': 'truba-head' }, [
@@ -310,7 +361,7 @@ function paintWarnings(r, list) {
 	])) : [ E('li', {}, common.empty(_('No warnings'))) ]));
 }
 
-function update(r, st, rates) {
+function update(r, st) {
 	const t = st.tunnel || {}, awg = t.awg || {}, h = st.health || {}, c = st.counters || {};
 	const a = st.applied || {}, l = st.lists || {}, n = st.nat, up = st.upnp || {};
 	const wdOn = uci.get('truba', 'watchdog', 'enabled') != '0';
@@ -381,16 +432,17 @@ function update(r, st, rates) {
 	common.setText(r.trDescr, since
 		? _('Traffic of devices in the routed zones since %s. The router\'s own traffic (DNS, list downloads) is not included.').format(common.fmtTime(since))
 		: _('Traffic of devices in the routed zones. The router\'s own traffic (DNS, list downloads) is not included.'));
-	const tr = st.traffic || {};
+	// Скорость — из последней точки истории; «—» — точки нет или в ней разрыв.
+	const tr = st.traffic || {}, cur = latest();
 	for (let k of KINDS) {
 		for (let dir of [ 'down', 'up' ]) {
-			const cell = r.tr[k][dir], rate = rates?.[k]?.[dir];
+			const cell = r.tr[k][dir], rate = cur?.[COLS[k][dir]];
 			common.setText(cell.total, common.fmtBytes(tr[k]?.[dir]));
 			common.setText(cell.rate, rate != null ? common.fmtRate(rate) : '—');
 		}
-		const conn = r.tr[k].conn, rate = rates?.[k]?.conn;
+		const conn = r.tr[k].conn, rate = cur?.[COLS[k].conn];
 		common.setText(conn.total, common.fmtNum(c[k]?.packets));
-		common.setText(conn.rate, rate != null ? _('%s per min').format(common.fmtNum(Math.round(rate * 60))) : '—');
+		common.setText(conn.rate, rate != null ? _('%s per min').format(common.fmtNum(rate)) : '—');
 	}
 	common.setText(r.block.total, common.fmtNum(c.block?.packets));
 
@@ -405,13 +457,13 @@ function update(r, st, rates) {
 
 return view.extend({
 	load: function() {
-		return Promise.all([ common.callStatus(), uci.load('network'), uci.load('truba'), uci.load('firewall') ]);
+		return Promise.all([ common.callStatus(), uci.load('network'), uci.load('truba'), uci.load('firewall'), fetchHistory() ]);
 	},
 
 	render: function(data) {
 		const page = buildPage(common.tunnelIface());
-		update(page, data[0], takeRates(data[0]));
-		poll.add(() => common.callStatus().then((st) => update(page, st, takeRates(st))), POLL);
+		update(page, data[0]);
+		poll.add(() => Promise.all([ common.callStatus(), fetchHistory() ]).then((res) => update(page, res[0])), POLL);
 		return page.el;
 	},
 
