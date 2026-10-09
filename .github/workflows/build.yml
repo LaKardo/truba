@@ -282,7 +282,7 @@ jobs:
             staging_dir/host/bin/apk adbdump "$out/$1"-[0-9]*.apk \
               | sed -n '/^  depends:/,/^  [a-z-]*:/p' | sed -n 's/^    - \([^<>=~ ]*\).*/\1/p' | sort | xargs
           }
-          extra_of() { grep -oE '[a-z0-9.+_-]+ \(>=0\)' "$1" | cut -d' ' -f1; }
+          extra_of() { grep -oE '[a-z0-9.+_-]+ \(>=[^)]*\)' "$1" | cut -d' ' -f1; }
           check_deps() {
             want=$(printf '%s\n' libc $2 | sort | xargs)
             got=$(deps_of "$1")

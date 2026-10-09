@@ -8,7 +8,7 @@ cp -a /repo/router/luci-app-truba/htdocs/. /www/
 cp -a /repo/router/luci-app-truba/root/. /
 chmod +x /usr/sbin/truba /etc/init.d/truba /etc/truba/reinstall.sh /usr/share/truba/uninstall.sh
 # С примонтированного каталога Windows файлы приходят с правами 777; rpcd такие скрипты игнорирует.
-chmod 0644 /usr/share/rpcd/ucode/truba.uc /usr/share/rpcd/acl.d/luci-app-truba.json
+chmod 0644 /usr/share/rpcd/ucode/truba-api.uc /usr/share/rpcd/acl.d/luci-app-truba.json
 
 mkdir -p /etc/truba/lists
 for f in geoip.dat geosite.dat; do

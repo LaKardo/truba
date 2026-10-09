@@ -348,10 +348,11 @@ ip netns exec vps nft delete table inet bigdrop
 
 echo "== rpcd: долгие проверки идут в фоне и не держат остальные вызовы LuCI"
 # rpcd обслуживает вызовы по одному: пока он ждал проверку (до ~5 с), стоял весь LuCI.
-mkdir -p /usr/share/rpcd/ucode
-cp /repo/router/luci-app-truba/root/usr/share/rpcd/ucode/truba.uc /usr/share/rpcd/ucode/truba.uc
-/etc/init.d/rpcd restart >/dev/null 2>&1
-check "rpcd: объект truba" wait_for 10 ubus list truba
+# Плагин пришёл с файлами пакета truba (ADR 0008); rpcd подхватывает его по HUP — как postinst.
+# С каталога Windows файлы приходят с правами 777, а такие плагины rpcd не загружает.
+chmod 0644 /usr/share/rpcd/ucode/truba-api.uc
+killall -HUP rpcd
+check "rpcd: объект truba (плагин из пакета truba, HUP)" wait_for 10 ubus list truba
 T0=$(date +%s); ubus call truba tunnel_test > /tmp/rt.json; T1=$(date +%s)
 check "rpcd: tunnel_test отвечает сразу (было $((T1 - T0)) с)" test $((T1 - T0)) -le 1
 STARTED="$(jsonfilter -i /tmp/rt.json -e '@.started')"

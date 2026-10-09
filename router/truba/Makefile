@@ -30,7 +30,8 @@ define Package/truba
 	ucode-mod-ubus (>=0), \
 	ucode-mod-uloop (>=0), \
 	ucode-mod-math (>=0), \
-	ucode-mod-socket (>=0)
+	ucode-mod-socket (>=0), \
+	rpcd-mod-ucode (>=0)
 endef
 
 define Package/truba/description
@@ -49,7 +50,8 @@ endef
 
 define Package/truba/install
 	$(INSTALL_DIR) $(1)/etc/config $(1)/etc/init.d $(1)/etc/uci-defaults $(1)/etc/hotplug.d/iface \
-		$(1)/etc/truba $(1)/lib/upgrade/keep.d $(1)/usr/sbin $(1)/usr/share/ucode/truba $(1)/usr/share/truba
+		$(1)/etc/truba $(1)/lib/upgrade/keep.d $(1)/usr/sbin $(1)/usr/share/ucode/truba $(1)/usr/share/truba \
+		$(1)/usr/share/rpcd/ucode
 	$(INSTALL_CONF) ./files/etc/config/truba $(1)/etc/config/truba
 	$(INSTALL_BIN) ./files/etc/init.d/truba $(1)/etc/init.d/truba
 	$(INSTALL_BIN) ./files/etc/uci-defaults/90-truba $(1)/etc/uci-defaults/90-truba
@@ -59,11 +61,26 @@ define Package/truba/install
 	$(INSTALL_BIN) ./files/usr/sbin/truba $(1)/usr/sbin/truba
 	$(INSTALL_DATA) ./files/usr/share/ucode/truba/*.uc $(1)/usr/share/ucode/truba/
 	$(INSTALL_BIN) ./files/usr/share/truba/uninstall.sh $(1)/usr/share/truba/uninstall.sh
+	$(INSTALL_DATA) ./files/usr/share/rpcd/ucode/truba-api.uc $(1)/usr/share/rpcd/ucode/truba-api.uc
+endef
+
+# ubus-объект truba — плагин rpcd (ADR 0008). rpcd загружает плагины при запуске,
+# а по HUP перезапускается сам, сохраняя сессии LuCI.
+define Package/truba/postinst
+#!/bin/sh
+[ -n "$${IPKG_INSTROOT}" ] || killall -HUP rpcd 2>/dev/null
+exit 0
 endef
 
 define Package/truba/prerm
 #!/bin/sh
 [ -n "$${IPKG_INSTROOT}" ] || /usr/share/truba/uninstall.sh
+exit 0
+endef
+
+define Package/truba/postrm
+#!/bin/sh
+[ -n "$${IPKG_INSTROOT}" ] || killall -HUP rpcd 2>/dev/null
 exit 0
 endef
 

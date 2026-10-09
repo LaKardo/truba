@@ -2,7 +2,8 @@ include $(TOPDIR)/rules.mk
 
 LUCI_TITLE:=LuCI interface for Truba
 # Только в метаданных пакета, без сборки зависимостей (см. router/truba/Makefile).
-LUCI_EXTRA_DEPENDS:=truba (>=0), luci-base (>=0)
+# ubus-API Трубы (rpcd-плагин), к которому обращается интерфейс, — в пакете truba с r17 (ADR 0008).
+LUCI_EXTRA_DEPENDS:=truba (>=1.0.0-r17), luci-base (>=0)
 LUCI_PKGARCH:=all
 
 PKG_LICENSE:=Apache-2.0
