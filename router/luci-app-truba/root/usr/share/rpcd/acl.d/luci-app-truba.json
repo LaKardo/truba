@@ -3,7 +3,7 @@
 		"description": "Grant access to Truba",
 		"read": {
 			"ubus": {
-				"truba": [ "status", "lists", "categories", "sets", "check", "nat_result", "tunnel_result", "log" ],
+				"truba": [ "status", "lists", "categories", "sets", "check", "nat_result", "tunnel_result", "rates", "log" ],
 				"luci-rpc": [ "getDHCPLeases", "getHostHints" ]
 			},
 			"uci": [ "truba", "network", "firewall", "dhcp", "upnpd" ]

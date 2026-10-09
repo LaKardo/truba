@@ -1083,3 +1083,24 @@ msgstr "Нужен адрес https://…, tls://…, quic://…, h3://…, tcp:
 
 msgid "Rule sets are being unpacked — reload the page in a minute."
 msgstr "Наборы правил распаковываются — обновите страницу через минуту."
+
+msgid "10 min"
+msgstr "10 мин"
+
+msgid "1 h"
+msgstr "1 ч"
+
+msgid "24 h"
+msgstr "24 ч"
+
+msgid "1 h ago"
+msgstr "1 ч назад"
+
+msgid "24 h ago"
+msgstr "24 ч назад"
+
+msgid "Period"
+msgstr "Срок"
+
+msgid "Speed is not being recorded: the Truba service is not running."
+msgstr "Скорость не записывается: служба Трубы не запущена."

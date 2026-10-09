@@ -132,7 +132,7 @@
 .truba-versions th:first-child, .truba-versions td:first-child { width: 22%; }
 .truba-versions code { overflow-wrap: anywhere; }
 
-/* График скорости за 10 минут и мини-график задержки. */
+/* График скорости и мини-график задержки. */
 .truba-chart { position: relative; margin: .25em 0 .75em; }
 .truba-chart svg {
 	display: block;
@@ -156,6 +156,50 @@
 .truba-legend i.tunnel { border-top-color: var(--truba-tunnel); }
 .truba-legend i.direct { border-top-color: var(--truba-direct); }
 .truba-legend i.up { border-top-style: dashed; }
+/* Над графиком: легенда слева, срок справа; на узком экране срок уходит на свою строку. */
+.truba-chart-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: .25em 1em; margin-bottom: .25em; }
+.truba-chart-head .truba-legend { margin-bottom: 0; }
+/* Срок графика: кнопки одной группой, выбранная — с подложкой цвета Туннеля. Стили кнопок
+   темы сброшены: у Bootstrap и Argon они крупные и с собственным фоном. */
+.truba-seg {
+	display: inline-flex;
+	border: 1px solid #ccc;
+	border: 1px solid color-mix(in srgb, currentColor 24%, transparent);
+	border-radius: 3px;
+	overflow: hidden;
+	font-size: .85em;
+}
+.truba-seg button {
+	min-height: 0;
+	margin: 0;
+	padding: .1em .75em;
+	border: 0;
+	border-radius: 0;
+	background: transparent;
+	box-shadow: none;
+	color: inherit;
+	font: inherit;
+	line-height: 1.6;
+	cursor: pointer;
+}
+.truba-seg button + button { border-left: 1px solid #ccc; border-left: 1px solid color-mix(in srgb, currentColor 24%, transparent); }
+.truba-seg button:hover { background: rgba(128, 128, 128, .1); background: color-mix(in srgb, currentColor 8%, transparent); }
+.truba-seg button.active { background: rgba(47, 111, 203, .18); background: color-mix(in srgb, var(--truba-tunnel) 18%, transparent); }
+/* Истории нет (служба остановлена): пояснение поверх пустого графика. */
+.truba-chart-note {
+	position: absolute;
+	inset: 0;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	padding: 0 1em;
+	text-align: center;
+	font-size: .9em;
+	color: #777;
+	color: color-mix(in srgb, currentColor 78%, transparent);
+}
+.truba-chart-note:empty { display: none; }
+.truba-chart.stale svg { opacity: .3; }
 
 /* Доля новых соединений: Туннель — Напрямую, цвета как на графике. */
 .truba-share {

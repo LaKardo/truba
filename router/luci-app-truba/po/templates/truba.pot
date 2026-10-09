@@ -806,11 +806,39 @@ msgid "Choose source zone «truba»."
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/overview.js
+msgid "10 min"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/overview.js
 msgid "10 min ago"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/overview.js
+msgid "1 h"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/overview.js
+msgid "1 h ago"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/overview.js
+msgid "24 h"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/overview.js
+msgid "24 h ago"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/overview.js
+msgid "Period"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/overview.js
 msgid "now"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/overview.js
+msgid "Speed is not being recorded: the Truba service is not running."
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/overview.js
