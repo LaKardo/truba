@@ -4,7 +4,41 @@
 
 log() { logger -t truba-reinstall "$*"; }
 
+# sysupgrade сохраняет /etc/config/dhcp, где Труба направила dnsmasq в mosdns, а пакетов
+# Трубы и mosdns после прошивки ещё нет: dnsmasq шлёт запросы в пустой порт. Без DNS остаётся
+# вся сеть и сам Роутер (dnsmasq — его системный резолвер, localuse), поэтому ни nslookup ниже,
+# ни apk не прошли бы никогда. Исходные значения — из бэкапа Трубы (/etc/truba в keep.d),
+# как при truba teardown; после установки служба снова направит dnsmasq в mosdns.
+restore_dnsmasq() {
+	local b=/etc/truba/state/dnsmasq.json sid k v port
+	if [ -f "$b" ]; then
+		sid="$(jsonfilter -q -i "$b" -e '@.sid')"
+		[ -n "$sid" ] && [ "$(uci -q get "dhcp.$sid")" = dnsmasq ] || sid='@dnsmasq[0]'
+		for k in noresolv cachesize; do
+			v="$(jsonfilter -q -i "$b" -e "@.$k")"
+			if [ -n "$v" ]; then uci -q set "dhcp.$sid.$k=$v"; else uci -q delete "dhcp.$sid.$k"; fi
+		done
+		uci -q delete "dhcp.$sid.server"
+		for v in $(jsonfilter -q -i "$b" -e '@.server[*]'); do
+			uci -q add_list "dhcp.$sid.server=$v"
+		done
+		rm -f "$b"
+	else
+		# Бэкапа нет — убрать хотя бы адрес mosdns; без других серверов — снова DNS провайдера.
+		port="$(uci -q get truba.dns.port)"
+		v="127.0.0.1#${port:-5335}"
+		uci -q get dhcp.@dnsmasq[0].server | grep -qF "$v" || return 0
+		uci -q del_list "dhcp.@dnsmasq[0].server=$v"
+		[ -n "$(uci -q get dhcp.@dnsmasq[0].server)" ] || uci -q delete dhcp.@dnsmasq[0].noresolv
+	fi
+	uci -q commit dhcp
+	/etc/init.d/dnsmasq restart >/dev/null 2>&1
+	log "DNS сети возвращён к настройкам до Трубы: mosdns появится вместе с пакетами"
+}
+
 apk list -I truba 2>/dev/null | grep -q '^truba-' && exit 0
+
+restore_dnsmasq
 
 # Ждём интернет (до 10 минут).
 i=0
@@ -41,7 +75,9 @@ apk list -I luci-i18n-base-ru 2>/dev/null | grep -q '^luci-i18n-base-ru-' && PKG
 
 if apk add $PKGS >/dev/null 2>&1; then
 	log "пакеты Трубы переустановлены: $PKGS"
-	/etc/init.d/network reload
+	# restart, а не reload: обработчик протокола amneziawg netifd находит только при запуске,
+	# без этого Туннель остаётся «proto none, NO_DEVICE» до перезагрузки.
+	/etc/init.d/network restart
 	/etc/init.d/truba enable
 	/etc/init.d/truba start
 else

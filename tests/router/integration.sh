@@ -859,6 +859,40 @@ echo "== status"
 /usr/sbin/truba status > /tmp/st.json; head -c 300 /tmp/st.json; echo
 check "status — валидный JSON" sh -c "ucode -e 'json(readfile(\"/tmp/st.json\"))' 2>/dev/null || jsonfilter -i /tmp/st.json -e '@.routing'"
 
+echo "== sysupgrade: reinstall.sh возвращает DNS сети до ожидания интернета"
+# После sysupgrade /etc/config/dhcp и бэкап Трубы (/etc/truba в keep.d) сохраняются, а пакетов
+# нет: dnsmasq шлёт запросы в mosdns, которого нет, и reinstall.sh ждал бы интернета вечно.
+# Имитация: служба снята без teardown (procd убивает mosdns, настройки dnsmasq остаются);
+# «исходный» DNS сети в бэкапе — свой сервер на 5399, который знает up.test. truba в этом
+# контейнере стоит не из apk, поэтому reinstall.sh идёт дальше проверки «уже установлена».
+cp /etc/truba/state/dnsmasq.json /tmp/dnsmasq.orig.json
+DM_SID="$(jsonfilter -i /tmp/dnsmasq.orig.json -e '@.sid')"
+printf '{"sid":"%s","noresolv":"1","server":["127.0.0.1#5399"]}' "$DM_SID" > /etc/truba/state/dnsmasq.json
+dnsmasq --conf-file=/dev/null --port=5399 --listen-address=127.0.0.1 --bind-interfaces --no-resolv --no-hosts \
+	--address=/up.test/5.6.7.8 --pid-file=/tmp/dm-up.pid
+ubus call service delete '{"name":"truba"}'; sleep 2
+up_ok() { nslookup up.test 127.0.0.1 2>&1 | grep -q 5.6.7.8; }
+check "sysupgrade: mosdns нет — DNS сети не отвечает" sh -c "! pidof mosdns && ! nslookup up.test 127.0.0.1 2>&1 | grep -q 5.6.7.8"
+sh /etc/truba/reinstall.sh >/dev/null 2>&1 & RI_PID=$!
+check "reinstall: DNS сети отвечает, не дожидаясь интернета" wait_for 20 up_ok
+check "reinstall: dnsmasq вернулся к серверам из бэкапа" test "$(uci -q get dhcp.@dnsmasq[0].server)" = "127.0.0.1#5399"
+check "reinstall: бэкап dnsmasq использован и удалён" test ! -f /etc/truba/state/dnsmasq.json
+check "reinstall: запись в журнале" sh -c "logread | grep -q 'truba-reinstall.*DNS сети возвращён'"
+check "reinstall: дальше ждёт интернет (ещё работает)" kill -0 "$RI_PID"
+kill "$RI_PID" 2>/dev/null; for p in $(pgrep -f 'truba/reinstall[.]sh'); do kill "$p" 2>/dev/null; done
+kill "$(cat /tmp/dm-up.pid)" 2>/dev/null
+# Как было до имитации: исходный бэкап, dnsmasq → mosdns, служба снова работает.
+cp /tmp/dnsmasq.orig.json /etc/truba/state/dnsmasq.json
+uci -q batch <<-'EOF'
+	delete dhcp.@dnsmasq[0].server
+	add_list dhcp.@dnsmasq[0].server='127.0.0.1#5335'
+	set dhcp.@dnsmasq[0].noresolv='1'
+	set dhcp.@dnsmasq[0].cachesize='0'
+	commit dhcp
+EOF
+check "служба снова запускается (не дольше 90 с)" bounded 90 /etc/init.d/truba start; sleep 3
+check "после имитации: mosdns работает" pidof mosdns
+
 echo "== teardown"
 /etc/init.d/truba stop; sleep 1
 check "таблица удалена" sh -c "! nft list table inet truba"
