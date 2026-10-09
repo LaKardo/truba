@@ -52,6 +52,19 @@ test_img() {
 	docker rm truba-base >/dev/null
 }
 
+# Роутер под procd для router и ui. --privileged открывает /proc/kmsg хоста, а logd читает его
+# сам. Если на хосте /proc/kmsg читает кто-то ещё (раннер CI), сообщение может уйти тому:
+# тогда logd висит в read до следующего сообщения ядра, а вместе с ним logread, метод log
+# в rpcd и весь LuCI. На Роутере читатель один; стенду ядро хоста не нужно — /dev/null
+# до запуска procd.
+stand() {
+	local name=$1
+	docker rm -f "$name" >/dev/null 2>&1 || true
+	docker run -d --privileged --name "$name" -v "$(hostpath "$ROOT"):/repo:ro" -v "$DAT_DIR:/dat:ro" \
+		--entrypoint sh "$TEST_IMG" -c 'mount --bind /dev/null /proc/kmsg && exec /sbin/init' >/dev/null || return 1
+	sleep 10
+}
+
 run() {
 	local name=$1; shift
 	echo "=== $name"
@@ -78,9 +91,7 @@ t_dat() {
 t_router() {
 	dat_dir || return 1
 	test_img || return 1
-	docker rm -f truba-it >/dev/null 2>&1 || true
-	docker run -d --privileged --name truba-it -v "$(hostpath "$ROOT"):/repo:ro" -v "$DAT_DIR:/dat:ro" "$TEST_IMG" /sbin/init >/dev/null
-	sleep 10
+	stand truba-it || return 1
 	local rc=0
 	docker exec truba-it sh /repo/tests/router/integration.sh || rc=$?
 	docker rm -f truba-it >/dev/null
@@ -103,9 +114,7 @@ t_ui() {
 	local out=${UI_OUT:-} ip rc=0 step
 	[ -n "$out" ] || out=$(mktemp -d)
 	mkdir -p "$out"
-	docker rm -f truba-ui >/dev/null 2>&1 || true
-	docker run -d --privileged --name truba-ui -v "$(hostpath "$ROOT"):/repo:ro" -v "$DAT_DIR:/dat:ro" "$TEST_IMG" /sbin/init >/dev/null
-	sleep 10
+	stand truba-ui || return 1
 	# Адрес Docker netifd стенда снимает при загрузке (wan по DHCP): стенд получает его отсюда.
 	ip=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' truba-ui)
 	local len gw
