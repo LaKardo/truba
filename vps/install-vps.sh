@@ -36,6 +36,8 @@ RTR_TUN=10.77.77.2
 MTU_MAX=1380
 TUN_OVERHEAD=87
 CONFIRM_TIMEOUT=120
+BOOT_DIR=/boot
+MODULES_DIR=/lib/modules
 
 say()  { printf '\033[1;32m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m!!\033[0m  %s\n' "$*" >&2; }
@@ -134,6 +136,35 @@ preflight() {
 
 # ---------- пакеты ----------
 
+# Метапакеты заголовков под метапакеты ядра, что стоят в системе: linux-image-generic →
+# linux-headers-generic, linux-image-generic-hwe-24.04 → linux-headers-generic-hwe-24.04 и т.п.
+# Одних заголовков текущего ядра (linux-headers-$(uname -r)) мало: unattended-upgrades ставит
+# новое ядро, DKMS без его заголовков не собирает amneziawg, и после перезагрузки VPS Туннель
+# не поднимается. С метапакетом заголовки нового ядра приходят вместе с ним.
+kernel_headers_metas() {
+	local p h
+	for p in $(dpkg-query -W -f='${db:Status-Abbrev} ${Package}\n' 'linux-image-*' 2>/dev/null \
+			| awk '$1 == "ii" && $2 !~ /^linux-image-(unsigned-)?[0-9]/ {print $2}'); do
+		h="linux-headers-${p#linux-image-}"
+		apt-cache show "$h" >/dev/null 2>&1 && echo "$h"
+	done
+	return 0
+}
+
+# Есть ли модуль amneziawg у самого нового установленного ядра — его VPS загрузит после
+# перезагрузки. Печатает строку для status; без модуля — предупреждение.
+kernel_module_check() {
+	local k
+	k=$(find "$BOOT_DIR" -maxdepth 1 -name 'vmlinuz-*' -printf '%f\n' 2>/dev/null | sed 's/^vmlinuz-//' | sort -V | tail -1) || true
+	[ -n "$k" ] || return 0
+	if find "$MODULES_DIR/$k" -name 'amneziawg.ko*' 2>/dev/null | grep -q .; then
+		echo "Модуль amneziawg для ядра после перезагрузки ($k): есть"
+	else
+		warn "модуля amneziawg нет для ядра $k: после перезагрузки VPS Туннель не поднимется. Поставьте linux-headers-$k и выполните dkms autoinstall -k $k"
+		return 1
+	fi
+}
+
 install_packages() {
 	say "Установка пакетов"
 	export DEBIAN_FRONTEND=noninteractive
@@ -144,6 +175,14 @@ install_packages() {
 	apt-get update -qq
 	apt-get install -y -qq software-properties-common python3-launchpadlib gnupg2 \
 		"linux-headers-$(uname -r)" nftables fail2ban unattended-upgrades curl >/dev/null
+	local metas
+	metas=$(kernel_headers_metas)
+	if [ -n "$metas" ]; then
+		# shellcheck disable=SC2086 # список пакетов
+		apt-get install -y -qq $metas >/dev/null
+	else
+		warn "не найден метапакет заголовков ядра: после обновления ядра DKMS может не собрать amneziawg — проверяйте install-vps.sh status"
+	fi
 	if ! grep -rqs 'amnezia/ppa' /etc/apt/sources.list.d/; then
 		add-apt-repository -y ppa:amnezia/ppa >/dev/null
 		apt-get update -qq
@@ -596,6 +635,7 @@ cmd_install() {
 	echo "  Затем: LuCI → Службы → Труба → Туннель → Импорт .conf"
 	echo
 	echo "  Версия AmneziaWG для сборки модуля Роутера: $AWG_VERSION"
+	kernel_module_check >/dev/null || true
 }
 
 cmd_show_config() {
@@ -647,6 +687,7 @@ cmd_status() {
 	if [ "${AWG_PROTO:-1}" -ge 3 ]; then
 		echo "Защита заголовков: $([ -n "${HPK:-}" ] && echo вкл || echo выкл)   DisableCookies: вкл   RandomTrailers: $([ "${RANDOM_TRAILERS:-0}" = 1 ] && echo вкл || echo выкл)"
 	fi
+	kernel_module_check || true
 	echo
 	awg show "$AWG_IF" 2>/dev/null || echo "Туннель не поднят"
 	echo

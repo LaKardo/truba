@@ -1,4 +1,8 @@
-// rpcd: ubus-объект `truba` для интерфейса LuCI. Логика — в /usr/sbin/truba.
+// rpcd: ubus-объект `truba` — API службы для LuCI и скриптов (ubus call truba status).
+// Логика — в /usr/sbin/truba; плагин — в пакете truba, чтобы API менялся вместе с ней (ADR 0008).
+// Имя файла — не truba.uc: так он был в luci-app-truba до r14, и apk не дал бы двум пакетам
+// один путь. Пока старый luci-app-truba ещё стоит, его плагин rpcd загружает вторым, и объект
+// truba остаётся за этим.
 'use strict';
 
 import { popen, readfile } from 'fs';
@@ -124,9 +128,11 @@ const methods = {
 		}
 	},
 
+	// Файлы переставляются сразу, а применяются в фоне: пока rpcd ждал бы применения
+	// (распаковка, загрузка подсетей geoip), стоял бы весь LuCI. Ход — в lists (applying).
 	rollback_lists: {
 		call: function() {
-			return truba('rollback-lists');
+			return truba('rollback-lists --bg');
 		}
 	},
 

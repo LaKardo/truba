@@ -53,7 +53,8 @@ if (process.argv.includes('--pot')) {
 // получает «Access denied» или «Method not found» — и только на живом Роутере.
 const acl = JSON.parse(readFileSync(join(root, 'root/usr/share/rpcd/acl.d/luci-app-truba.json'), 'utf8'))['luci-app-truba'];
 const allowed = new Set([ ...(acl.read?.ubus?.truba || []), ...(acl.write?.ubus?.truba || []) ]);
-const plugin = readFileSync(join(root, 'root/usr/share/rpcd/ucode/truba.uc'), 'utf8');
+// ubus-API — в пакете truba (ADR 0008), ACL — в luci-app-truba.
+const plugin = readFileSync(join(root, '../truba/files/usr/share/rpcd/ucode/truba-api.uc'), 'utf8');
 const provided = new Set([ ...plugin.matchAll(/^\t(\w+): \{$/gm) ].map((m) => m[1]));
 for (const f of files) {
 	for (const m of readFileSync(f, 'utf8').matchAll(/object: 'truba', method: '(\w+)'/g)) {

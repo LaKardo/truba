@@ -12,7 +12,7 @@ if [ ! -f "$STATE/firewall.orig" ]; then
 	} > "$STATE/firewall.orig"
 fi
 
-# Full cone NAT; аппаратное ускорение выключено: оно обходит netfilter целиком (PLAN §4.2).
+# Full cone NAT; аппаратное ускорение выключено: оно обходит netfilter целиком (docs/architecture.md §4.2).
 # Программное ускорение не трогаем: его выбирает владелец. Пакеты ускоренных соединений
 # идут мимо счётчиков Трубы и мимо ограничения скорости qosmate — об этом предупреждает «Обзор».
 uci -q set firewall.@defaults[0].fullcone='1'

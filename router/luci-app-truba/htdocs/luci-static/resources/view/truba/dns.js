@@ -104,9 +104,13 @@ function buildVersions() {
 function updateVersions(r, l) {
 	l = l || {};
 	const last = l.last;
-	if (r.updating !== !!l.updating) {
-		r.updating = !!l.updating;
-		r.busy.replaceChildren(r.updating ? common.busy(_('Update in progress…')) : NBSP);
+	// Применение идёт и после отката, и после обновления списков — в фоне.
+	const busy = l.updating ? 'updating' : l.applying ? 'applying' : '';
+	if (r.busyState !== busy) {
+		r.busyState = busy;
+		r.updating = !!busy;
+		r.busy.replaceChildren(busy == 'updating' ? common.busy(_('Update in progress…'))
+			: busy == 'applying' ? common.busy(_('Applying settings…')) : NBSP);
 	}
 	// Нет версии — «отсутствует» обычным текстом, а не моноширинным, как контрольная сумма.
 	const ver = (c, v) => {
@@ -180,6 +184,11 @@ return view.extend({
 		o.datatype = 'range(30,86400)';
 		o.placeholder = '300';
 
+		o = s.taboption('advanced', form.Value, 'set_timeout', _('Keep DNS addresses in routing sets, s'),
+			_('IPs from answers for categories with action Tunnel or Direct stay in the routing sets this long after they were added; a later answer adds them again. A CDN address the domain no longer uses stops steering traffic at the latest after this time. 0 — keep until the rules or lists change.'));
+		o.datatype = 'or(range(0,0),range(600,604800))';
+		o.placeholder = '86400';
+
 		o = s.taboption('advanced', form.Value, 'port', _('mosdns port'),
 			_('Local port; dnsmasq forwards requests here. The next port is taken by the mosdns statistics API (127.0.0.1 only).'));
 		o.datatype = 'port';
@@ -208,10 +217,11 @@ return view.extend({
 				E('button', { 'class': 'btn cbi-button-reset', 'type': 'button', 'click': ui.createHandlerFn(this, () => {
 					if (!confirm(_('Swap current and previous rule sets?')))
 						return;
+					// Файлы переставляются сразу, применение — в фоне; его ход видно над таблицей.
 					return common.callRollbackLists().then((r) => {
 						versions.kicked = Date.now();
-						ui.addNotification(null,
-							E('p', {}, (r.swapped || []).length ? _('Rolled back: %s').format(r.swapped.join(', ')) : _('No previous version.')), 'info');
+						ui.addNotification(null, E('p', {}, r.error == 'busy' ? _('Rule sets are being updated, try again later.')
+							: (r.swapped || []).length ? _('Rolled back: %s').format(r.swapped.join(', ')) : _('No previous version.')), 'info');
 					});
 				}) }, _('Roll back'))
 			])

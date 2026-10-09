@@ -526,17 +526,20 @@ export function update_lists(force) {
 	return result;
 };
 
-export function rollback_lists() {
-	let lk = U.lock(C.LOCK_LISTS);
+// bg — применить в фоне и не ждать занятую блокировку списков: так вызывает rpcd. Он обслуживает
+// вызовы по одному, и, пока ждал бы применения (распаковка, загрузка подсетей geoip) или
+// идущего обновления списков, стоял бы весь LuCI. Перестановка файлов — сразу, она быстрая.
+export function rollback_lists(bg) {
+	let lk = U.lock(C.LOCK_LISTS, !!bg);
 	if (!lk)
 		return { error: 'busy' };
 	let swapped = swap_lists();
 	lk.close();
 	if (length(swapped)) {
 		U.info('списки: откат ' + join(', ', swapped));
-		system('/etc/init.d/truba reload >/dev/null 2>&1');
+		system(bg ? '( /etc/init.d/truba reload >/dev/null 2>&1 & )' : '/etc/init.d/truba reload >/dev/null 2>&1');
 	}
-	return { swapped };
+	return { swapped, applying: !!bg && length(swapped) > 0 };
 };
 
 // Сбросить Действия Категорий Режима к Стартовым настройкам (без применения).

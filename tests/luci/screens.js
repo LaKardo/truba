@@ -15,7 +15,16 @@ const pages = [ 'overview', 'tunnel', 'routing', 'devices', 'dns', 'lists', 'inb
 	// Ошибки страниц Трубы; стартовая панель LuCI стенда к проверке не относится.
 	const ours = () => page.url().includes('/admin/services/truba/');
 	page.on('pageerror', (e) => { if (ours()) errors.push(`[${page.url()}] pageerror: ${e.message}`); });
-	page.on('console', (m) => { if (ours() && m.type() === 'error') errors.push(`[${page.url()}] console: ${m.text()}`); });
+	// «Failed to load resource» в консоли — без адреса; тот же запрос с адресом ловит response ниже.
+	page.on('console', (m) => {
+		if (ours() && m.type() === 'error' && !/^Failed to load resource/.test(m.text())) errors.push(`[${page.url()}] console: ${m.text()}`);
+	});
+	// LuCI подгружает protocol/<proto>.js для каждого обработчика netifd: на стенде wireguard-tools
+	// стоит без luci-proto-wireguard — это 404 стенда, не интерфейса Трубы.
+	page.on('response', (r) => {
+		if (ours() && r.status() >= 400 && !/\/luci-static\/resources\/protocol\//.test(r.url()))
+			errors.push(`[${page.url()}] HTTP ${r.status()}: ${r.url()}`);
+	});
 
 	await page.goto(`${base}/cgi-bin/luci/`, { waitUntil: 'networkidle2' });
 	// Поле имени заполнено «root» заранее; пароль на чистом стенде пустой.

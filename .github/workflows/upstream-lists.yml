@@ -1,0 +1,29 @@
+name: upstream-lists
+
+# Раз в сутки: разбирает ли распаковщик свежие geoip.dat и geosite.dat из release-веток
+# kirilllavrov и работает ли с ними служба. Проверки на PR идут на зафиксированных выпусках
+# (tests/dat.pin), поэтому смену формата у источника заметит только эта задача — раньше,
+# чем Роутер скачает такой файл (update-lists его и так не примет, но списки встанут).
+
+on:
+  schedule:
+    - cron: '0 13 * * *'   # после выхода списков (geoip — около 10–11 UTC) и проверки Роутера в 12:00
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [ dat, router ]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: Свежие списки (${{ matrix.suite }})
+        env:
+          DAT_FRESH: '1'
+        run: bash tests/run.sh ${{ matrix.suite }}

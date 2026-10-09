@@ -348,10 +348,11 @@ ip netns exec vps nft delete table inet bigdrop
 
 echo "== rpcd: долгие проверки идут в фоне и не держат остальные вызовы LuCI"
 # rpcd обслуживает вызовы по одному: пока он ждал проверку (до ~5 с), стоял весь LuCI.
-mkdir -p /usr/share/rpcd/ucode
-cp /repo/router/luci-app-truba/root/usr/share/rpcd/ucode/truba.uc /usr/share/rpcd/ucode/truba.uc
-/etc/init.d/rpcd restart >/dev/null 2>&1
-check "rpcd: объект truba" wait_for 10 ubus list truba
+# Плагин пришёл с файлами пакета truba (ADR 0008); rpcd подхватывает его по HUP — как postinst.
+# С каталога Windows файлы приходят с правами 777, а такие плагины rpcd не загружает.
+chmod 0644 /usr/share/rpcd/ucode/truba-api.uc
+killall -HUP rpcd
+check "rpcd: объект truba (плагин из пакета truba, HUP)" wait_for 10 ubus list truba
 T0=$(date +%s); ubus call truba tunnel_test > /tmp/rt.json; T1=$(date +%s)
 check "rpcd: tunnel_test отвечает сразу (было $((T1 - T0)) с)" test $((T1 - T0)) -le 1
 STARTED="$(jsonfilter -i /tmp/rt.json -e '@.started')"
@@ -593,6 +594,29 @@ else
 	check "gs_direct4 сохранён при перезагрузке правил" sh -c "nft list set inet truba gs_direct4 | grep -q 198.51.100.7"
 fi
 
+echo "== IP из DNS в наборах — со сроком (ADR 0007)"
+# Адрес CDN, которым домен больше не пользуется, не должен направлять трафик неделями,
+# до следующей смены правил или списков.
+# left_le IP N — элементу IP в gs_direct4 осталось не больше N с.
+left_le() { L="$(nft -j list set inet truba gs_direct4 | jsonfilter -e "@.nftables[*].set.elem[@.elem.val='$1'].elem.expires")"; [ -n "$L" ] && [ "$L" -le "$2" ]; }
+check "gs_direct4: срок по умолчанию — сутки" sh -c "nft list set inet truba gs_direct4 | grep -q 'timeout 1d'"
+check "IP, положенный mosdns, получает срок набора" sh -c "nft list set inet truba gs_direct4 | grep -q '192.0.2.77 expires'"
+nft add element inet truba gs_direct4 '{ 198.51.100.9 expires 90s }'
+check "reload (не дольше 90 с)" bounded 90 /etc/init.d/truba reload; sleep 3
+check "перенос в новую таблицу не продлевает срок" left_le 198.51.100.9 90
+# Срок короче оставшегося у перенесённых — ядро не приняло бы элемент длиннее срока набора.
+nft add element inet truba gs_direct4 '{ 198.51.100.10 expires 80000s }'
+uci set truba.dns.set_timeout=3600; uci commit truba
+check "reload (не дольше 90 с)" bounded 90 /etc/init.d/truba reload; sleep 3
+check "срок 1 ч: применено без ошибки" sh -c "! grep -q '\"error\"' /var/run/truba/applied.json && nft list set inet truba gs_direct4 | grep -q 'timeout 1h'"
+check "срок 1 ч: перенесённый IP укорочен до срока набора" left_le 198.51.100.10 3600
+uci set truba.dns.set_timeout=0; uci commit truba
+check "reload (не дольше 90 с)" bounded 90 /etc/init.d/truba reload; sleep 3
+check "без срока: применено без ошибки, IP перенесены" sh -c "! grep -q '\"error\"' /var/run/truba/applied.json && ! nft list set inet truba gs_direct4 | grep -q timeout && nft list set inet truba gs_direct4 | grep -q 198.51.100.10"
+uci -q delete truba.dns.set_timeout; uci commit truba
+check "reload (не дольше 90 с)" bounded 90 /etc/init.d/truba reload; sleep 3
+check "срок снова сутки, перенесённые без срока получили его" sh -c "nft list set inet truba gs_direct4 | grep -q 'timeout 1d' && nft list set inet truba gs_direct4 | grep -q '198.51.100.10 expires'"
+
 echo "== Неверные настройки пропускаются, а не ломают применение"
 # Опечатки из консоли: MAC не давал загрузить таблицу nft, схема адреса DNS — запустить mosdns,
 # адрес для ping делал Туннель «неработающим» навсегда.
@@ -644,7 +668,7 @@ finished() { bounded 90 "$@"; [ $? -ne 124 ]; }
 ads_blocked() { nslookup "$ADS" 127.0.0.1 2>&1 | grep -qiE 'NXDOMAIN|can.t find'; }
 
 check "копия правил сохранена на флеше" sh -c "[ -s /etc/truba/good/truba.nft ] && [ -s /etc/truba/good/mosdns.json ] && [ -s /etc/truba/good/meta.json ]"
-check "копия: без накопленных счётчиков и без IP из DNS" sh -c "! grep -q 'packets [1-9]' /etc/truba/good/truba.nft && ! grep -A3 'set gs_direct4' /etc/truba/good/truba.nft | grep -q elements"
+check "копия: без накопленных счётчиков и без IP из DNS" sh -c "! grep -q 'packets [1-9]' /etc/truba/good/truba.nft && ! sed -n '/set gs_direct4/,/}/p' /etc/truba/good/truba.nft | grep -q elements"
 check "копия: mosdns без API, со своими списками доменов" sh -c "! grep -q '\"api\"' /etc/truba/good/mosdns.json && grep -q '/etc/truba/good/geosite/category-ads.txt' /etc/truba/good/mosdns.json && [ -s /etc/truba/good/geosite/category-ads.txt ]"
 GOOD_INODE="$(ls -i /etc/truba/good/truba.nft | awk '{print $1}')"
 uci set truba.watchdog.enabled='1'; uci commit truba
@@ -809,6 +833,17 @@ check "rollback-lists и его reload завершились" wait_idle 60
 unstick
 check "rollback-lists: оба набора" grep -q 'geosite.dat' /tmp/rb.json
 check "rollback-lists: текущие на месте" test -s /etc/truba/lists/geoip.dat
+# Через rpcd (кнопка «Откатить»): файлы переставляются сразу, а применение идёт в фоне —
+# иначе rpcd ждал бы распаковку и загрузку подсетей geoip, и стоял бы весь LuCI.
+APPLIED_T="$(jsonfilter -i /var/run/truba/applied.json -e '@.time')"; sleep 1
+T0=$(date +%s); ubus call truba rollback_lists > /tmp/rb2.json; T1=$(date +%s)
+check "rpcd rollback_lists отвечает сразу (было $((T1 - T0)) с)" test $((T1 - T0)) -le 1
+check "rpcd rollback_lists: оба набора, применение в фоне" sh -c "grep -q geosite.dat /tmp/rb2.json && [ \"\$(jsonfilter -i /tmp/rb2.json -e '@.applying')\" = true ]"
+applied_after() { [ "$(jsonfilter -i /var/run/truba/applied.json -e '@.time')" -gt "$APPLIED_T" ]; }
+check "rpcd rollback_lists: настройки применены в фоне" wait_for 60 applied_after
+check "rpcd rollback_lists: применение завершилось" wait_idle 60
+unstick
+check "lists: применение не идёт" test "$(ubus call truba lists | jsonfilter -e '@.applying')" = false
 
 echo "== update-lists -f без изменений: предыдущая версия остаётся версией для отката"
 for f in geoip.dat geosite.dat; do cp "/etc/truba/lists/$f" "/root/src/$f"; src_sum "$f"; done
@@ -858,6 +893,41 @@ check "блокировки truba свободны" sh -c "! grep -q ' -> FLOCK'
 echo "== status"
 /usr/sbin/truba status > /tmp/st.json; head -c 300 /tmp/st.json; echo
 check "status — валидный JSON" sh -c "ucode -e 'json(readfile(\"/tmp/st.json\"))' 2>/dev/null || jsonfilter -i /tmp/st.json -e '@.routing'"
+
+echo "== sysupgrade: reinstall.sh возвращает DNS сети до ожидания интернета"
+# После sysupgrade /etc/config/dhcp и бэкап Трубы (/etc/truba в keep.d) сохраняются, а пакетов
+# нет: dnsmasq шлёт запросы в mosdns, которого нет, и reinstall.sh ждал бы интернета вечно.
+# Имитация: служба снята без teardown (procd убивает mosdns, настройки dnsmasq остаются);
+# «исходный» DNS сети в бэкапе — свой сервер на 5399, который знает up.trubatest (не .test:
+# эту зону dnsmasq OpenWrt отвечает сам, rfc6761.conf). truba в этом контейнере стоит
+# не из apk, поэтому reinstall.sh идёт дальше проверки «уже установлена».
+cp /etc/truba/state/dnsmasq.json /tmp/dnsmasq.orig.json
+DM_SID="$(jsonfilter -i /tmp/dnsmasq.orig.json -e '@.sid')"
+printf '{"sid":"%s","noresolv":"1","server":["127.0.0.1#5399"]}' "$DM_SID" > /etc/truba/state/dnsmasq.json
+dnsmasq --conf-file=/dev/null --port=5399 --listen-address=127.0.0.1 --bind-interfaces --no-resolv --no-hosts \
+	--address=/up.trubatest/5.6.7.8 --pid-file=/tmp/dm-up.pid
+ubus call service delete '{"name":"truba"}'; sleep 2
+up_ok() { nslookup up.trubatest 127.0.0.1 2>&1 | grep -q 5.6.7.8; }
+check "sysupgrade: mosdns нет — DNS сети не отвечает" sh -c "! pidof mosdns && ! nslookup up.trubatest 127.0.0.1 2>&1 | grep -q 5.6.7.8"
+sh /etc/truba/reinstall.sh >/dev/null 2>&1 & RI_PID=$!
+check "reinstall: DNS сети отвечает, не дожидаясь интернета" wait_for 20 up_ok
+check "reinstall: dnsmasq вернулся к серверам из бэкапа" test "$(uci -q get dhcp.@dnsmasq[0].server)" = "127.0.0.1#5399"
+check "reinstall: бэкап dnsmasq использован и удалён" test ! -f /etc/truba/state/dnsmasq.json
+check "reinstall: запись в журнале" sh -c "logread | grep -q 'truba-reinstall.*DNS сети возвращён'"
+check "reinstall: дальше ждёт интернет (ещё работает)" kill -0 "$RI_PID"
+kill "$RI_PID" 2>/dev/null; for p in $(pgrep -f 'truba/reinstall[.]sh'); do kill "$p" 2>/dev/null; done
+kill "$(cat /tmp/dm-up.pid)" 2>/dev/null
+# Как было до имитации: исходный бэкап, dnsmasq → mosdns, служба снова работает.
+cp /tmp/dnsmasq.orig.json /etc/truba/state/dnsmasq.json
+uci -q batch <<-'EOF'
+	delete dhcp.@dnsmasq[0].server
+	add_list dhcp.@dnsmasq[0].server='127.0.0.1#5335'
+	set dhcp.@dnsmasq[0].noresolv='1'
+	set dhcp.@dnsmasq[0].cachesize='0'
+	commit dhcp
+EOF
+check "служба снова запускается (не дольше 90 с)" bounded 90 /etc/init.d/truba start; sleep 3
+check "после имитации: mosdns работает" pidof mosdns
 
 echo "== teardown"
 /etc/init.d/truba stop; sleep 1

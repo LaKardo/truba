@@ -14,6 +14,10 @@ name: build
 # - зависимости truba и luci-app-truba — только в метаданных (EXTRA_DEPENDS), SDK их не собирает;
 # - тесты идут параллельно со сборкой, публикацию держит deploy;
 # - обновляются только нужные фиды.
+#
+# Права: всему workflow — только чтение; запись в репозиторий (ветка gh-pages) — у deploy.
+# Действия закреплены по коммиту (SHA), а не по тегу: тег можно передвинуть, а фид
+# после sysupgrade Роутер ставит сам, с правами root (ADR 0004).
 
 on:
   push:
@@ -45,7 +49,7 @@ on:
         default: true
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: build-feed
@@ -60,20 +64,24 @@ env:
 jobs:
   test:
     runs-on: ubuntu-24.04
-    # Обычно ~4 мин; если все шаги bounded упрутся в предел — ~25. Без предела
+    # Обычно до ~4 мин на часть; если все шаги bounded упрутся в предел — ~25. Без предела
     # зависший шаг держит задание до 6 ч.
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [ units, dat, router, vps, luci, ui ]
     steps:
-      - uses: actions/checkout@v4
-      - name: Проверки (распаковщик, роутер под procd, VPS, LuCI)
-        run: bash tests/run.sh all
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: Проверки (${{ matrix.suite }})
+        run: bash tests/run.sh ${{ matrix.suite }}
 
   matrix:
     runs-on: ubuntu-24.04
     outputs:
       versions: ${{ steps.v.outputs.versions }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - id: v
         # Ввод — через окружение, а не подстановкой в текст скрипта: так он остаётся данными.
         env:
@@ -93,7 +101,7 @@ jobs:
       matrix:
         version: ${{ fromJson(needs.matrix.outputs.versions) }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       # Пакеты AmneziaWG меняются, только когда меняются их источники, шаги сборки (AWG_BUILD_REV)
       # или версия ImmortalWrt (а с ней ядро). Иначе берём их из опубликованного фида этой же
@@ -148,7 +156,7 @@ jobs:
       # downloads.immortalwrt.org бывает медленным (однажды 18 мин вместо 12 с).
       - name: SDK из кэша
         id: sdk-cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: ${{ steps.sdk.outputs.file }}
           key: sdk-${{ matrix.version }}-${{ steps.sdk.outputs.sha256 }}
@@ -166,7 +174,7 @@ jobs:
       # Сохраняем сразу после проверки, а не в конце задания: кэш пригодится, даже если сборка упадёт.
       - name: SDK в кэш
         if: steps.sdk-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: ${{ steps.sdk.outputs.file }}
           key: sdk-${{ matrix.version }}-${{ steps.sdk.outputs.sha256 }}
@@ -282,7 +290,7 @@ jobs:
             staging_dir/host/bin/apk adbdump "$out/$1"-[0-9]*.apk \
               | sed -n '/^  depends:/,/^  [a-z-]*:/p' | sed -n 's/^    - \([^<>=~ ]*\).*/\1/p' | sort | xargs
           }
-          extra_of() { grep -oE '[a-z0-9.+_-]+ \(>=0\)' "$1" | cut -d' ' -f1; }
+          extra_of() { grep -oE '[a-z0-9.+_-]+ \(>=[^)]*\)' "$1" | cut -d' ' -f1; }
           check_deps() {
             want=$(printf '%s\n' libc $2 | sort | xargs)
             got=$(deps_of "$1")
@@ -316,7 +324,7 @@ jobs:
           printf '{"version":"%s","target":"%s","subtarget":"%s","built":"%s"}\n' \
             "${{ matrix.version }}" "$TARGET" "$SUBTARGET" "$(date -u +%FT%TZ)" > "$dst/feed.json"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: feed-${{ matrix.version }}
           path: publish/
@@ -324,7 +332,7 @@ jobs:
 
       - name: Логи сборки
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: build-logs-${{ matrix.version }}
           path: sdk/logs/
@@ -335,8 +343,11 @@ jobs:
     # Ручной запуск с publish=false — проверка сборки без публикации (например, на ветке).
     if: ${{ github.event_name != 'workflow_dispatch' || inputs.publish }}
     runs-on: ubuntu-24.04
+    # Единственное задание с записью: публикует фид в ветку gh-pages.
+    permissions:
+      contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Текущее содержимое Pages
         run: |
           mkdir -p site
@@ -344,7 +355,7 @@ jobs:
             git fetch -q --depth=1 origin gh-pages
             git --work-tree=site checkout FETCH_HEAD -- .
           fi
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           path: site
           pattern: feed-*
@@ -354,7 +365,7 @@ jobs:
           cd site
           ls -d */mediatek/filogic 2>/dev/null | cut -d/ -f1 | sort -V > versions.txt
           cat versions.txt
-      - uses: peaceiris/actions-gh-pages@v4
+      - uses: peaceiris/actions-gh-pages@84c30a85c19949d7eee79c4ff27748b70285e453 # v4.1.0
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_branch: gh-pages

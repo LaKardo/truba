@@ -107,6 +107,8 @@ export function load() {
 			ttl_max: num(bad, 'dns.ttl_max', d.ttl_max, 300, 30, 86400),
 			cache_size: num(bad, 'dns.cache_size', d.cache_size, 65536, 1024, 1048576),
 			lazy_cache_ttl: num(bad, 'dns.lazy_cache_ttl', d.lazy_cache_ttl, 86400, 0, 604800),
+			// Срок IP из DNS в наборах gs_* (ADR 0007): 0 — без срока, иначе от 10 минут до недели.
+			set_timeout: num(bad, 'dns.set_timeout', d.set_timeout, 86400, 0, 604800),
 		},
 		lists: {
 			geoip_url: l.geoip_url ?? 'https://raw.githubusercontent.com/kirilllavrov/geoip-builder/release/geoip.dat',
@@ -127,6 +129,12 @@ export function load() {
 		},
 		invalid: bad,
 	};
+	// Срок короче 10 минут — короче TTL ответов: адреса пропадали бы из наборов, пока устройства
+	// ещё пользуются ответом, и новые соединения шли бы мимо своей Категории.
+	if (cfg.dns.set_timeout > 0 && cfg.dns.set_timeout < 600) {
+		push(bad, { key: 'dns.set_timeout', value: '' + d.set_timeout });
+		cfg.dns.set_timeout = 86400;
+	}
 	// HTTP API mosdns (счётчики кэша для «Обзора») — на соседнем с DNS порту, только 127.0.0.1.
 	let p = cfg.dns.port;
 	cfg.dns.api = sprintf('127.0.0.1:%d', (p < 65535) ? p + 1 : p - 1);

@@ -23,7 +23,7 @@ function usage() {
 		'  routes             пересчитать таблицу Туннеля по его состоянию\n' +
 		'  refresh-bypass     обновить набор локальных подсетей\n' +
 		'  update-lists [-f]  скачать Наборы правил (-f — применить даже без изменений)\n' +
-		'  rollback-lists     вернуть предыдущие Наборы правил\n' +
+		'  rollback-lists [--bg]  вернуть предыдущие Наборы правил (--bg — применить в фоне)\n' +
 		'  check <домен|IP> [MAC]  какая Категория и Действие сработают\n' +
 		'  status             состояние для «Обзора» в JSON\n' +
 		'  lists              версии Наборов правил в JSON\n' +
@@ -61,7 +61,7 @@ case 'update-lists':
 	break;
 
 case 'rollback-lists':
-	out(load('core').rollback_lists());
+	out(load('core').rollback_lists(args[0] == '--bg'));
 	break;
 
 case 'check':
