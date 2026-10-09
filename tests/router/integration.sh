@@ -367,6 +367,24 @@ nat_done() { [ "$(ubus call truba nat_result | jsonfilter -e '@.time')" -ge "$ST
 check "rpcd: итог проверки NAT появился" wait_for 20 nat_done
 check "rpcd: итог проверки NAT — OK" test "$(ubus call truba nat_result | jsonfilter -e '@.ok')" = true
 
+echo "== rpcd: при старом luci-app-truba объект truba — за его плагином (ADR 0011)"
+# До r14 плагин лежал в luci-app-truba как truba.uc. Два плагина с одним объектом rpcd не
+# переносит: портит память и падает — на Роутере на HUP из postinst r17, и LuCI не пускал.
+# На x86 это не проявляется, поэтому проверяется, что второй регистрации нет вовсе.
+RP=$(pidof rpcd)
+cat > /usr/share/rpcd/ucode/truba.uc <<'EOF'
+return { truba: { old_plugin: { call: function() { return { old: true }; } } } };
+EOF
+chmod 0644 /usr/share/rpcd/ucode/truba.uc
+killall -HUP rpcd
+old_owner() { [ "$(ubus call truba old_plugin | jsonfilter -e '@.old')" = true ]; }
+check "rpcd: при старом плагине объект — за ним" wait_for 10 old_owner
+check "rpcd: truba-api.uc при нём не регистрирует ничего" sh -c '! ubus -v list truba | grep -q "\"status\""'
+check "rpcd пережил HUP (тот же процесс)" test "$(pidof rpcd)" = "$RP"
+rm /usr/share/rpcd/ucode/truba.uc
+killall -HUP rpcd
+check "rpcd: без старого плагина объект снова у truba-api.uc" wait_for 10 ubus call truba lists
+
 echo "== учёт трафика устройств (Маршрутизация вкл)"
 bytes() { nft list counter inet truba "$1" 2>/dev/null | sed -n 's/.*bytes \([0-9]*\).*/\1/p'; }
 gt0() { [ "$(bytes "$1")" -gt 0 ] 2>/dev/null; }
@@ -435,10 +453,17 @@ check "история: процесс stats запущен procd" stats_running
 has_rates() { [ "$(rf 4 $R)" -ge 2 ] 2>/dev/null; }
 check "история: точки со скоростью в /var/run (оперативная память)" wait_for 15 has_rates
 check "история: точка — раз в 5 с" test "$(rf 5 $R)" = 5
-T0=$(date +%s)
-for i in 1 2 3; do lan_tcp 1.2.3.4 48081 >/dev/null 2>&1; done
+# after_tick — дождаться очередного замера и напечатать время его точки. Действие сразу после
+# него целиком попадает в следующую точку, новее этого времени, а всё прежнее — в точки не
+# новее. С отметкой от date замер мог прийтись на ту же секунду уже после действия: точка с
+# его следствием оказывалась «не новее» отметки, и проверка падала (в CI — то одна, то другая).
+new_point() { [ "$(rf 3 $R)" -gt "$P0" ] 2>/dev/null; }
+after_tick() { P0=$(rf 3 $R); wait_for 7 new_point; rf 3 $R; }
+T0=$(after_tick)
+n=0; for i in 1 2 3; do lan_tcp 1.2.3.4 48081 >/dev/null 2>&1 && n=$((n + 1)); done
 tun_seen() { [ "$(rf 6 $R "$T0")" -gt 0 ] 2>/dev/null; }
 check "история: скорость Туннеля от устройств видна без браузера" wait_for 15 tun_seen
+tun_seen || echo "    T0=$T0, соединений $n из 3, конец $R: $(tail -c 300 $R)"
 ubus call truba rates '{"span":600}' > /tmp/r1.json
 NOW="$(jsonfilter -i /tmp/r1.json -e '@.now')"
 check "rpcd rates: время Роутера" test "$NOW" -ge "$T0"
@@ -461,10 +486,11 @@ check "история: перезапуск процесса не стирает
 check "история: после перезапуска процесса без разрыва" test "$(rf 7 $R "$L0")" = 0
 # Счётчики начаты заново (новый отсчёт в applied.json) — разрыв, а не скачок скорости.
 cp /var/run/truba/applied.json /tmp/applied.bak
-T1=$(date +%s)
+T1=$(after_tick)
 sed -i 's/"counters_since": *[0-9]*/"counters_since": 1/' /var/run/truba/applied.json
 gap_after() { [ "$(rf 7 $R "$T1")" -ge 1 ] 2>/dev/null; }
 check "история: счётчики начаты заново — разрыв" wait_for 15 gap_after
+gap_after || echo "    T1=$T1, конец $R: $(tail -c 300 $R)"
 cp /tmp/applied.bak /var/run/truba/applied.json
 
 echo "== порядок Категорий (узкие раньше широких)"
