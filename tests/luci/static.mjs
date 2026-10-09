@@ -1,6 +1,7 @@
-// Проверка интерфейса LuCI: синтаксис JS-файлов и полнота русского перевода.
-//   node tests/luci/check.mjs            — проверить
-//   node tests/luci/check.mjs --pot      — напечатать шаблон .pot
+// Интерфейс LuCI без стенда: синтаксис JS, полнота русского перевода, каждый вызов truba.*
+// есть в ubus-API пакета truba и в ACL.
+//   node tests/luci/static.mjs           — проверить
+//   node tests/luci/static.mjs --pot     — напечатать шаблон .pot (po/templates/truba.pot)
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';

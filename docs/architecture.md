@@ -741,14 +741,17 @@ truba/
 │  │                         #   files/usr/share/ucode/truba/*.uc, rpcd-плагин (ubus-API, ADR 0008),
 │  │                         #   uci-defaults, keep.d, hotplug, reinstall.sh, uninstall.sh
 │  └─ luci-app-truba/        # luci.mk: htdocs/…/view/truba/*.js, ACL, меню, po/{ru,templates}
-├─ tests/
-│  ├─ run.sh                 # всё в Docker: units, dat, router, vps, luci, ui
+├─ tests/                   # README.md — части, стенд, как добавить проверку (ADR 0012)
+│  ├─ run.sh                 # всё в Docker, части параллельно
 │  ├─ dat.pin                # выпуски Наборов правил для проверок на PR
-│  ├─ router/                # интеграционный тест под procd, модули, эталоны (golden), распаковщик
-│  ├─ luci/                  # перевод и вызовы API, стенд LuCI, обход вкладок в Chromium
+│  ├─ golden/                # эталоны правил nftables и конфига mosdns
+│  ├─ lib/                   # общие функции, синтетические .dat, пробы TCP/UDP/STUN
+│  ├─ unit/                  # модули на ucode, распаковщик на настоящих выпусках
+│  ├─ router/                # стенд Роутера под procd и части: net, dns, lists, life, tunnel, stats
+│  ├─ luci/                  # перевод и вызовы API, стенд LuCI, проход Chromium
 │  └─ vps/                   # shellcheck и функции install-vps.sh
 └─ .github/workflows/
-   ├─ tests.yml              # на PR: части tests/run.sh параллельно
+   ├─ tests.yml              # части tests/run.sh параллельно: на PR и перед публикацией фида
    ├─ build.yml              # матрица версий ImmortalWrt 25.12.x × mediatek/filogic, фид
    ├─ watch-releases.yml     # ежедневно: появилась новая 25.12.x? → build.yml
    └─ upstream-lists.yml     # ежедневно: свежие geoip/geosite разбираются и работают
@@ -763,7 +766,7 @@ truba/
 3. Подключить фиды `base` и `luci` (для полной сборки AmneziaWG ещё `packages` и `awg-openwrt` на зафиксированном коммите) и локальный фид `router/`.
 4. `make package/<пакет>/compile` для нужных пакетов. Зависимости `truba` и `luci-app-truba` записаны в `EXTRA_DEPENDS`: SDK кладёт их в метаданные, но не компилирует (иначе он собирал бы mosdns вместе с Go, curl, openssl, luci-base и выбрасывал). CI сверяет зависимости готовых пакетов с Makefile и падает, если у пакета версия `0` (непереведённый LuCI).
 5. Подписать индекс apk ключом из `secrets.APK_SIGN_KEY`.
-6. Опубликовать в GitHub Pages: `/<версия>/mediatek/filogic/` (`packages.adb` + `.apk` + `awg.json`), публичный ключ — `/keys/truba.pem`. Публикация ждёт тестов, которые идут параллельно со сборкой.
+6. Опубликовать в GitHub Pages: `/<версия>/mediatek/filogic/` (`packages.adb` + `.apk` + `awg.json`), публичный ключ — `/keys/truba.pem`. Публикация ждёт проверок `tests.yml`, которые идут параллельно со сборкой.
 
 Сборку можно проверить на ветке без публикации: `gh workflow run build.yml --ref <ветка> -f publish=false`.
 

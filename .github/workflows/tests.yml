@@ -1,40 +1,41 @@
 name: tests
 
-# Проверки на pull request: части tests/run.sh параллельно, без сборки и публикации фида.
-# Сборка и фид — build.yml после слияния в main.
+# Проверки tests/run.sh: каждая часть — своим заданием, все параллельно (ADR 0012).
+# Запускается на pull request и из build.yml перед публикацией фида — матрица одна, здесь.
 # Действия закреплены по коммиту (SHA), а не по тегу: тег можно передвинуть.
 
 on:
   pull_request:
-    # vps/** — тоже: tests/run.sh проверяет и install-vps.sh (shellcheck, nft, параметры AWG, SSH).
+    # vps/** — тоже: часть vps проверяет install-vps.sh.
     paths: [ 'router/**', 'vps/**', 'tests/**', '.github/workflows/tests.yml' ]
+  workflow_call:
 
 permissions:
   contents: read
 
 concurrency:
-  group: tests-${{ github.event.pull_request.number }}
-  cancel-in-progress: true
+  group: tests-${{ github.event.pull_request.number || github.sha }}
+  # Новый коммит в PR отменяет прежний прогон; прогон для публикации фида не отменяется.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   test:
     runs-on: ubuntu-24.04
-    # Обычно до ~4 мин на часть; если все шаги bounded упрутся в предел — ~25. Без предела
-    # зависший шаг держит задание до 6 ч.
-    timeout-minutes: 30
+    # Часть идёт до ~2 мин; предел — чтобы зависший шаг не держал задание до 6 ч.
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
-        suite: [ units, dat, router, vps, luci, ui ]
+        part: [ units, dat, vps, luci, ui, router-net, router-dns, router-lists, router-life, router-tunnel, router-stats ]
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-      - name: Проверки (${{ matrix.suite }})
+      - name: Проверки (${{ matrix.part }})
         env:
           UI_OUT: ${{ github.workspace }}/ui-screens
-        run: bash tests/run.sh ${{ matrix.suite }}
+        run: bash tests/run.sh ${{ matrix.part }}
       # Снимки всех вкладок — посмотреть интерфейс из PR, не поднимая стенд.
       - name: Снимки вкладок LuCI
-        if: always() && matrix.suite == 'ui'
+        if: always() && matrix.part == 'ui'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: ui-screens

@@ -1,4 +1,4 @@
-// STUN-сервер для проверки «truba nat-test» (integration.sh): на Binding Request отвечает
+// STUN-сервер для проверки «truba nat-test» (tests/router): на Binding Request отвечает
 // XOR-MAPPED-ADDRESS с адресом MAPPED и портом источника — как Труба, которая выпускает
 // Роутер от своего IP, сохраняя порт.
 //   stun_server.uc ADDR PORT MAPPED

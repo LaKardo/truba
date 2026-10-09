@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Проверки install-vps.sh без настоящего VPS: shellcheck, генерация параметров AWG,
-# правила nftables (nft -c). Запуск в контейнере ubuntu:24.04 с --cap-add NET_ADMIN.
+# install-vps.sh без настоящего VPS: shellcheck, параметры AWG 1.x/2.x/3.1, конфиги обеих сторон,
+# правила nftables с загрузкой в ядро, sysctl, заголовки ядра, MTU по сети VPS, порт SSH.
+# Контейнер ubuntu:24.04 с --cap-add NET_ADMIN (tests/run.sh vps).
 set -uo pipefail
 
 FAILS=0
@@ -122,7 +123,7 @@ if ip link add trubamtu0 type dummy 2>/dev/null; then
 	mtu_both 1380 && ok "сеть VPS 9000: MTU не больше 1380" || fail "сеть 9000: $(grep '^MTU' "$ROUTER_CONF")"
 	ip link del trubamtu0
 else
-	# С одним NET_ADMIN модуль dummy не загрузить; в tests/run.sh all его загружает тест роутера.
+	# С одним NET_ADMIN модуль dummy не загрузить; его загружают стенды Роутера (tests/run.sh).
 	echo "skip  MTU по сети VPS: нет модуля dummy на хосте"
 fi
 WAN_IF=nonexistent0; write_router_conf

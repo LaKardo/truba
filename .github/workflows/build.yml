@@ -62,19 +62,9 @@ env:
   AWG_BUILD_REV: '1'
 
 jobs:
+  # Те же части tests/run.sh, что на PR (tests.yml); публикацию фида держит deploy.
   test:
-    runs-on: ubuntu-24.04
-    # Обычно до ~4 мин на часть; если все шаги bounded упрутся в предел — ~25. Без предела
-    # зависший шаг держит задание до 6 ч.
-    timeout-minutes: 30
-    strategy:
-      fail-fast: false
-      matrix:
-        suite: [ units, dat, router, vps, luci, ui ]
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-      - name: Проверки (${{ matrix.suite }})
-        run: bash tests/run.sh ${{ matrix.suite }}
+    uses: ./.github/workflows/tests.yml
 
   matrix:
     runs-on: ubuntu-24.04
