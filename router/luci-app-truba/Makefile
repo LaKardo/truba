@@ -2,13 +2,14 @@ include $(TOPDIR)/rules.mk
 
 LUCI_TITLE:=LuCI interface for Truba
 # Только в метаданных пакета, без сборки зависимостей (см. router/truba/Makefile).
-# ubus-API Трубы (rpcd-плагин), к которому обращается интерфейс, — в пакете truba с r17 (ADR 0008).
-LUCI_EXTRA_DEPENDS:=truba (>=1.0.0-r17), luci-base (>=0)
+# ubus-API Трубы (rpcd-плагин), к которому обращается интерфейс, — в пакете truba (ADR 0008):
+# версии интерфейса и службы совпадают.
+LUCI_EXTRA_DEPENDS:=truba (>=1.1.0-r1), luci-base (>=0)
 LUCI_PKGARCH:=all
 
 PKG_LICENSE:=Apache-2.0
-PKG_VERSION:=1.0.0
-PKG_RELEASE:=14
+PKG_VERSION:=1.1.0
+PKG_RELEASE:=1
 # luci.mk берёт версию перевода из git-истории po/, а в CI исходники лежат вне git,
 # и перевод получал версию 0 — apk upgrade никогда бы его не обновил.
 PKG_PO_VERSION=$(PKG_VERSION)-r$(PKG_RELEASE)

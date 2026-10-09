@@ -235,8 +235,6 @@ function warnings(st) {
 	if (nb.offload)
 		res.push({ text: _('Software flow offloading is on: packets of offloaded connections bypass the Truba counters, so device traffic is undercounted.'),
 			href: L.url('admin/network/firewall'), label: _('Firewall') });
-	if (nb.openclash_fakeip)
-		add(_('OpenClash runs in fake-ip mode: «Check NAT» may report a problem although full cone NAT works.'), 'inbound');
 	if (up.enabled && !up.installed)
 		add(common.UPNP_MISSING, 'inbound');
 	if (st.tunnel?.up && big && !big.ok)

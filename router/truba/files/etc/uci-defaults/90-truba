@@ -14,7 +14,7 @@ fi
 
 # Full cone NAT; аппаратное ускорение выключено: оно обходит netfilter целиком (docs/architecture.md §4.2).
 # Программное ускорение не трогаем: его выбирает владелец. Пакеты ускоренных соединений
-# идут мимо счётчиков Трубы и мимо ограничения скорости qosmate — об этом предупреждает «Обзор».
+# идут мимо счётчиков Трубы и мимо шейперов трафика — об этом предупреждает «Обзор».
 uci -q set firewall.@defaults[0].fullcone='1'
 uci -q set firewall.@defaults[0].flow_offloading_hw='0'
 
@@ -43,7 +43,7 @@ if [ -z "$(uci -q get firewall.lan_truba)" ]; then
 	EOF
 fi
 
-# IPv6 домашней сети не трогаем (нужен roamd, ADR 0005); закрываем только выход в интернет по IPv6.
+# IPv6 домашней сети не трогаем (link-local нужен mesh-узлам, ADR 0005); закрываем только выход в интернет по IPv6.
 if [ -z "$(uci -q get firewall.truba_no_ipv6_inet)" ]; then
 	uci -q batch <<-EOF
 		set firewall.truba_no_ipv6_inet=rule

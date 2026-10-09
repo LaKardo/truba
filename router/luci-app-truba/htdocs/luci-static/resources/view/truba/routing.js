@@ -160,7 +160,7 @@ return view.extend({
 		// Исключения для устройств — до Категорий: политика устройства сильнее их.
 		const leases = (data[3] && data[3].dhcp_leases) || [];
 		const ds = m.section(form.GridSection, 'device', _('Device policies'),
-			_('Per-device exceptions. A device is recognised by its MAC address, also behind roamd mesh nodes (4-address mode keeps client MACs). Block still applies to all devices.'));
+			_('Per-device exceptions. A device is recognised by its MAC address, also behind mesh nodes in 4-address mode (it keeps client MACs). Block still applies to all devices.'));
 		ds.anonymous = true;
 		ds.addremove = true;
 		ds.sortable = true;

@@ -84,15 +84,12 @@ function traffic(raw) {
 // Соседи, которые искажают учёт или проверки Трубы.
 function neighbours() {
 	let c = cursor();
-	let res = { offload: false, offload_hw: false, openclash_fakeip: false };
+	let res = { offload: false, offload_hw: false };
 	if (c.load('firewall'))
 		c.foreach('firewall', 'defaults', (s) => {
 			res.offload ||= (s.flow_offloading == '1');
 			res.offload_hw ||= (s.flow_offloading_hw == '1');
 		});
-	if (stat('/etc/config/openclash') && c.load('openclash'))
-		res.openclash_fakeip = c.get('openclash', 'config', 'enable') == '1' &&
-			match(c.get('openclash', 'config', 'en_mode') ?? '', /fake-ip/) != null;
 	return res;
 }
 

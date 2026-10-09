@@ -886,10 +886,6 @@ msgid "Firewall"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/overview.js
-msgid "OpenClash runs in fake-ip mode: «Check NAT» may report a problem although full cone NAT works."
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/overview.js
 msgid "Full-size packets do not get through the tunnel: pages open slowly and downloads stall. Lower the tunnel MTU."
 msgstr ""
 
@@ -1146,7 +1142,7 @@ msgid "Device policies"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/routing.js
-msgid "Per-device exceptions. A device is recognised by its MAC address, also behind roamd mesh nodes (4-address mode keeps client MACs). Block still applies to all devices."
+msgid "Per-device exceptions. A device is recognised by its MAC address, also behind mesh nodes in 4-address mode (it keeps client MACs). Block still applies to all devices."
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/routing.js

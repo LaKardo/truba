@@ -1,12 +1,12 @@
 // rpcd: ubus-объект `truba` — API службы для LuCI и скриптов (ubus call truba status).
 // Логика — в /usr/sbin/truba; плагин — в пакете truba, чтобы API менялся вместе с ней (ADR 0008).
-// Имя файла — не truba.uc: так он был в luci-app-truba до r14, и apk не дал бы двум пакетам
-// один путь. Пока старый плагин стоит, объект остаётся за ним (конец файла, ADR 0011).
+// Имя файла — не truba.uc: так он назывался в luci-app-truba до 1.0.0-r14, и apk не дал бы двум пакетам
+// один путь. Пока старый плагин стоит, объект остаётся за ним (конец файла, ADR 0008).
 'use strict';
 
 import { access, popen, readfile } from 'fs';
 
-// Плагин luci-app-truba до r14.
+// Плагин luci-app-truba до 1.0.0-r14.
 const OLD_PLUGIN = '/usr/share/rpcd/ucode/truba.uc';
 
 function shq(s) {

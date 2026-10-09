@@ -82,8 +82,8 @@ msgstr "%d мин назад"
 msgid "%d h ago"
 msgstr "%d ч назад"
 
-msgid "Per-device exceptions. A device is recognised by its MAC address, also behind roamd mesh nodes (4-address mode keeps client MACs). Block still applies to all devices."
-msgstr "Исключения для отдельных устройств. Устройство узнаётся по MAC-адресу, в том числе за узлами mesh roamd (4-адресный режим сохраняет MAC клиентов). Блок действует на все устройства."
+msgid "Per-device exceptions. A device is recognised by its MAC address, also behind mesh nodes in 4-address mode (it keeps client MACs). Block still applies to all devices."
+msgstr "Исключения для отдельных устройств. Устройство узнаётся по MAC-адресу, в том числе за mesh-узлами в 4-адресном режиме (он сохраняет MAC клиентов). Блок действует на все устройства."
 
 msgid "Device policies"
 msgstr "Политики устройств"
@@ -615,9 +615,6 @@ msgstr "с подъёма интерфейса, вместе с трафиком
 
 msgid "New connections"
 msgstr "Новые соединения"
-
-msgid "OpenClash runs in fake-ip mode: «Check NAT» may report a problem although full cone NAT works."
-msgstr "OpenClash работает в режиме fake-ip: «Проверить NAT» может показать проблему, хотя Full cone NAT работает."
 
 msgid "Device traffic"
 msgstr "Трафик устройств"

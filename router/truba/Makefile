@@ -1,8 +1,8 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=truba
-PKG_VERSION:=1.0.0
-PKG_RELEASE:=18
+PKG_VERSION:=1.1.0
+PKG_RELEASE:=1
 PKG_LICENSE:=Apache-2.0
 
 include $(INCLUDE_DIR)/package.mk
@@ -65,8 +65,8 @@ define Package/truba/install
 endef
 
 # ubus-объект truba — плагин rpcd (ADR 0008). rpcd загружает плагины при запуске,
-# а по HUP перезапускается сам, сохраняя сессии LuCI. Не запущен — запустить: r17 при
-# старом luci-app-truba ронял rpcd (ADR 0011), и обновление по SSH возвращает LuCI.
+# а по HUP перезапускается сам, сохраняя сессии LuCI. Если rpcd не запущен — запустить:
+# иначе после обновления по SSH LuCI не пускает.
 define Package/truba/postinst
 #!/bin/sh
 [ -n "$${IPKG_INSTROOT}" ] || killall -HUP rpcd 2>/dev/null || /etc/init.d/rpcd restart
