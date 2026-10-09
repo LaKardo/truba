@@ -9,8 +9,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
-  actions: write
+  contents: read
 
 jobs:
   check:
@@ -36,6 +35,9 @@ jobs:
   build:
     needs: check
     if: needs.check.outputs.missing != ''
+    # Права вызванного build.yml не выше этих: deploy публикует фид в gh-pages.
+    permissions:
+      contents: write
     uses: ./.github/workflows/build.yml
     with:
       versions: ${{ needs.check.outputs.missing }}

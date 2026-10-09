@@ -1,7 +1,8 @@
 name: tests
 
-# Проверки на pull request: только tests/run.sh, без сборки и публикации фида.
+# Проверки на pull request: части tests/run.sh параллельно, без сборки и публикации фида.
 # Сборка и фид — build.yml после слияния в main.
+# Действия закреплены по коммиту (SHA), а не по тегу: тег можно передвинуть.
 
 on:
   pull_request:
@@ -18,10 +19,24 @@ concurrency:
 jobs:
   test:
     runs-on: ubuntu-24.04
-    # Обычно ~4 мин; если все шаги bounded упрутся в предел — ~25. Без предела
+    # Обычно до ~4 мин на часть; если все шаги bounded упрутся в предел — ~25. Без предела
     # зависший шаг держит задание до 6 ч.
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [ units, dat, router, vps, luci, ui ]
     steps:
-      - uses: actions/checkout@v4
-      - name: Проверки (распаковщик, роутер под procd, VPS, LuCI)
-        run: bash tests/run.sh all
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: Проверки (${{ matrix.suite }})
+        env:
+          UI_OUT: ${{ github.workspace }}/ui-screens
+        run: bash tests/run.sh ${{ matrix.suite }}
+      # Снимки всех вкладок — посмотреть интерфейс из PR, не поднимая стенд.
+      - name: Снимки вкладок LuCI
+        if: always() && matrix.suite == 'ui'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ui-screens
+          path: ui-screens/
+          if-no-files-found: ignore
