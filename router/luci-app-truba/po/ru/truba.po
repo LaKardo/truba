@@ -1053,3 +1053,33 @@ msgstr "не скачался"
 
 msgid "checksum mismatch"
 msgstr "не сошлась контрольная сумма"
+
+msgid "The current rule sets could not be read, so the previous ones were restored."
+msgstr "Текущие Наборы правил не читаются — возвращены предыдущие."
+
+msgid "no result in time"
+msgstr "итог не пришёл вовремя"
+
+msgid "the file cannot be read, the current one is kept"
+msgstr "файл не читается, оставлен текущий"
+
+msgid "the rule sets are being unpacked, try again in a minute"
+msgstr "Наборы правил распаковываются, повторите через минуту"
+
+msgid "The rules loaded before the error stay in effect."
+msgstr "Действуют правила, загруженные до ошибки."
+
+msgid "The last working rules from %s are in effect."
+msgstr "Действуют последние удачные правила от %s."
+
+msgid "No Truba rules are in effect: traffic and DNS go direct."
+msgstr "Правила Трубы не действуют: трафик и DNS идут напрямую."
+
+msgid "Invalid settings were skipped, defaults are used instead: %s"
+msgstr "Неверные настройки пропущены, вместо них — значения по умолчанию: %s"
+
+msgid "Expected https://…, tls://…, quic://…, h3://…, tcp://… or udp://… (optionally «@IP»)"
+msgstr "Нужен адрес https://…, tls://…, quic://…, h3://…, tcp://… или udp://… (можно с «@IP»)"
+
+msgid "Rule sets are being unpacked — reload the page in a minute."
+msgstr "Наборы правил распаковываются — обновите страницу через минуту."

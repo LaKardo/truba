@@ -134,6 +134,29 @@ STATE="$STATE_DIR/pipe.env"; AWG_VERSION=test; save_state
 ( unset HPK RANDOM_TRAILERS; load_state; [ "$HPK" = 'aHBrLXRlc3Qta2V5LTMyLWJ5dGVzLWxvbmctLS0tLS0=' ] && [ "$RANDOM_TRAILERS" = 1 ] ) \
 	&& ok "pipe.env хранит HeaderProtectionKey и RandomTrailers" || fail "pipe.env: HPK/RandomTrailers"
 
+# Порт SSH. Смена порта у подтверждённой установки снова идёт через окно с подтверждением,
+# прежний порт — запасной: иначе закрытый у провайдера новый порт оставил бы VPS без входа.
+ssh_case() {   # ssh_case SSH_PORT SSH_CONFIRMED SSH_FALLBACK OPT_SSH_PORT → «порт подтверждён запасной»
+	SSH_PORT=$1 SSH_CONFIRMED=$2 SSH_FALLBACK=$3 OPT_SSH_PORT=$4
+	choose_ssh_port
+	echo "$SSH_PORT $SSH_CONFIRMED ${SSH_FALLBACK:--}"
+}
+[ "$(ssh_case 50022 1 '' 51022)" = "51022 0 50022" ] && ok "SSH: смена порта — снова окно с подтверждением, прежний запасной" \
+	|| fail "SSH: смена порта: $(ssh_case 50022 1 '' 51022)"
+[ "$(ssh_case 50022 1 '' '')" = "50022 1 -" ] && ok "SSH: повторный install без смены порта — без окна" \
+	|| fail "SSH: повторный install: $(ssh_case 50022 1 '' '')"
+[ "$(ssh_case 50022 1 '' 50022)" = "50022 1 -" ] && ok "SSH: тот же порт явно — без окна" \
+	|| fail "SSH: тот же порт: $(ssh_case 50022 1 '' 50022)"
+# Прерванная смена: в pipe.env уже новый порт, не подтверждён, запасной — прежний.
+[ "$(ssh_case 51022 0 50022 '')" = "51022 0 50022" ] && ok "SSH: прерванная смена порта — окно с прежним запасным" \
+	|| fail "SSH: прерванная смена: $(ssh_case 51022 0 50022 '')"
+read -r p c f <<< "$(ssh_case '' 0 '' '')"
+[ "$p" -ge 40000 ] && [ "$p" -le 59999 ] && [ "$c" = 0 ] && [ "$f" = - ] && ok "SSH: первая установка — случайный порт, запасной 22" \
+	|| fail "SSH: первая установка: $p $c $f"
+SSH_PORT=51022 SSH_CONFIRMED=0 SSH_FALLBACK=50022; save_state
+( unset SSH_FALLBACK; load_state; [ "$SSH_FALLBACK" = 50022 ] ) && ok "pipe.env хранит запасной порт SSH" || fail "pipe.env: SSH_FALLBACK"
+unset OPT_SSH_PORT
+
 echo
 [ "$FAILS" -eq 0 ] && echo "ALL OK" || echo "$FAILS FAILED"
 exit "$FAILS"

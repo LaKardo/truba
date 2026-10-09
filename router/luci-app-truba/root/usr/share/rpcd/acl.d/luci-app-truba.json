@@ -3,14 +3,14 @@
 		"description": "Grant access to Truba",
 		"read": {
 			"ubus": {
-				"truba": [ "status", "lists", "categories", "sets", "check", "nat_test", "tunnel_test", "log" ],
+				"truba": [ "status", "lists", "categories", "sets", "check", "nat_result", "tunnel_result", "log" ],
 				"luci-rpc": [ "getDHCPLeases", "getHostHints" ]
 			},
 			"uci": [ "truba", "network", "firewall", "dhcp", "upnpd" ]
 		},
 		"write": {
 			"ubus": {
-				"truba": [ "update_lists", "rollback_lists" ]
+				"truba": [ "update_lists", "rollback_lists", "nat_test", "tunnel_test" ]
 			},
 			"uci": [ "truba", "network", "firewall", "upnpd" ]
 		}

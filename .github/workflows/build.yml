@@ -75,9 +75,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - id: v
+        # Ввод — через окружение, а не подстановкой в текст скрипта: так он остаётся данными.
+        env:
+          VERSIONS: ${{ inputs.versions }}
         run: |
           set -euo pipefail
-          list="${{ inputs.versions }}"
+          list="$VERSIONS"
           [ -n "$list" ] || list=$(grep -E '^[0-9]' router/VERSIONS | paste -sd, -)
           echo "versions=$(echo "$list" | tr -d ' ' | jq -R -c 'split(",") | map(select(length > 0))')" >> "$GITHUB_OUTPUT"
 

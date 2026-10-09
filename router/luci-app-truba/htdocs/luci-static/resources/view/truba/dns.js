@@ -13,6 +13,19 @@ const NBSP = common.NBSP;
 // Версии меняются раз в сутки: опрос раз в 30 с, а пока идёт обновление — раз в 5 с.
 const SLOW_POLL = 30000;
 
+// Адрес DNS-сервера в том виде, что понимает mosdns 5 (та же проверка — upstream_ok в conf.uc):
+// с опечаткой в схеме mosdns не запустился бы, а с ним пропал бы DNS всей сети.
+const UPSTREAM_RE = /^(([a-z0-9+]+):\/\/)?(\[[0-9a-fA-F:.]+\]|[^\]\[\s\/@:]+)(:\d+)?(\/[^\s@]*)?(@[0-9.]+)?$/;
+const UPSTREAM_SCHEMES = [ 'udp', 'tcp', 'tcp+pipeline', 'tls', 'tls+pipeline', 'https', 'h3', 'quic', 'doq' ];
+
+function validateUpstream(sid, v) {
+	if (!v)
+		return true;
+	const m = UPSTREAM_RE.exec(v);
+	const ok = m && (m[2] == null ? m[5] == null : UPSTREAM_SCHEMES.indexOf(m[2]) >= 0);
+	return ok ? true : _('Expected https://…, tls://…, quic://…, h3://…, tcp://… or udp://… (optionally «@IP»)');
+}
+
 // ---- Состояние DNS: mosdns и кэш ----
 
 function buildDnsState() {
@@ -139,10 +152,12 @@ return view.extend({
 		let o = s.taboption('general', form.DynamicList, 'tunnel_upstream', _('For «Tunnel»'),
 			_('Used for categories with action Tunnel and, in mode «All via tunnel», for everything else. Requests go through the tunnel. Formats: https://…, tls://…, udp://…; «address@IP» sets the IP to connect to.'));
 		o.default = [ 'https://1.1.1.1/dns-query', 'https://8.8.8.8/dns-query' ];
+		o.validate = validateUpstream;
 
 		o = s.taboption('general', form.DynamicList, 'direct_upstream', _('For «Direct»'),
 			_('Used for categories with action Direct, for the router\'s own hosts (NTP, list mirrors) and, in mode «Selective», for everything else.'));
 		o.default = [ 'tls://common.dot.dns.yandex.net@77.88.8.8', 'tls://common.dot.dns.yandex.net@77.88.8.1' ];
+		o.validate = validateUpstream;
 
 		// Перехват хранится в секции main, но по смыслу — здесь.
 		o = s.taboption('general', form.Flag, 'dns_hijack', _('Intercept DNS (port 53)'),

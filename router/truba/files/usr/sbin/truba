@@ -2,10 +2,12 @@
 // Труба: командная строка. Вызывается init-скриптом, hotplug, cron и rpcd.
 'use strict';
 
-import * as K from 'truba.core';
-import * as CHK from 'truba.check';
-import * as NAT from 'truba.nattest';
-import * as WD from 'truba.watchdog';
+// Модули загружаются по требованию: status опрашивается раз в 5 с, и разбирать ради него
+// распаковщик, генератор правил и watchdog незачем. require() модули с export не загружает,
+// а импорт внутри loadstring — загружает.
+function load(name) {
+	return loadstring(sprintf("import * as M from 'truba.%s'; return M;", name))();
+}
 
 const cmd = ARGV[0];
 const args = slice(ARGV, 1);
@@ -37,66 +39,66 @@ function usage() {
 
 switch (cmd) {
 case 'apply':
-	let r = K.apply();
+	let r = load('core').apply();
 	out(r);
 	exit(r.error ? 1 : 0);
 
 case 'teardown':
-	K.teardown();
+	load('core').teardown();
 	break;
 
 case 'routes':
-	print(K.routes(), '\n');
+	print(load('core').routes(), '\n');
 	break;
 
 case 'refresh-bypass':
-	K.refresh_bypass();
+	load('core').refresh_bypass();
 	break;
 
 case 'update-lists':
-	out(K.update_lists(args[0] == '-f'));
+	out(load('core').update_lists(args[0] == '-f'));
 	break;
 
 case 'rollback-lists':
-	out(K.rollback_lists());
+	out(load('core').rollback_lists());
 	break;
 
 case 'check':
 	if (!args[0])
 		usage();
-	out(CHK.check(args[0], args[1]));
+	out(load('check').check(args[0], args[1]));
 	break;
 
 case 'status':
-	out(K.status());
+	out(load('state').status());
 	break;
 
 case 'lists':
-	out(K.lists());
+	out(load('state').lists());
 	break;
 
 case 'categories':
-	out(K.categories());
+	out(load('core').categories());
 	break;
 
 case 'sets':
-	out(K.sets());
+	out(load('state').sets());
 	break;
 
 case 'reset-rules':
-	out(K.reset_rules(args[0]));
+	out(load('core').reset_rules(args[0]));
 	break;
 
 case 'nat-test':
-	out(NAT.run(args[0] == 'auto'));
+	out(load('nattest').run(args[0] == 'auto'));
 	break;
 
 case 'tunnel-test':
-	out(WD.tunnel_test());
+	out(load('watchdog').tunnel_test());
 	break;
 
 case 'watchdog':
-	WD.run();
+	load('watchdog').run();
 	break;
 
 default:

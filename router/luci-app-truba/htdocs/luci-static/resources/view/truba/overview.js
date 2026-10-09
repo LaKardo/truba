@@ -155,19 +155,32 @@ function listsStale(st) {
 		&& (!last || Date.now() / 1000 - last.time > 36 * 3600);
 }
 
+// Что действует, если применить настройки не удалось (applied.fallback, ADR 0006).
+function fallbackText(a) {
+	switch (a.fallback) {
+	case 'kept': return _('The rules loaded before the error stay in effect.');
+	case 'last_good': return _('The last working rules from %s are in effect.').format(common.fmtTime(a.good_time));
+	case 'none': return _('No Truba rules are in effect: traffic and DNS go direct.');
+	default: return '';
+	}
+}
+
 // Предупреждения: текст и вкладка, где его исправляют. Ошибки «Туннель не настроен»
 // и «не работает» видны по плитке Туннеля и сюда не попадают.
 function warnings(st) {
 	const a = st.applied || {}, nb = st.neighbours || {}, up = st.upnp || {}, big = st.health?.big;
 	const res = [];
 	const add = (text, tab) => res.push({ text, tab });
-	const W_TABS = { lists_missing: 'dns', zones_without_devices: 'routing', tunnel_not_configured: 'tunnel' };
+	const W_TABS = { lists_missing: 'dns', zones_without_devices: 'routing', tunnel_not_configured: 'tunnel', lists_rolled_back: 'dns' };
 	for (let w of (a.warnings || []))
 		add(common.WARNING_LABELS[w] || w, W_TABS[w]);
 	if ((a.missing || []).length)
 		add(common.missingText(a.missing), 'routing');
+	if ((a.invalid || []).length)
+		add(_('Invalid settings were skipped, defaults are used instead: %s').format(
+			a.invalid.map((x) => '%s = «%s»'.format(x.key, x.value)).join(', ')), common.invalidTab(a.invalid));
 	if (a.error)
-		add(_('Error while applying rules: %s').format(a.error), 'diagnostics');
+		add([ _('Error while applying rules: %s').format(a.error), fallbackText(a) ].filter((x) => x).join(' '), 'diagnostics');
 	if (nb.offload)
 		res.push({ text: _('Software flow offloading is on: packets of offloaded connections bypass the Truba counters, so device traffic is undercounted.'),
 			href: L.url('admin/network/firewall'), label: _('Firewall') });

@@ -1,7 +1,7 @@
 // rpcd: ubus-объект `truba` для интерфейса LuCI. Логика — в /usr/sbin/truba.
 'use strict';
 
-import { popen } from 'fs';
+import { popen, readfile } from 'fs';
 
 function shq(s) {
 	return "'" + replace('' + s, "'", "'\\''") + "'";
@@ -18,6 +18,24 @@ function truba(args) {
 	}
 	catch (e) {
 		return { error: 'parse', output: out };
+	}
+}
+
+// Проверки NAT и Туннеля идут секунды, а rpcd обслуживает вызовы по одному: пока он ждёт
+// проверку, стоит весь LuCI. Поэтому проверка запускается в фоне, а итог интерфейс забирает
+// отдельным вызовом, когда в нём появится время не раньше started.
+function background(args) {
+	system('( /usr/sbin/truba ' + args + ' >/dev/null 2>&1 & )');
+	return { started: time() };
+}
+
+// Итог из файла — без запуска процессов; {} — итога ещё нет.
+function result(path) {
+	try {
+		return json(readfile(path) ?? '{}') ?? {};
+	}
+	catch (e) {
+		return {};
 	}
 }
 
@@ -62,13 +80,25 @@ const methods = {
 
 	nat_test: {
 		call: function() {
-			return truba('nat-test');
+			return background('nat-test');
+		}
+	},
+
+	nat_result: {
+		call: function() {
+			return result('/var/run/truba/nat.json');
 		}
 	},
 
 	tunnel_test: {
 		call: function() {
-			return truba('tunnel-test');
+			return background('tunnel-test');
+		}
+	},
+
+	tunnel_result: {
+		call: function() {
+			return result('/var/run/truba/tunnel-test.json');
 		}
 	},
 

@@ -102,6 +102,7 @@ save_state() {
 		HPK='${HPK:-}'
 		RANDOM_TRAILERS='${RANDOM_TRAILERS:-0}'
 		SSH_CONFIRMED='${SSH_CONFIRMED:-0}'
+		SSH_FALLBACK='${SSH_FALLBACK:-}'
 	EOF
 }
 
@@ -454,6 +455,7 @@ confirm_ssh() {
 		warn "проверка нового порта SSH пропущена (--no-confirm)"
 		return 0
 	fi
+	[ -n "${SSH_FALLBACK:-}" ] && echo "  Прежний порт $SSH_FALLBACK работает, пока вы не подтвердите новый."
 	[ -r /dev/tty ] || die "нужен интерактивный терминал для проверки нового порта SSH (или --no-confirm)"
 	echo
 	echo "  Откройте НОВОЕ окно терминала и войдите по новому порту:"
@@ -469,6 +471,18 @@ confirm_ssh() {
 }
 
 rollback_ssh() {
+	if [ -n "${SSH_FALLBACK:-}" ]; then
+		# Смена порта у работающей Трубы: SSH и правила возвращаются к прежнему порту.
+		warn "откат: SSH остаётся на прежнем порту $SSH_FALLBACK"
+		SSH_PORT=$SSH_FALLBACK
+		SSH_FALLBACK=''
+		SSH_CONFIRMED=1
+		save_state
+		ssh_apply "$SSH_PORT"
+		write_nft
+		nft -f "$NFT_FILE"
+		exit 1
+	fi
 	warn "откат: SSH возвращается на 22, правила Трубы сняты"
 	rm -f "$SSHD_DROPIN"
 	systemctl daemon-reload
@@ -501,6 +515,22 @@ setup_unattended() {
 
 # ---------- команды ----------
 
+# Порт SSH этого запуска: --ssh-port, сохранённый или новый случайный. Новый порт ещё никто
+# не проверял, поэтому, даже если прежний был подтверждён, переход снова идёт через окно
+# «прежний + новый» с подтверждением, а прежний порт (SSH_FALLBACK) остаётся для отката.
+# Без этого sshd сразу слушал бы только новый порт, а прежний ушёл бы на Роутер: закрытый
+# у провайдера новый порт оставил бы VPS без входа.
+choose_ssh_port() {
+	local saved=${SSH_PORT:-}
+	SSH_PORT=${OPT_SSH_PORT:-$saved}
+	[ -n "$SSH_PORT" ] || SSH_PORT=$(pick_port)
+	if [ -n "$saved" ] && [ "$SSH_PORT" != "$saved" ] && [ "${SSH_CONFIRMED:-0}" = 1 ]; then
+		SSH_CONFIRMED=0
+		SSH_FALLBACK=$saved
+	fi
+	return 0
+}
+
 cmd_install() {
 	load_state
 	preflight          # WAN_IF и PUB_IP — всегда свежие, остальное из состояния
@@ -513,8 +543,7 @@ cmd_install() {
 		warn "модуль поддерживает AWG 3.1 (защита заголовков): включится после rotate-keys, затем импортируйте router.conf заново"
 	fi
 
-	SSH_PORT=${OPT_SSH_PORT:-${SSH_PORT:-}}
-	[ -n "$SSH_PORT" ] || SSH_PORT=$(pick_port)
+	choose_ssh_port
 	AWG_PORT=${OPT_AWG_PORT:-${AWG_PORT:-}}
 	[ -n "$AWG_PORT" ] || AWG_PORT=$(pick_port "$SSH_PORT")
 	[ "$SSH_PORT" != "$AWG_PORT" ] || die "порты SSH и Туннеля совпадают"
@@ -533,13 +562,16 @@ cmd_install() {
 	write_router_conf
 
 	if [ "${SSH_CONFIRMED:-0}" != 1 ]; then
-		say "SSH: временно слушает 22 и $SSH_PORT"
-		ssh_apply 22 "$SSH_PORT"
-		write_nft 22
+		# Запасной порт на время проверки: при первой установке — 22, при смене — прежний.
+		local keep=${SSH_FALLBACK:-22}
+		say "SSH: временно слушает $keep и $SSH_PORT"
+		ssh_apply "$keep" "$SSH_PORT"
+		write_nft "$keep"
 		nft -f "$NFT_FILE"
 		write_pipe_unit
 		confirm_ssh || rollback_ssh
 		SSH_CONFIRMED=1
+		SSH_FALLBACK=''
 		save_state
 	fi
 

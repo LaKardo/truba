@@ -133,6 +133,9 @@ export function parse_geoip(path) {
 				});
 				if (ip == null || prefix == null)
 					die('geoip: повреждённая запись CIDR');
+				// Префикс длиннее адреса nftables не примет — не загрузилась бы вся таблица.
+				if (prefix > ((length(ip) == 4) ? 32 : 128))
+					die(sprintf('geoip: префикс /%d в категории %s', prefix, cat.tag));
 				if (length(ip) == 4) {
 					push(cat.v4, sprintf('%d.%d.%d.%d/%d',
 						ord(ip, 0), ord(ip, 1), ord(ip, 2), ord(ip, 3), prefix));
@@ -154,6 +157,19 @@ export function parse_geoip(path) {
 		push(cats, cat);
 	});
 	return cats;
+};
+
+// Разбирается ли скачанный Набор правил: null — да, иначе причина. Контрольная сумма
+// подтверждает только, что файл скачан целиком; файл, который распаковщик не разбирает
+// (повреждён у источника, новый формат), ломал бы каждое применение настроек.
+export function validate(set, path) {
+	try {
+		let cats = (set == 'geosite') ? parse_geosite(path) : parse_geoip(path);
+		return length(cats) ? null : 'нет ни одной категории';
+	}
+	catch (e) {
+		return U.errmsg(e);
+	}
 };
 
 // Имя файла из тега: только безопасные символы.
@@ -237,8 +253,9 @@ export function geoip_cidrs(tag) {
 	return filter(split(s, '\n'), l => l != '');
 };
 
-export function geosite_file(tag) {
-	return C.DATA_DIR + '/geosite/' + fname(tag) + '.txt';
+// dir — другой каталог списков (последняя удачная копия, ADR 0006).
+export function geosite_file(tag, dir) {
+	return (dir ?? C.DATA_DIR + '/geosite') + '/' + fname(tag) + '.txt';
 };
 
 export function geosite_entries(tag) {
@@ -248,21 +265,59 @@ export function geosite_entries(tag) {
 	return filter(split(s, '\n'), l => l != '');
 };
 
-// Распаковать, только если изменились хеши исходных файлов.
+// Отпечаток файлов без чтения: inode, размер, время. Списки меняются только переносом
+// (update-lists, откат) — у нового файла другой inode.
+function file_sig(paths) {
+	return sprintf('%J', map(paths, (p) => {
+		let s = stat(p);
+		return s ? [ s.inode, s.size, s.mtime ] : null;
+	}));
+}
+
+// Распаковать, только если изменились исходные файлы. apply вызывает это на каждое
+// применение (и на каждый подъём Туннеля): пока файлы те же, их хеши не пересчитываются.
 export function ensure() {
 	let gi = C.LISTS_DIR + '/' + C.DAT_FILES.geoip;
 	let gs = C.LISTS_DIR + '/' + C.DAT_FILES.geosite;
 	if (!stat(gi) && !stat(gs))
 		return { cats: [], hash: null };
 
-	let hash = (U.sha256_file(gi) ?? '-') + ':' + (U.sha256_file(gs) ?? '-');
 	let prev = U.read_json(C.CATS_FILE, null);
-	if (prev && prev.hash == hash && stat(C.DATA_DIR + '/geosite') && stat(C.DATA_DIR + '/geoip'))
+	let unpacked = prev && stat(C.DATA_DIR + '/geosite') && stat(C.DATA_DIR + '/geoip');
+	let sig = file_sig([ gi, gs ]);
+	if (unpacked && prev.sig == sig)
 		return prev;
 
+	let hash = (U.sha256_file(gi) ?? '-') + ':' + (U.sha256_file(gs) ?? '-');
+	if (unpacked && prev.hash == hash) {
+		prev.sig = sig;
+		U.write_json(C.CATS_FILE, prev);
+		return prev;
+	}
+
 	let cats = unpack(gi, gs);
-	let res = { hash, cats, unpacked: time() };
+	let res = { hash, sig, cats, unpacked: time() };
 	U.mkdirp(C.DATA_DIR);
 	U.write_json(C.CATS_FILE, res);
 	return res;
+};
+
+// Перечень Категорий для интерфейса и «Проверить домен/IP». Распаковывает сам, только если
+// apply не занят тем же (после загрузки он распаковывает списки и пишет те же файлы):
+// тогда null — «списки распаковываются». Нечитаемые списки — пустой перечень с причиной.
+export function cached() {
+	let dat = U.read_json(C.CATS_FILE, null);
+	if (dat)
+		return dat;
+	let lk = U.lock(C.LOCK_APPLY, true);
+	if (!lk)
+		return null;
+	try {
+		dat = ensure();
+	}
+	catch (e) {
+		dat = { cats: [], hash: null, error: U.errmsg(e) };
+	}
+	lk.close();
+	return dat;
 };

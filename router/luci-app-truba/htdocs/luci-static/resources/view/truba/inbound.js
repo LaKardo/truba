@@ -86,7 +86,7 @@ function paintNat(x, n, wdOn) {
 function runNat(x) {
 	x.busy = true;
 	setState(x.state, '', _('Testing…'));
-	return common.callNatTest()
+	return common.runNatTest()
 		.then((n) => paintNat(x, n, true))
 		.catch((e) => paintNat(x, { time: Date.now() / 1000, error: e.message }, true))
 		.finally(() => { x.busy = false; });

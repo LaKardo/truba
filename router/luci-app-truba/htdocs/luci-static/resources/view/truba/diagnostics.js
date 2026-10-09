@@ -52,7 +52,13 @@ function showLog(box, lines, f) {
 const TT_ERRORS = {
 	not_configured: common.NAT_ERRORS.not_configured,
 	tunnel_down: common.NAT_ERRORS.tunnel_down,
+	timeout: common.NAT_ERRORS.timeout,
 	no_target: _('no address to ping')
+};
+
+// Почему «Проверить домен/IP» не дала результата.
+const CHECK_ERRORS = {
+	busy: _('the rule sets are being unpacked, try again in a minute')
 };
 
 function renderTunnelTest(r) {
@@ -79,7 +85,7 @@ function renderTunnelTest(r) {
 
 function renderCheck(r) {
 	if (!r || r.error || !r.action)
-		return E('p', {}, _('Error: %s').format((r && r.error) || 'no answer'));
+		return E('p', {}, _('Error: %s').format(CHECK_ERRORS[r?.error] || r?.error || 'no answer'));
 
 	const parts = [
 		E('p', { 'class': 'truba-target' }, [ E('strong', {}, r.target), ' → ', actionBadge(r.action) ]),
@@ -150,7 +156,7 @@ return view.extend({
 
 		const runTunnelTest = () => {
 			ttOut.replaceChildren(common.busy(_('Checking… about 5 seconds')));
-			return common.callTunnelTest()
+			return common.runTunnelTest()
 				.then((r) => ttOut.replaceChildren(renderTunnelTest(r)))
 				.catch((e) => ttOut.replaceChildren(renderTunnelTest({ error: e.message })));
 		};

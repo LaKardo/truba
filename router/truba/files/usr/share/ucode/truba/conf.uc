@@ -11,10 +11,62 @@ const DEFAULT_TUNNEL_DNS = [ 'https://1.1.1.1/dns-query', 'https://8.8.8.8/dns-q
 // соединения не оставляет запросы без ответа (на живом роутере DoH 77.88.8.8 изредка рвался).
 const DEFAULT_DIRECT_DNS = [ 'tls://common.dot.dns.yandex.net@77.88.8.8', 'tls://common.dot.dns.yandex.net@77.88.8.1' ];
 
+const MAC_RE = /^([0-9a-f]{2}:){5}[0-9a-f]{2}$/;
+
+// Схемы адресов, которые понимает mosdns 5; без схемы — udp. Адрес с опечаткой в схеме
+// останавливает mosdns целиком, а с ним DNS всей сети, поэтому в его конфиг он не попадает.
+const UPSTREAM_SCHEMES = [ 'udp', 'tcp', 'tcp+pipeline', 'tls', 'tls+pipeline', 'https', 'h3', 'quic', 'doq' ];
+
+// «[схема://]хост[:порт][/путь][@IP]»; путь — только со схемой. Та же проверка — в dns.js.
+// Регулярные выражения ucode — POSIX: внутри [...] нет \s, только [:space:].
+const UPSTREAM_RE = regexp('^(([a-z0-9+]+)://)?(\\[[0-9a-fA-F:.]+\\]|[^][[:space:]/@:]+)(:[0-9]+)?(/[^[:space:]@]*)?(@[0-9.]+)?$');
+
+export function upstream_ok(u) {
+	let m = (type(u) == 'string') ? match(u, UPSTREAM_RE) : null;
+	if (!m)
+		return false;
+	return (m[2] == null) ? (m[5] == null) : (m[2] in UPSTREAM_SCHEMES);
+};
+
 function bool(v, dflt) {
 	if (v == null)
 		return dflt;
 	return (v == '1' || v == 'true' || v == 'on' || v == 'yes');
+}
+
+// Одно неверное значение в UCI (опечатка в консоли, старый конфиг) не должно ломать
+// применение целиком: оно пропускается, вместо него — значение по умолчанию, а «Обзор»
+// показывает, что пропущено (bad → applied.invalid).
+
+// Целое в пределах [lo, hi] — те же пределы, что у полей LuCI.
+function num(bad, key, v, dflt, lo, hi) {
+	if (v == null || v == '')
+		return dflt;
+	let n = (type(v) == 'string' && match(v, /^[0-9]+$/)) ? int(v) : null;
+	if (n == null || n < lo || n > hi) {
+		push(bad, { key, value: '' + v });
+		return dflt;
+	}
+	return n;
+}
+
+// Список DNS-серверов без неверных адресов; если не осталось ни одного — по умолчанию.
+function upstreams(bad, key, v, dflt) {
+	let all = U.to_list(v);
+	let good = filter(all, upstream_ok);
+	for (let u in all)
+		if (!upstream_ok(u))
+			push(bad, { key, value: '' + u });
+	return length(good) ? good : dflt;
+}
+
+function pattern(bad, key, v, dflt, re) {
+	if (v == null || v == '')
+		return dflt;
+	if (type(v) == 'string' && match(v, re))
+		return v;
+	push(bad, { key, value: '' + v });
+	return dflt;
 }
 
 export function load() {
@@ -25,12 +77,22 @@ export function load() {
 	let d = c.get_all('truba', 'dns') ?? {};
 	let l = c.get_all('truba', 'lists') ?? {};
 	let w = c.get_all('truba', 'watchdog') ?? {};
+	let bad = [];
+
+	// Неверный адрес для ping — Туннель «не отвечает» навсегда, и при Аварийной блокировке
+	// весь трафик «Туннеля» отбрасывается.
+	let probe = w.probe ?? '';
+	if (probe != '' && !U.is_ipv4(probe)) {
+		push(bad, { key: 'watchdog.probe', value: '' + probe });
+		probe = '';
+	}
 
 	let cfg = {
 		routing: bool(m.routing, true),
 		mode: (m.mode == 'selective') ? 'selective' : 'all',
 		killswitch: bool(m.killswitch, true),
-		iface: m.iface ?? 'awg0',
+		// Имя интерфейса попадает в правила nftables и в имена объектов ubus.
+		iface: pattern(bad, 'main.iface', m.iface, 'awg0', /^[A-Za-z0-9_]{1,15}$/),
 		zones: length(U.to_list(m.zone)) ? U.to_list(m.zone) : [ 'lan' ],
 		dns_hijack: bool(m.dns_hijack, true),
 		upnp: bool(m.upnp, false),
@@ -39,29 +101,31 @@ export function load() {
 		rules: [],
 		devices: [],
 		dns: {
-			tunnel: length(U.to_list(d.tunnel_upstream)) ? U.to_list(d.tunnel_upstream) : DEFAULT_TUNNEL_DNS,
-			direct: length(U.to_list(d.direct_upstream)) ? U.to_list(d.direct_upstream) : DEFAULT_DIRECT_DNS,
-			port: int(d.port ?? 5335),
-			ttl_max: int(d.ttl_max ?? 300),
-			cache_size: int(d.cache_size ?? 65536),
-			lazy_cache_ttl: int(d.lazy_cache_ttl ?? 86400),
+			tunnel: upstreams(bad, 'dns.tunnel_upstream', d.tunnel_upstream, DEFAULT_TUNNEL_DNS),
+			direct: upstreams(bad, 'dns.direct_upstream', d.direct_upstream, DEFAULT_DIRECT_DNS),
+			port: num(bad, 'dns.port', d.port, 5335, 1, 65535),
+			ttl_max: num(bad, 'dns.ttl_max', d.ttl_max, 300, 30, 86400),
+			cache_size: num(bad, 'dns.cache_size', d.cache_size, 65536, 1024, 1048576),
+			lazy_cache_ttl: num(bad, 'dns.lazy_cache_ttl', d.lazy_cache_ttl, 86400, 0, 604800),
 		},
 		lists: {
 			geoip_url: l.geoip_url ?? 'https://raw.githubusercontent.com/kirilllavrov/geoip-builder/release/geoip.dat',
 			geoip_mirror: l.geoip_mirror ?? 'https://cdn.jsdelivr.net/gh/kirilllavrov/geoip-builder@release/geoip.dat',
 			geosite_url: l.geosite_url ?? 'https://raw.githubusercontent.com/kirilllavrov/geosite-builder/release/geosite.dat',
 			geosite_mirror: l.geosite_mirror ?? 'https://cdn.jsdelivr.net/gh/kirilllavrov/geosite-builder@release/geosite.dat',
-			update_utc: l.update_utc ?? '12:00',
+			update_utc: pattern(bad, 'lists.update_utc', l.update_utc, '12:00', /^([01]?[0-9]|2[0-3]):[0-5][0-9]$/),
 			via_tunnel: bool(l.via_tunnel, true),
 			auto_update: bool(l.auto_update, true),
 		},
 		watchdog: {
 			enabled: bool(w.enabled, true),
-			interval: int(w.interval ?? 30),
-			handshake_max: int(w.handshake_max ?? 180),
-			fails: int(w.fails ?? 3),
-			probe: w.probe ?? '',
+			// Интервал 0 — цикл без пауз, 0 неудач — деление на ноль в счёте перезапусков.
+			interval: num(bad, 'watchdog.interval', w.interval, 30, 10, 600),
+			handshake_max: num(bad, 'watchdog.handshake_max', w.handshake_max, 180, 60, 3600),
+			fails: num(bad, 'watchdog.fails', w.fails, 3, 1, 20),
+			probe,
 		},
+		invalid: bad,
 	};
 	// HTTP API mosdns (счётчики кэша для «Обзора») — на соседнем с DNS порту, только 127.0.0.1.
 	let p = cfg.dns.port;
@@ -85,14 +149,20 @@ export function load() {
 			return;
 		if (s.enabled == '0')
 			return;
-		push(cfg.devices, { name: s.name ?? '', mac: lc(s.mac), policy });
+		// MAC попадает в набор nftables: с опечаткой не загрузилась бы вся таблица.
+		let mac = (type(s.mac) == 'string') ? lc(s.mac) : '';
+		if (!match(mac, MAC_RE)) {
+			push(bad, { key: 'device.mac', value: '' + s.mac });
+			return;
+		}
+		push(cfg.devices, { name: s.name ?? '', mac, policy });
 	});
 
 	return cfg;
 };
 
 // Сведения о Туннеле из конфигурации network: адрес, адрес Трубы внутри, endpoint.
-export function tunnel_info(iface) {
+export function tunnel_info(iface, ub) {
 	let c = cursor();
 	c.load('network');
 	let ifc = c.get_all('network', iface);
@@ -105,10 +175,7 @@ export function tunnel_info(iface) {
 	let addr = null;
 
 	// Предпочтительно — фактический адрес поднятого интерфейса.
-	let ub = connect();
-	let st = ub ? ub.call('network.interface.' + iface, 'status', {}) : null;
-	if (ub)
-		ub.disconnect();
+	let st = U.ubus_call(ub, 'network.interface.' + iface, 'status');
 	let a4 = st?.['ipv4-address']?.[0];
 	if (a4?.address)
 		addr = a4.address + '/' + (a4.mask ?? 32);
@@ -139,7 +206,8 @@ export function tunnel_info(iface) {
 				res.peer = U.int2ip(me == first ? second : first);
 			}
 			else {
-				res.peer = U.int2ip(r[0] + 1);
+				// Первый хост подсети, а если первый — сам Роутер, то второй: иначе watchdog пинговал бы себя.
+				res.peer = U.int2ip((me == r[0] + 1) ? r[0] + 2 : r[0] + 1);
 			}
 		}
 	}
@@ -171,7 +239,7 @@ export function vps_ip(tinfo) {
 };
 
 // Устройства (l3) сетей, входящих в выбранные зоны межсетевого экрана.
-export function zone_devices(zones) {
+export function zone_devices(zones, ub) {
 	let c = cursor();
 	c.load('firewall');
 	let nets = [], devs = [];
@@ -184,15 +252,14 @@ export function zone_devices(zones) {
 			push(devs, d);
 	});
 
-	let ub = connect();
+	let own = (ub == null && length(nets)) ? connect() : null;
 	for (let n in nets) {
-		let st = ub ? ub.call('network.interface.' + n, 'status', {}) : null;
+		let st = (ub ?? own)?.call('network.interface.' + n, 'status', {});
 		let dev = st?.l3_device ?? st?.device;
 		if (dev)
 			push(devs, dev);
 	}
-	if (ub)
-		ub.disconnect();
+	own?.disconnect();
 	return uniq(devs);
 };
 

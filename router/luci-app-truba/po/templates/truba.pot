@@ -66,6 +66,10 @@ msgid "The tunnel is not configured yet — import the configuration on the Tunn
 msgstr ""
 
 #: htdocs/luci-static/resources/truba/common.js
+msgid "The current rule sets could not be read, so the previous ones were restored."
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/common.js
 msgid "the tunnel is not configured"
 msgstr ""
 
@@ -79,6 +83,10 @@ msgstr ""
 
 #: htdocs/luci-static/resources/truba/common.js
 msgid "no STUN server answered"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/common.js
+msgid "no result in time"
 msgstr ""
 
 #: htdocs/luci-static/resources/truba/common.js
@@ -142,6 +150,10 @@ msgid "checksum mismatch"
 msgstr ""
 
 #: htdocs/luci-static/resources/truba/common.js
+msgid "the file cannot be read, the current one is kept"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/common.js
 msgid "updated"
 msgstr ""
 
@@ -199,6 +211,10 @@ msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/diagnostics.js
 msgid "no address to ping"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/diagnostics.js
+msgid "the rule sets are being unpacked, try again in a minute"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/diagnostics.js
@@ -375,6 +391,10 @@ msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/diagnostics.js
 msgid "Refresh"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/dns.js
+msgid "Expected https://…, tls://…, quic://…, h3://…, tcp://… or udp://… (optionally «@IP»)"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/dns.js
@@ -794,6 +814,22 @@ msgid "now"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/overview.js
+msgid "The rules loaded before the error stay in effect."
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/overview.js
+msgid "The last working rules from %s are in effect."
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/overview.js
+msgid "No Truba rules are in effect: traffic and DNS go direct."
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/overview.js
+msgid "Invalid settings were skipped, defaults are used instead: %s"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/overview.js
 msgid "Error while applying rules: %s"
 msgstr ""
 
@@ -1127,6 +1163,10 @@ msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/routing.js
 msgid "By mode = Direct. Only categories with action Tunnel go through the tunnel."
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/routing.js
+msgid "Rule sets are being unpacked — reload the page in a minute."
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/routing.js

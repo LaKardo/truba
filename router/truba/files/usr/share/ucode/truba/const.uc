@@ -27,9 +27,22 @@ export const CATS_FILE   = '/var/lib/truba/categories.json';
 export const HEALTH_FILE = '/var/run/truba/health.json';
 export const APPLIED_FILE = '/var/run/truba/applied.json';
 export const NAT_FILE    = '/var/run/truba/nat.json';
+export const TT_FILE     = '/var/run/truba/tunnel-test.json';
 export const LISTS_STATE = '/etc/truba/state/lists.json';
 export const DNSMASQ_BACKUP = '/etc/truba/state/dnsmasq.json';
 export const UPNP_BACKUP = '/etc/truba/state/upnpd.json';
+
+// Последняя удачная копия правил (ADR 0006) — на флеше: нужна после перезагрузки,
+// когда применить настройки не удалось, а прежних правил в памяти уже нет.
+export const GOOD_DIR     = '/etc/truba/good';
+export const GOOD_NFT     = '/etc/truba/good/truba.nft';
+export const GOOD_MOSDNS  = '/etc/truba/good/mosdns.json';
+export const GOOD_GEOSITE = '/etc/truba/good/geosite';
+export const GOOD_META    = '/etc/truba/good/meta.json';
+
+// Блокировки: применение настроек и Наборы правил.
+export const LOCK_APPLY = 'truba';
+export const LOCK_LISTS = 'truba-lists';
 
 export const DAT_FILES = { geoip: 'geoip.dat', geosite: 'geosite.dat' };
 

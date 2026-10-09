@@ -5,7 +5,8 @@ name: tests
 
 on:
   pull_request:
-    paths: [ 'router/**', 'tests/**', '.github/workflows/tests.yml' ]
+    # vps/** — тоже: tests/run.sh проверяет и install-vps.sh (shellcheck, nft, параметры AWG, SSH).
+    paths: [ 'router/**', 'vps/**', 'tests/**', '.github/workflows/tests.yml' ]
 
 permissions:
   contents: read
