@@ -370,8 +370,8 @@ return view.extend({
 			_('Empty — the Truba address inside the tunnel. An internet address would not answer while the emergency block is active.'));
 		o.datatype = 'ip4addr';
 		o.optional = true;
-		// Что делать, пока Туннель не отвечает, — рядом с тем, как это определяется.
-		// Хранится в секции main, как и раньше.
+		// Что делать, пока Туннель не отвечает, — рядом с тем, как это определяется;
+		// хранится в секции main.
 		o = s.option(form.Flag, 'killswitch', _('Emergency block'),
 			_('While the tunnel is down, traffic with action Tunnel is dropped instead of going direct.'));
 		o.ucisection = 'main';

@@ -58,20 +58,6 @@ fi
 
 uci -q commit firewall
 
-# Прежнее время обновления по умолчанию (04:00 UTC) было раньше выхода новых списков
-# (geoip — около 10–11 UTC, geosite — обычно до 09 UTC): выпуск ждал следующего утра.
-if [ "$(uci -q get truba.lists.update_utc)" = "04:00" ]; then
-	uci -q set truba.lists.update_utc='12:00'
-	uci -q commit truba
-fi
-
-# Прежде для «Напрямую» был один сервер по умолчанию: обрыв его соединения оставлял
-# запросы без ответа. Второй добавляется, только если первый — прежний по умолчанию.
-if [ "$(uci -q get truba.dns.direct_upstream)" = "tls://common.dot.dns.yandex.net@77.88.8.8" ]; then
-	uci -q add_list truba.dns.direct_upstream='tls://common.dot.dns.yandex.net@77.88.8.1'
-	uci -q commit truba
-fi
-
 # Стартовые настройки Категорий — только при первой установке.
 if [ -z "$(uci -q show truba | grep '=rule$')" ]; then
 	/usr/sbin/truba reset-rules all >/dev/null 2>&1

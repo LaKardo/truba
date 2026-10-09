@@ -65,11 +65,10 @@ define Package/truba/install
 endef
 
 # ubus-объект truba — плагин rpcd (ADR 0008). rpcd загружает плагины при запуске,
-# а по HUP перезапускается сам, сохраняя сессии LuCI. Если rpcd не запущен — запустить:
-# иначе после обновления по SSH LuCI не пускает.
+# а по HUP перезапускается сам, сохраняя сессии LuCI.
 define Package/truba/postinst
 #!/bin/sh
-[ -n "$${IPKG_INSTROOT}" ] || killall -HUP rpcd 2>/dev/null || /etc/init.d/rpcd restart
+[ -n "$${IPKG_INSTROOT}" ] || killall -HUP rpcd 2>/dev/null
 exit 0
 endef
 

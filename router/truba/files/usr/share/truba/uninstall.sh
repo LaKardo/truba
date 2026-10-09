@@ -8,7 +8,7 @@ ORIG=/etc/truba/state/firewall.orig
 if [ -f "$ORIG" ]; then
 	while IFS='=' read -r k v; do
 		case "$k" in
-		fullcone|flow_offloading|flow_offloading_hw)
+		fullcone|flow_offloading_hw)
 			if [ -n "$v" ]; then
 				uci -q set "firewall.@defaults[0].$k=$v"
 			else

@@ -1,24 +1,7 @@
 #!/bin/sh
-# Жизненный цикл и отказы: перенос настроек при обновлении пакета (uci-defaults), ошибка
-# применения при работе и при загрузке (ADR 0006), плагин старого интерфейса в rpcd (ADR 0008),
+# Жизненный цикл и отказы: ошибка применения при работе и при загрузке (ADR 0006),
 # переустановка после sysupgrade (ADR 0004).
 . /repo/tests/router/stand.sh
-
-section "обновление пакета: uci-defaults переносит прежние значения по умолчанию"
-DIRECT_DNS="$(uci -q get truba.dns.direct_upstream)"
-direct_dns() { uci -q delete truba.dns.direct_upstream; for u in "$@"; do uci add_list truba.dns.direct_upstream="$u"; done; uci commit truba; }
-uci set truba.lists.update_utc='04:00'
-direct_dns 'tls://common.dot.dns.yandex.net@77.88.8.8'
-sh /etc/uci-defaults/90-truba
-check "время обновления списков: прежнее 04:00 → 12:00 UTC" test "$(uci -q get truba.lists.update_utc)" = 12:00
-check "DNS «Напрямую»: к прежнему серверу добавлен второй" test "$(uci -q get truba.dns.direct_upstream)" = "$DIRECT_DNS"
-sh /etc/uci-defaults/90-truba
-check "повторный запуск ничего не добавляет" test "$(uci -q get truba.dns.direct_upstream)" = "$DIRECT_DNS"
-direct_dns 'https://77.88.8.8/dns-query'
-sh /etc/uci-defaults/90-truba
-check "свой сервер пользователя не трогается" test "$(uci -q get truba.dns.direct_upstream)" = 'https://77.88.8.8/dns-query'
-# shellcheck disable=SC2086
-direct_dns $DIRECT_DNS
 
 section "последняя удачная копия правил (ADR 0006)"
 check "копия на флеше: правила, конфиг mosdns, описание" eval '[ -s /etc/truba/good/truba.nft ] && [ -s /etc/truba/good/mosdns.json ] && [ -s /etc/truba/good/meta.json ]'
@@ -80,21 +63,6 @@ uci set truba.main.mode='all'; uci commit truba
 reload "ошибка устранена"
 check "без ошибки, mosdns работает, копия снова есть" eval 'no_error && wait_for 10 mosdns_up && [ -s /etc/truba/good/meta.json ]'
 mv "$NFT.real" "$NFT"
-
-section "rpcd: плагин старого интерфейса (ADR 0008)"
-# Плагин luci-app-truba до 1.0.0-r14 регистрировал тот же объект. Два плагина одного объекта
-# rpcd не переносит: портит память и падает на HUP. На x86 это не проявляется, поэтому
-# проверяется, что второй регистрации нет вовсе.
-RP="$(pidof rpcd)"
-echo "return { truba: { old_plugin: { call: function() { return { old: true }; } } } };" > /usr/share/rpcd/ucode/truba.uc
-chmod 0644 /usr/share/rpcd/ucode/truba.uc
-killall -HUP rpcd
-old_owner() { [ "$(ubus call truba old_plugin | jsonfilter -e '@.old')" = true ]; }
-check "объект — за старым плагином" wait_for 10 old_owner
-check "truba-api.uc при нём не регистрирует ничего, rpcd пережил HUP" eval '! ubus -v list truba | grep -q "\"status\"" && [ "$(pidof rpcd)" = "$RP" ]'
-rm /usr/share/rpcd/ucode/truba.uc
-killall -HUP rpcd
-check "без старого плагина объект снова у truba-api.uc" wait_for 10 ubus call truba lists
 
 section "sysupgrade: reinstall.sh возвращает DNS сети до ожидания интернета (ADR 0004)"
 # После sysupgrade /etc/config/dhcp и бэкап Трубы (/etc/truba в keep.d) на месте, а пакетов нет:

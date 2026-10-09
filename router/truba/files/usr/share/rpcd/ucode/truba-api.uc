@@ -1,13 +1,8 @@
 // rpcd: ubus-объект `truba` — API службы для LuCI и скриптов (ubus call truba status).
 // Логика — в /usr/sbin/truba; плагин — в пакете truba, чтобы API менялся вместе с ней (ADR 0008).
-// Имя файла — не truba.uc: так он назывался в luci-app-truba до 1.0.0-r14, и apk не дал бы двум пакетам
-// один путь. Пока старый плагин стоит, объект остаётся за ним (конец файла, ADR 0008).
 'use strict';
 
-import { access, popen, readfile } from 'fs';
-
-// Плагин luci-app-truba до 1.0.0-r14.
-const OLD_PLUGIN = '/usr/share/rpcd/ucode/truba.uc';
+import { popen, readfile } from 'fs';
 
 function shq(s) {
 	return "'" + replace('' + s, "'", "'\\''") + "'";
@@ -154,12 +149,5 @@ const methods = {
 	},
 };
 
-// Два плагина с одним объектом rpcd не переносит: неудавшуюся регистрацию он освобождает, но
-// оставляет в своём списке, и следующий плагин пишет в освобождённую память. rpcd падает —
-// на Роутере это было на HUP из postinst, и LuCI не пускал. Порядок плагинов — как отдаёт
-// readdir, поэтому пока стоит старый luci-app-truba, этот плагин не регистрирует ничего:
-// объект — за старым. Обновление интерфейса удаляет его файл, и HUP отдаёт объект сюда.
-if (access(OLD_PLUGIN))
-	return {};
-
+// Объект truba регистрирует только этот плагин: второй плагин того же объекта роняет rpcd (ADR 0008).
 return { truba: methods };
