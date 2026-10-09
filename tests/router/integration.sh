@@ -593,6 +593,29 @@ else
 	check "gs_direct4 сохранён при перезагрузке правил" sh -c "nft list set inet truba gs_direct4 | grep -q 198.51.100.7"
 fi
 
+echo "== IP из DNS в наборах — со сроком (ADR 0007)"
+# Адрес CDN, которым домен больше не пользуется, не должен направлять трафик неделями,
+# до следующей смены правил или списков.
+# left_le IP N — элементу IP в gs_direct4 осталось не больше N с.
+left_le() { L="$(nft -j list set inet truba gs_direct4 | jsonfilter -e "@.nftables[*].set.elem[@.elem.val='$1'].elem.expires")"; [ -n "$L" ] && [ "$L" -le "$2" ]; }
+check "gs_direct4: срок по умолчанию — сутки" sh -c "nft list set inet truba gs_direct4 | grep -q 'timeout 1d'"
+check "IP, положенный mosdns, получает срок набора" sh -c "nft list set inet truba gs_direct4 | grep -q '192.0.2.77 expires'"
+nft add element inet truba gs_direct4 '{ 198.51.100.9 expires 90s }'
+check "reload (не дольше 90 с)" bounded 90 /etc/init.d/truba reload; sleep 3
+check "перенос в новую таблицу не продлевает срок" left_le 198.51.100.9 90
+# Срок короче оставшегося у перенесённых — ядро не приняло бы элемент длиннее срока набора.
+nft add element inet truba gs_direct4 '{ 198.51.100.10 expires 80000s }'
+uci set truba.dns.set_timeout=3600; uci commit truba
+check "reload (не дольше 90 с)" bounded 90 /etc/init.d/truba reload; sleep 3
+check "срок 1 ч: применено без ошибки" sh -c "! grep -q '\"error\"' /var/run/truba/applied.json && nft list set inet truba gs_direct4 | grep -q 'timeout 1h'"
+check "срок 1 ч: перенесённый IP укорочен до срока набора" left_le 198.51.100.10 3600
+uci set truba.dns.set_timeout=0; uci commit truba
+check "reload (не дольше 90 с)" bounded 90 /etc/init.d/truba reload; sleep 3
+check "без срока: применено без ошибки, IP перенесены" sh -c "! grep -q '\"error\"' /var/run/truba/applied.json && ! nft list set inet truba gs_direct4 | grep -q timeout && nft list set inet truba gs_direct4 | grep -q 198.51.100.10"
+uci -q delete truba.dns.set_timeout; uci commit truba
+check "reload (не дольше 90 с)" bounded 90 /etc/init.d/truba reload; sleep 3
+check "срок снова сутки, перенесённые без срока получили его" sh -c "nft list set inet truba gs_direct4 | grep -q 'timeout 1d' && nft list set inet truba gs_direct4 | grep -q '198.51.100.10 expires'"
+
 echo "== Неверные настройки пропускаются, а не ломают применение"
 # Опечатки из консоли: MAC не давал загрузить таблицу nft, схема адреса DNS — запустить mosdns,
 # адрес для ping делал Туннель «неработающим» навсегда.

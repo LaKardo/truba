@@ -259,6 +259,12 @@ msgstr "Идёт обновление…"
 msgid "Applying settings…"
 msgstr "Применяются настройки…"
 
+msgid "Keep DNS addresses in routing sets, s"
+msgstr "Срок адресов из DNS в наборах, с"
+
+msgid "IPs from answers for categories with action Tunnel or Direct stay in the routing sets this long after they were added; a later answer adds them again. A CDN address the domain no longer uses stops steering traffic at the latest after this time. 0 — keep until the rules or lists change."
+msgstr "IP из ответов для Категорий с Действием «Туннель» или «Напрямую» остаются в наборах маршрутизации столько после добавления; следующий ответ добавляет их снова. Адрес CDN, которым домен больше не пользуется, перестаёт направлять трафик не позже этого срока. 0 — держать до смены правил или списков."
+
 msgid "Rule sets are being updated, try again later."
 msgstr "Наборы правил обновляются, попробуйте позже."
 

@@ -112,10 +112,13 @@ function stats_chain(iface) {
 	return s;
 }
 
-function set_decl(name, typ, flags, elems) {
+// timeout — срок элементов по умолчанию, с (набор с flags timeout).
+function set_decl(name, typ, flags, elems, timeout) {
 	let s = '\tset ' + name + ' {\n\t\ttype ' + typ + ';\n';
 	if (flags)
 		s += '\t\tflags ' + flags + ';\n';
+	if (timeout)
+		s += sprintf('\t\ttimeout %ds;\n', timeout);
 	if (index(flags ?? '', 'interval') >= 0)
 		s += '\t\tauto-merge;\n';
 	if (length(elems))
@@ -124,7 +127,25 @@ function set_decl(name, typ, flags, elems) {
 	return s;
 }
 
-// ctx: { lan_if[], bypass4[], gs_tunnel4[], gs_direct4[], dev_tunnel[], dev_direct[], socket_mark, counters }.
+// IP из DNS, перенесённые из прежней таблицы ({ ip, expires }), — с оставшимся сроком: перенос
+// не продлевает его, иначе частые применения держали бы устаревшие адреса вечно (ADR 0007).
+// Срок длиннее timeout набора ядро не принимает, а в наборе без срока — срок вообще.
+// Элемент без срока (прежняя таблица без него) получает срок набора целиком.
+function dns_elems(list, timeout) {
+	let out = [];
+	for (let e in list ?? []) {
+		let ip = (type(e) == 'object') ? e.ip : e;
+		let left = (type(e) == 'object') ? e.expires : null;
+		if (!timeout || left == null)
+			push(out, ip);
+		else if (left >= 1)
+			push(out, sprintf('%s expires %ds', ip, (left < timeout) ? left : timeout));
+	}
+	return out;
+}
+
+// ctx: { lan_if[], bypass4[], gs_tunnel4[], gs_direct4[], dev_tunnel[], dev_direct[], socket_mark, counters };
+// gs_* — IP из прежней таблицы: строки или { ip, expires } (S.set_elements).
 // Заполняет ctx.set_sizes — число подсетей geoip по Действиям: из ядра огромный набор читать дорого,
 // и ctx.gi — сами подсети: копия правил (ADR 0006) строится из того же ctx без нового чтения.
 export function nft_full(cfg, plan, ctx) {
@@ -148,8 +169,11 @@ export function nft_full(cfg, plan, ctx) {
 	s += set_decl('gi_block4', 'ipv4_addr', 'interval', gi.block);
 	s += set_decl('gi_tunnel4', 'ipv4_addr', 'interval', gi.tunnel);
 	s += set_decl('gi_direct4', 'ipv4_addr', 'interval', gi.direct);
-	s += set_decl('gs_tunnel4', 'ipv4_addr', null, ctx.gs_tunnel4);
-	s += set_decl('gs_direct4', 'ipv4_addr', null, ctx.gs_direct4);
+	// IP из ответов DNS (их кладёт mosdns) — со сроком: адрес CDN, которым домен больше не
+	// пользуется, перестаёт направлять трафик не позже срока (ADR 0007). 0 — без срока.
+	let gst = cfg.dns.set_timeout;
+	s += set_decl('gs_tunnel4', 'ipv4_addr', gst ? 'timeout' : null, dns_elems(ctx.gs_tunnel4, gst), gst);
+	s += set_decl('gs_direct4', 'ipv4_addr', gst ? 'timeout' : null, dns_elems(ctx.gs_direct4, gst), gst);
 	s += set_decl('dev_tunnel', 'ether_addr', null, ctx.dev_tunnel);
 	s += set_decl('dev_direct', 'ether_addr', null, ctx.dev_direct);
 	s += counter_decls([ ...CONN_COUNTERS, ...TRAFFIC_COUNTERS ], ctx.counters);

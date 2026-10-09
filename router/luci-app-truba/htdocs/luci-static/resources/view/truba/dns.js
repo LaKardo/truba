@@ -184,6 +184,11 @@ return view.extend({
 		o.datatype = 'range(30,86400)';
 		o.placeholder = '300';
 
+		o = s.taboption('advanced', form.Value, 'set_timeout', _('Keep DNS addresses in routing sets, s'),
+			_('IPs from answers for categories with action Tunnel or Direct stay in the routing sets this long after they were added; a later answer adds them again. A CDN address the domain no longer uses stops steering traffic at the latest after this time. 0 — keep until the rules or lists change.'));
+		o.datatype = 'or(range(0,0),range(600,604800))';
+		o.placeholder = '86400';
+
 		o = s.taboption('advanced', form.Value, 'port', _('mosdns port'),
 			_('Local port; dnsmasq forwards requests here. The next port is taken by the mosdns statistics API (127.0.0.1 only).'));
 		o.datatype = 'port';

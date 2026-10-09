@@ -542,6 +542,14 @@ msgid "Upper limit for answers of classified domains, so devices re-resolve quic
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/dns.js
+msgid "Keep DNS addresses in routing sets, s"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/dns.js
+msgid "IPs from answers for categories with action Tunnel or Direct stay in the routing sets this long after they were added; a later answer adds them again. A CDN address the domain no longer uses stops steering traffic at the latest after this time. 0 — keep until the rules or lists change."
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/dns.js
 msgid "mosdns port"
 msgstr ""
 

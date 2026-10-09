@@ -17,6 +17,7 @@ config dns 'dns'
 	option ttl_max '300'
 	option cache_size '65536'
 	option lazy_cache_ttl '86400'
+	option set_timeout '86400'
 
 config lists 'lists'
 	option geoip_url 'https://raw.githubusercontent.com/kirilllavrov/geoip-builder/release/geoip.dat'

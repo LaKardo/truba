@@ -13,6 +13,7 @@ import * as F from 'truba.conf';
 import * as N from 'truba.net';
 
 // Элементы динамического набора (наполненного mosdns): для переноса в новую таблицу и для «Обзора».
+// [ { ip, expires } ]: expires — сколько секунд элементу осталось, null — без срока (ADR 0007).
 export function set_elements(name) {
 	let r = U.run('nft -j list set inet ' + C.NFT_TABLE + ' ' + name);
 	if (r.code != 0)
@@ -21,9 +22,10 @@ export function set_elements(name) {
 	try {
 		for (let o in json(r.out)?.nftables ?? []) {
 			for (let e in o?.set?.elem ?? []) {
-				let v = (type(e) == 'object') ? (e.elem?.val ?? e.val) : e;
+				let el = (type(e) == 'object') ? (e.elem ?? e) : null;
+				let v = el ? el.val : e;
 				if (type(v) == 'string' && U.is_ipv4(v))
-					push(out, v);
+					push(out, { ip: v, expires: el?.expires });
 			}
 		}
 	}
