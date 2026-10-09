@@ -466,6 +466,10 @@ msgid "Update in progress…"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/dns.js
+msgid "Applying settings…"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/dns.js
 msgid "Last check: %s"
 msgstr ""
 
@@ -567,6 +571,10 @@ msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/dns.js
 msgid "Swap current and previous rule sets?"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/dns.js
+msgid "Rule sets are being updated, try again later."
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/dns.js

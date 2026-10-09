@@ -244,6 +244,8 @@ export function lists() {
 		prev_geosite: list_info(C.PREV_DIR, C.DAT_FILES.geosite, true),
 		last: U.read_json(C.LISTS_STATE, null),
 		updating: U.lock_busy(C.LOCK_LISTS),
+		// Идёт применение настроек (после отката или обновления списков — в фоне).
+		applying: U.lock_busy(C.LOCK_APPLY),
 	};
 };
 

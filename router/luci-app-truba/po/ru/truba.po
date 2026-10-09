@@ -256,6 +256,12 @@ msgstr "Выберите зону-источник «truba»."
 msgid "Update in progress…"
 msgstr "Идёт обновление…"
 
+msgid "Applying settings…"
+msgstr "Применяются настройки…"
+
+msgid "Rule sets are being updated, try again later."
+msgstr "Наборы правил обновляются, попробуйте позже."
+
 msgid "File"
 msgstr "Файл"
 

@@ -124,9 +124,11 @@ const methods = {
 		}
 	},
 
+	// Файлы переставляются сразу, а применяются в фоне: пока rpcd ждал бы применения
+	// (распаковка, загрузка подсетей geoip), стоял бы весь LuCI. Ход — в lists (applying).
 	rollback_lists: {
 		call: function() {
-			return truba('rollback-lists');
+			return truba('rollback-lists --bg');
 		}
 	},
 

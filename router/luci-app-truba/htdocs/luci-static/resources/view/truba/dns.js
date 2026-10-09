@@ -104,9 +104,13 @@ function buildVersions() {
 function updateVersions(r, l) {
 	l = l || {};
 	const last = l.last;
-	if (r.updating !== !!l.updating) {
-		r.updating = !!l.updating;
-		r.busy.replaceChildren(r.updating ? common.busy(_('Update in progress…')) : NBSP);
+	// Применение идёт и после отката, и после обновления списков — в фоне.
+	const busy = l.updating ? 'updating' : l.applying ? 'applying' : '';
+	if (r.busyState !== busy) {
+		r.busyState = busy;
+		r.updating = !!busy;
+		r.busy.replaceChildren(busy == 'updating' ? common.busy(_('Update in progress…'))
+			: busy == 'applying' ? common.busy(_('Applying settings…')) : NBSP);
 	}
 	// Нет версии — «отсутствует» обычным текстом, а не моноширинным, как контрольная сумма.
 	const ver = (c, v) => {
@@ -208,10 +212,11 @@ return view.extend({
 				E('button', { 'class': 'btn cbi-button-reset', 'type': 'button', 'click': ui.createHandlerFn(this, () => {
 					if (!confirm(_('Swap current and previous rule sets?')))
 						return;
+					// Файлы переставляются сразу, применение — в фоне; его ход видно над таблицей.
 					return common.callRollbackLists().then((r) => {
 						versions.kicked = Date.now();
-						ui.addNotification(null,
-							E('p', {}, (r.swapped || []).length ? _('Rolled back: %s').format(r.swapped.join(', ')) : _('No previous version.')), 'info');
+						ui.addNotification(null, E('p', {}, r.error == 'busy' ? _('Rule sets are being updated, try again later.')
+							: (r.swapped || []).length ? _('Rolled back: %s').format(r.swapped.join(', ')) : _('No previous version.')), 'info');
 					});
 				}) }, _('Roll back'))
 			])

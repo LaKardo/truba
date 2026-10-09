@@ -809,6 +809,17 @@ check "rollback-lists и его reload завершились" wait_idle 60
 unstick
 check "rollback-lists: оба набора" grep -q 'geosite.dat' /tmp/rb.json
 check "rollback-lists: текущие на месте" test -s /etc/truba/lists/geoip.dat
+# Через rpcd (кнопка «Откатить»): файлы переставляются сразу, а применение идёт в фоне —
+# иначе rpcd ждал бы распаковку и загрузку подсетей geoip, и стоял бы весь LuCI.
+APPLIED_T="$(jsonfilter -i /var/run/truba/applied.json -e '@.time')"; sleep 1
+T0=$(date +%s); ubus call truba rollback_lists > /tmp/rb2.json; T1=$(date +%s)
+check "rpcd rollback_lists отвечает сразу (было $((T1 - T0)) с)" test $((T1 - T0)) -le 1
+check "rpcd rollback_lists: оба набора, применение в фоне" sh -c "grep -q geosite.dat /tmp/rb2.json && [ \"\$(jsonfilter -i /tmp/rb2.json -e '@.applying')\" = true ]"
+applied_after() { [ "$(jsonfilter -i /var/run/truba/applied.json -e '@.time')" -gt "$APPLIED_T" ]; }
+check "rpcd rollback_lists: настройки применены в фоне" wait_for 60 applied_after
+check "rpcd rollback_lists: применение завершилось" wait_idle 60
+unstick
+check "lists: применение не идёт" test "$(ubus call truba lists | jsonfilter -e '@.applying')" = false
 
 echo "== update-lists -f без изменений: предыдущая версия остаётся версией для отката"
 for f in geoip.dat geosite.dat; do cp "/etc/truba/lists/$f" "/root/src/$f"; src_sum "$f"; done
