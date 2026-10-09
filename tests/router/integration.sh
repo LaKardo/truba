@@ -898,16 +898,17 @@ echo "== sysupgrade: reinstall.sh возвращает DNS сети до ожи�
 # После sysupgrade /etc/config/dhcp и бэкап Трубы (/etc/truba в keep.d) сохраняются, а пакетов
 # нет: dnsmasq шлёт запросы в mosdns, которого нет, и reinstall.sh ждал бы интернета вечно.
 # Имитация: служба снята без teardown (procd убивает mosdns, настройки dnsmasq остаются);
-# «исходный» DNS сети в бэкапе — свой сервер на 5399, который знает up.test. truba в этом
-# контейнере стоит не из apk, поэтому reinstall.sh идёт дальше проверки «уже установлена».
+# «исходный» DNS сети в бэкапе — свой сервер на 5399, который знает up.trubatest (не .test:
+# эту зону dnsmasq OpenWrt отвечает сам, rfc6761.conf). truba в этом контейнере стоит
+# не из apk, поэтому reinstall.sh идёт дальше проверки «уже установлена».
 cp /etc/truba/state/dnsmasq.json /tmp/dnsmasq.orig.json
 DM_SID="$(jsonfilter -i /tmp/dnsmasq.orig.json -e '@.sid')"
 printf '{"sid":"%s","noresolv":"1","server":["127.0.0.1#5399"]}' "$DM_SID" > /etc/truba/state/dnsmasq.json
 dnsmasq --conf-file=/dev/null --port=5399 --listen-address=127.0.0.1 --bind-interfaces --no-resolv --no-hosts \
-	--address=/up.test/5.6.7.8 --pid-file=/tmp/dm-up.pid
+	--address=/up.trubatest/5.6.7.8 --pid-file=/tmp/dm-up.pid
 ubus call service delete '{"name":"truba"}'; sleep 2
-up_ok() { nslookup up.test 127.0.0.1 2>&1 | grep -q 5.6.7.8; }
-check "sysupgrade: mosdns нет — DNS сети не отвечает" sh -c "! pidof mosdns && ! nslookup up.test 127.0.0.1 2>&1 | grep -q 5.6.7.8"
+up_ok() { nslookup up.trubatest 127.0.0.1 2>&1 | grep -q 5.6.7.8; }
+check "sysupgrade: mosdns нет — DNS сети не отвечает" sh -c "! pidof mosdns && ! nslookup up.trubatest 127.0.0.1 2>&1 | grep -q 5.6.7.8"
 sh /etc/truba/reinstall.sh >/dev/null 2>&1 & RI_PID=$!
 check "reinstall: DNS сети отвечает, не дожидаясь интернета" wait_for 20 up_ok
 check "reinstall: dnsmasq вернулся к серверам из бэкапа" test "$(uci -q get dhcp.@dnsmasq[0].server)" = "127.0.0.1#5399"
