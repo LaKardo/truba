@@ -367,6 +367,24 @@ nat_done() { [ "$(ubus call truba nat_result | jsonfilter -e '@.time')" -ge "$ST
 check "rpcd: итог проверки NAT появился" wait_for 20 nat_done
 check "rpcd: итог проверки NAT — OK" test "$(ubus call truba nat_result | jsonfilter -e '@.ok')" = true
 
+echo "== rpcd: при старом luci-app-truba объект truba — за его плагином (ADR 0011)"
+# До r14 плагин лежал в luci-app-truba как truba.uc. Два плагина с одним объектом rpcd не
+# переносит: портит память и падает — на Роутере на HUP из postinst r17, и LuCI не пускал.
+# На x86 это не проявляется, поэтому проверяется, что второй регистрации нет вовсе.
+RP=$(pidof rpcd)
+cat > /usr/share/rpcd/ucode/truba.uc <<'EOF'
+return { truba: { old_plugin: { call: function() { return { old: true }; } } } };
+EOF
+chmod 0644 /usr/share/rpcd/ucode/truba.uc
+killall -HUP rpcd
+old_owner() { [ "$(ubus call truba old_plugin | jsonfilter -e '@.old')" = true ]; }
+check "rpcd: при старом плагине объект — за ним" wait_for 10 old_owner
+check "rpcd: truba-api.uc при нём не регистрирует ничего" sh -c '! ubus -v list truba | grep -q "\"status\""'
+check "rpcd пережил HUP (тот же процесс)" test "$(pidof rpcd)" = "$RP"
+rm /usr/share/rpcd/ucode/truba.uc
+killall -HUP rpcd
+check "rpcd: без старого плагина объект снова у truba-api.uc" wait_for 10 ubus call truba lists
+
 echo "== учёт трафика устройств (Маршрутизация вкл)"
 bytes() { nft list counter inet truba "$1" 2>/dev/null | sed -n 's/.*bytes \([0-9]*\).*/\1/p'; }
 gt0() { [ "$(bytes "$1")" -gt 0 ] 2>/dev/null; }

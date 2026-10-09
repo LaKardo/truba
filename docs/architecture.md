@@ -663,6 +663,8 @@ config watchdog 'watchdog'
 
 Долгие проверки идут в фоне: rpcd обслуживает вызовы по одному, и пока он ждал бы проверку, остальные вызовы LuCI стояли бы (было 253 мс → 4,3 с у `luci-rpc getHostHints`).
 
+Объект `truba` регистрирует ровно один плагин: два плагина одного объекта роняют rpcd. Пока стоит `luci-app-truba` до r14 со своим `truba.uc`, `truba-api.uc` не регистрирует ничего, и объект остаётся за старым плагином. Обновление интерфейса удаляет этот файл, и после HUP объект переходит к `truba-api.uc` (ADR 0011).
+
 **Права:** ACL `/usr/share/rpcd/acl.d/luci-app-truba.json` — чтение и запись `uci: truba, network, firewall, upnpd`; на чтение — методы, которые только показывают, на запись — те, что что-то запускают (обновление и откат списков, проверки NAT и Туннеля).
 **Меню:** `/usr/share/luci/menu.d/luci-app-truba.json`.
 **Применение:** `/usr/share/ucitrack/luci-app-truba.json` → `{"config":"truba","init":"truba"}`.
