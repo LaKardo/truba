@@ -22,7 +22,7 @@ function validateUpstream(sid, v) {
 	if (!v)
 		return true;
 	const m = UPSTREAM_RE.exec(v);
-	const ok = m && (m[2] == null ? m[5] == null : UPSTREAM_SCHEMES.indexOf(m[2]) >= 0);
+	const ok = m && (m[2] == null ? m[5] == null : UPSTREAM_SCHEMES.includes(m[2]));
 	return ok ? true : _('Expected https://…, tls://…, quic://…, h3://…, tcp://… or udp://… (optionally «@IP»)');
 }
 
@@ -30,19 +30,17 @@ function validateUpstream(sid, v) {
 
 function buildDnsState() {
 	const r = {};
-	const span = (cls) => E('span', cls ? { 'class': cls } : {});
-	r.state = span('truba-badge');
-	r.hits = span('truba-num');
+	r.state = common.span('truba-badge');
+	r.hits = common.span('truba-num');
 	r.fillBar = E('span');
-	r.fill = span('truba-num');
-	r.since = span();
-	const row = (label, value) => E('tr', {}, [ E('th', { 'scope': 'row' }, label), E('td', {}, value) ]);
+	r.fill = common.span('truba-num');
+	r.since = common.span();
 	r.el = E('div', { 'class': 'cbi-section' }, [
 		E('h3', {}, [ _('DNS state'), ' ', r.state ]),
-		E('table', { 'class': 'truba-kv' }, [
-			row(_('Answers from cache'), r.hits),
-			row(_('Cache filled'), [ E('span', { 'class': 'truba-meter' }, r.fillBar), r.fill ]),
-			row(_('Counted'), r.since)
+		common.kvTable([
+			[ _('Answers from cache'), r.hits ],
+			[ _('Cache filled'), [ E('span', { 'class': 'truba-meter' }, r.fillBar), r.fill ] ],
+			[ _('Counted'), r.since ]
 		])
 	]);
 	return r;
@@ -50,11 +48,8 @@ function buildDnsState() {
 
 function updateDnsState(r, st) {
 	const dc = st.dns_cache;
-	if (!st.routing)
-		common.setLevel(r.state, '');
-	else
-		common.setLevel(r.state, st.mosdns ? 'ok' : 'err');
-	common.setText(r.state, !st.routing ? _('not used: routing is off') : st.mosdns ? _('mosdns running') : _('mosdns not running'));
+	common.setState(r.state, !st.routing ? '' : st.mosdns ? 'ok' : 'err',
+		!st.routing ? _('not used: routing is off') : st.mosdns ? _('mosdns running') : _('mosdns not running'));
 	if (st.routing && dc) {
 		const pct = (n) => dc.query ? Math.round(n * 100 / dc.query) : 0;
 		common.setText(r.hits, dc.query ? _('%d%% from cache · %d%% expired').format(pct(dc.hit), pct(dc.lazy_hit)) : _('no queries yet'));

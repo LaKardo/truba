@@ -85,7 +85,7 @@ function renderTunnelTest(r) {
 
 function renderCheck(r) {
 	if (!r || r.error || !r.action)
-		return E('p', {}, _('Error: %s').format(CHECK_ERRORS[r?.error] || r?.error || 'no answer'));
+		return E('p', {}, _('Error: %s').format(CHECK_ERRORS[r?.error] || r?.error || _('no answer')));
 
 	const parts = [
 		E('p', { 'class': 'truba-target' }, [ E('strong', {}, r.target), ' → ', actionBadge(r.action) ]),
@@ -95,17 +95,12 @@ function renderCheck(r) {
 	if (r.kind == 'domain') {
 		const hits = r.geosite || [];
 		parts.push(E('h4', {}, _('geosite categories containing the domain')));
-		parts.push(hits.length ? E('table', { 'class': 'table' }, [
-			E('tr', { 'class': 'tr table-titles' }, [
-				E('th', { 'class': 'th' }, _('Category')), E('th', { 'class': 'th' }, _('Matching entry')),
-				E('th', { 'class': 'th' }, _('Entries')), E('th', { 'class': 'th' }, _('Action'))
-			])
-		].concat(hits.map((h) => E('tr', { 'class': 'tr' }, [
-			E('td', { 'class': 'td' }, (r.decisive && r.decisive.tag == h.tag) ? E('strong', {}, h.tag + ' ✓') : h.tag),
-			E('td', { 'class': 'td' }, E('code', {}, h.entry)),
-			E('td', { 'class': 'td' }, common.fmtNum(h.count)),
-			E('td', { 'class': 'td' }, common.ACTION_LABELS[h.action] || h.action)
-		])))) : E('p', {}, common.empty(_('none'))));
+		parts.push(hits.length ? common.table([ _('Category'), _('Matching entry'), _('Entries'), _('Action') ], hits.map((h) => common.row([
+			(r.decisive?.tag == h.tag) ? E('strong', {}, h.tag + ' ✓') : h.tag,
+			E('code', {}, h.entry),
+			common.fmtNum(h.count),
+			common.ACTION_LABELS[h.action] || h.action
+		]))) : E('p', {}, common.empty(_('none'))));
 		if (r.decisive)
 			parts.push(E('p', {}, _('Decisive category (the narrowest one with an explicit action): %s').format(r.decisive.tag)));
 	}
@@ -113,17 +108,12 @@ function renderCheck(r) {
 	const ips = r.ips || [];
 	if (ips.length) {
 		parts.push(E('h4', {}, _('Addresses')));
-		parts.push(E('table', { 'class': 'table' }, [
-			E('tr', { 'class': 'tr table-titles' }, [
-				E('th', { 'class': 'th' }, 'IP'), E('th', { 'class': 'th' }, _('geoip categories')),
-				E('th', { 'class': 'th' }, _('Action')), E('th', { 'class': 'th' }, _('Why'))
-			])
-		].concat(ips.map((v) => E('tr', { 'class': 'tr' }, [
-			E('td', { 'class': 'td' }, v.ip),
-			E('td', { 'class': 'td' }, (v.geoip || []).join(', ') || '—'),
-			E('td', { 'class': 'td' }, actionBadge(v.action)),
-			E('td', { 'class': 'td' }, (common.REASON_LABELS[v.reason] || v.reason) + (v.device ? ' (%s)'.format(v.device) : ''))
-		])))));
+		parts.push(common.table([ 'IP', _('geoip categories'), _('Action'), _('Why') ], ips.map((v) => common.row([
+			v.ip,
+			(v.geoip || []).join(', ') || '—',
+			actionBadge(v.action),
+			(common.REASON_LABELS[v.reason] || v.reason) + (v.device ? ' (%s)'.format(v.device) : '')
+		]))));
 	}
 	return E('div', {}, parts);
 }
@@ -134,7 +124,7 @@ return view.extend({
 	},
 
 	render: function(leasesData) {
-		const leases = (leasesData && leasesData.dhcp_leases) || [];
+		const leases = leasesData?.dhcp_leases || [];
 		const input = E('input', { 'type': 'text', 'class': 'cbi-input-text truba-grow',
 			'placeholder': _('domain or IPv4, e.g. gosuslugi.ru') });
 		const dev = E('select', { 'class': 'cbi-input-select' }, [ E('option', { 'value': '' }, _('— any device —')) ].concat(
@@ -150,7 +140,8 @@ return view.extend({
 			out.replaceChildren(common.busy(_('Checking…')));
 			// Без устройства аргумент mac не передаётся вовсе: rpcd отклоняет null вместо строки.
 			const call = dev.value ? common.callCheck(t, dev.value) : common.callCheck(t);
-			return call.then((r) => out.replaceChildren(renderCheck(r)));
+			return call.then((r) => out.replaceChildren(renderCheck(r)))
+				.catch((e) => out.replaceChildren(renderCheck({ error: e.message })));
 		};
 		input.addEventListener('keydown', (ev) => { if (ev.key == 'Enter') runCheck(); });
 
@@ -164,19 +155,14 @@ return view.extend({
 		// Журнал: загружается целиком, фильтр — в браузере.
 		let lines = [], filter = 'all';
 		const FILTER_LABELS = { all: _('All'), truba: _('Truba'), mosdns: 'mosdns', problems: _('Warnings and errors') };
-		const chips = LOG_FILTERS.map((f) => {
-			const b = E('button', { 'class': 'truba-chip', 'type': 'button', 'aria-pressed': f == filter ? 'true' : 'false', 'click': () => {
-				filter = f;
-				for (let x of chips)
-					x.setAttribute('aria-pressed', x === b ? 'true' : 'false');
-				showLog(logBox, lines, filter);
-			} }, FILTER_LABELS[f]);
-			return b;
+		const chips = common.chips(LOG_FILTERS.map((f) => [ f, FILTER_LABELS[f] ]), filter, (f) => {
+			filter = f;
+			showLog(logBox, lines, filter);
 		});
 		const loadLog = () => common.callLog(300).then((t) => {
 			lines = parseLog(t);
 			showLog(logBox, lines, filter);
-		});
+		}).catch((e) => logBox.replaceChildren(common.empty(_('Error: %s').format(e.message))));
 		loadLog();
 
 		return E('div', {}, [

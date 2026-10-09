@@ -11,8 +11,9 @@
 
 // ---- Проверка NAT: строки постоянны, меняются значения; список серверов — по клику ----
 
+const span = common.span, setState = common.setState;
+
 function buildNat(view) {
-	const span = (cls) => E('span', cls ? { 'class': cls } : {});
 	const x = { busy: false, key: null };
 	x.state = span('truba-badge');
 	x.addr = span('truba-num');
@@ -23,15 +24,14 @@ function buildNat(view) {
 	x.servers = E('ul');
 	x.btn = E('button', { 'class': 'btn cbi-button-action', 'type': 'button', 'click': ui.createHandlerFn(view, () => runNat(x)) },
 		_('Check NAT'));
-	const row = (label, value) => E('tr', {}, [ E('th', { 'scope': 'row' }, label), E('td', {}, value) ]);
 	x.el = E('div', { 'class': 'cbi-section' }, [
 		E('h3', {}, [ _('NAT check'), ' ', x.state ]),
-		E('table', { 'class': 'truba-kv' }, [
-			row(_('External address'), x.addr),
-			row(_('External IP is the Truba IP'), x.vps),
-			row(_('Port preserved'), x.port),
-			row(_('Same mapping for different servers'), x.same),
-			row(_('Checked'), x.when)
+		common.kvTable([
+			[ _('External address'), x.addr ],
+			[ _('External IP is the Truba IP'), x.vps ],
+			[ _('Port preserved'), x.port ],
+			[ _('Same mapping for different servers'), x.same ],
+			[ _('Checked'), x.when ]
 		]),
 		E('details', { 'class': 'truba-details' }, [ E('summary', {}, _('STUN servers')), x.servers ]),
 		E('div', { 'class': 'truba-toolbar' }, [ x.btn ]),
@@ -39,11 +39,6 @@ function buildNat(view) {
 			_('This checks the Truba layer only. For the full RFC 5780 test run NatTypeTester on a PC in the home network whose device policy is «All via tunnel».'))
 	]);
 	return x;
-}
-
-function setState(el, level, text) {
-	common.setLevel(el, level);
-	common.setText(el, text);
 }
 
 // Итог «Проверки NAT»: из status (последняя проверка) или сразу после нажатия кнопки.
@@ -129,20 +124,20 @@ return view.extend({
 			upnpState = E('div', { 'class': 'alert-message warning' }, common.UPNP_MISSING);
 		else if (up.enabled && !up.running)
 			upnpState = E('div', { 'class': 'alert-message warning' }, _('UPnP is enabled, but miniupnpd is not running.'));
-		const leases = (up.leases || []).map((l) => E('tr', { 'class': 'tr' }, [
-			E('td', { 'class': 'td' }, l.proto),
-			E('td', { 'class': 'td' }, String(l.ext_port)),
-			E('td', { 'class': 'td' }, '%s:%d'.format(l.ip, l.port)),
-			E('td', { 'class': 'td' }, l.descr || '—'),
-			E('td', { 'class': 'td' }, l.expires ? common.fmtTime(l.expires) : _('no expiry'))
+		const leases = (up.leases || []).map((l) => common.row([
+			l.proto,
+			String(l.ext_port),
+			'%s:%d'.format(l.ip, l.port),
+			l.descr || '—',
+			l.expires ? common.fmtTime(l.expires) : _('no expiry')
 		]));
 
-		const rows = forwards.map((r) => E('tr', { 'class': 'tr' }, [
-			E('td', { 'class': 'td' }, r.name || '—'),
-			E('td', { 'class': 'td' }, L.toArray(r.proto).join(', ') || 'tcp udp'),
-			E('td', { 'class': 'td' }, r.src_dport || '—'),
-			E('td', { 'class': 'td' }, '%s:%s'.format(r.dest_ip || '?', r.dest_port || r.src_dport || '?')),
-			E('td', { 'class': 'td' }, r.enabled == '0' ? _('disabled') : _('enabled'))
+		const rows = forwards.map((r) => common.row([
+			r.name || '—',
+			L.toArray(r.proto).join(', ') || 'tcp udp',
+			r.src_dport || '—',
+			'%s:%s'.format(r.dest_ip || '?', r.dest_port || r.src_dport || '?'),
+			r.enabled == '0' ? _('disabled') : _('enabled')
 		]));
 
 		return m.render().then((mapEl) => E('div', {}, [
@@ -157,23 +152,15 @@ return view.extend({
 			E('div', { 'class': 'cbi-section' }, [
 				E('h3', {}, _('Active UPnP / NAT-PMP mappings')),
 				upnpState,
-				leases.length ? E('table', { 'class': 'table' }, [
-					E('tr', { 'class': 'tr table-titles' }, [
-						E('th', { 'class': 'th' }, _('Protocol')), E('th', { 'class': 'th' }, _('External port')),
-						E('th', { 'class': 'th' }, _('Device')), E('th', { 'class': 'th' }, _('Description')),
-						E('th', { 'class': 'th' }, _('Expires'))
-					])
-				].concat(leases)) : E('p', {}, common.empty(_('No active mappings.')))
+				leases.length
+					? common.table([ _('Protocol'), _('External port'), _('Device'), _('Description'), _('Expires') ], leases)
+					: E('p', {}, common.empty(_('No active mappings.')))
 			]),
 			E('div', { 'class': 'cbi-section' }, [
 				E('h3', {}, _('Port forwards from the tunnel')),
-				rows.length ? E('table', { 'class': 'table' }, [
-					E('tr', { 'class': 'tr table-titles' }, [
-						E('th', { 'class': 'th' }, _('Name')), E('th', { 'class': 'th' }, _('Protocol')),
-						E('th', { 'class': 'th' }, _('External port')), E('th', { 'class': 'th' }, _('Device')),
-						E('th', { 'class': 'th' }, _('State'))
-					])
-				].concat(rows)) : E('p', {}, common.empty(_('No port forwards with source zone «truba».'))),
+				rows.length
+					? common.table([ _('Name'), _('Protocol'), _('External port'), _('Device'), _('State') ], rows)
+					: E('p', {}, common.empty(_('No port forwards with source zone «truba».'))),
 				E('div', { 'class': 'truba-toolbar' }, [
 					E('a', { 'class': 'btn cbi-button', 'href': L.url('admin/network/firewall/forwards') }, _('Edit port forwards')),
 					E('span', { 'class': 'cbi-value-description' }, _('Choose source zone «truba».'))

@@ -8,12 +8,11 @@
 
 // ---- Состояние Туннеля: строки постоянны, опрос раз в 5 с меняет только значения ----
 
-const SVGNS = 'http://www.w3.org/2000/svg';
 const SW = 200, SH = 50;
+const span = common.span, setState = common.setState;
 
 function buildState() {
 	const r = {};
-	const span = (cls) => E('span', cls ? { 'class': cls } : {});
 	r.state = span('truba-badge');
 	r.hs = span('truba-dot');
 	r.rtt = span('truba-dot truba-num');
@@ -23,20 +22,13 @@ function buildState() {
 	r.table = span();
 	r.iface = span('truba-num');
 	r.scale = span('truba-num');
-	const svg = document.createElementNS(SVGNS, 'svg');
-	svg.setAttribute('viewBox', '0 0 %d %d'.format(SW, SH));
-	svg.setAttribute('preserveAspectRatio', 'none');
-	svg.setAttribute('aria-hidden', 'true');
-	r.spark = document.createElementNS(SVGNS, 'path');
-	r.spark.setAttribute('class', 'line tunnel');
-	svg.appendChild(r.spark);
+	const svg = common.svgEl('svg', { 'viewBox': '0 0 %d %d'.format(SW, SH), 'preserveAspectRatio': 'none', 'aria-hidden': 'true' });
+	r.spark = svg.appendChild(common.svgEl('path', { 'class': 'line tunnel' }));
 
-	const kv = (rows) => E('table', { 'class': 'truba-kv' }, rows.map(([ label, value ]) =>
-		E('tr', {}, [ E('th', { 'scope': 'row' }, label), E('td', {}, value) ])));
 	r.el = E('div', { 'class': 'cbi-section' }, [
 		E('h3', {}, [ _('State'), ' ', r.state ]),
 		E('div', { 'class': 'truba-cards' }, [
-			kv([
+			common.kvTable([
 				[ _('Last handshake'), r.hs ],
 				[ _('Latency to the Truba'), r.rtt ],
 				[ _('Packet loss'), r.loss ],
@@ -65,7 +57,7 @@ function drawSpark(r, probes) {
 		common.setText(r.scale, '');
 		return;
 	}
-	let lo = Math.min.apply(null, got), hi = Math.max.apply(null, got);
+	let lo = Math.min(...got), hi = Math.max(...got);
 	const pad = Math.max((hi - lo) * 0.2, 1);
 	lo = Math.max(0, lo - pad);
 	hi += pad;
@@ -83,11 +75,6 @@ function drawSpark(r, probes) {
 	});
 	r.spark.setAttribute('d', d);
 	common.setText(r.scale, _('%d–%d ms').format(Math.round(lo), Math.round(hi)));
-}
-
-function setState(el, level, text) {
-	common.setLevel(el, level);
-	common.setText(el, text);
 }
 
 function updateState(r, st) {
@@ -159,7 +146,7 @@ function parseConf(text) {
 	const res = { iface: {}, peers: [] };
 	let cur = null;
 	for (let raw of text.split(/\r?\n/)) {
-		const line = raw.replace(/^\s+|\s+$/g, '');
+		const line = raw.trim();
 		if (!line || line[0] == '#' || line[0] == ';')
 			continue;
 		const sec = line.match(/^\[(\w+)\]$/);
@@ -228,7 +215,7 @@ function applyConf(iface, conf) {
 	const zone = uci.sections('firewall', 'zone').find((z) => z.name == 'truba');
 	if (zone) {
 		const nets = L.toArray(zone.network);
-		if (nets.indexOf(iface) < 0)
+		if (!nets.includes(iface))
 			uci.set('firewall', zone['.name'], 'network', nets.concat([ iface ]));
 	}
 }

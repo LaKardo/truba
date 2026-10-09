@@ -1,7 +1,7 @@
 // Один проход headless Chromium по интерфейсу на живом стенде (tests/luci/stand.sh):
 // все вкладки «Службы → Труба» без ошибок JS и HTTP, «Проверить домен/IP», затем
 // «Сохранить и применить» по шагам — служба сама перестраивает правила (ucitrack → reload).
-// Итог шага берётся у службы через ubus из отдельной вкладки, а не по таймеру.
+// Итог шага берётся у службы через ubus (запрос к /ubus с сессией LuCI), а не по таймеру.
 //   node browser.js http://<адрес стенда> /out
 const puppeteer = require('puppeteer');
 const fs = require('fs');
@@ -150,7 +150,9 @@ async function saveApply(page) {
 	t0 = await time();
 	await page.goto(url('overview'), { waitUntil: 'networkidle2' });
 	await settled(page);
-	await page.evaluate(() => (document.querySelector('input[id$=".main.routing"]') || [ ...document.querySelectorAll('input[type=checkbox]') ][1]).click());
+	// Переключатель плитки — по подписи: у него нет id, а порядок плиток может меняться.
+	await page.evaluate(() => [ ...document.querySelectorAll('label.truba-switch') ]
+		.find((l) => l.textContent.trim() == 'Routing enabled').querySelector('input').click());
 	await saveApply(page);
 	result(await applied(t0, (st) => st.routing === false && st.mosdns === false),
 		'«Сохранить и применить»: Маршрутизация выкл → mosdns остановлен');

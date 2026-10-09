@@ -56,6 +56,7 @@ const lastT = (h) => h.points.length ? h.points[h.points.length - 1][0] : 0;
 // следующий опрос заберёт всё пропущенное.
 function fetchRates(h) {
 	const last = lastT(h);
+	h.fetched = Date.now();
 	return common.callRates(h.span, last).then((res) => {
 		if (!Array.isArray(res?.points))
 			return;
@@ -69,8 +70,10 @@ function fetchRates(h) {
 	}).catch(() => { });
 }
 
+// Поминутная точка появляется раз в минуту — чаще её не спрашивать: Роутер читал бы файл зря.
 function fetchHistory() {
-	return Promise.all([ fetchRates(hist.fine), (span > hist.fine.span) ? fetchRates(hist.min) : null ]);
+	const minDue = span > hist.fine.span && Date.now() - (hist.min.fetched || 0) >= hist.min.step * 1000;
+	return Promise.all([ fetchRates(hist.fine), minDue ? fetchRates(hist.min) : null ]);
 }
 
 // Последняя точка, если она свежая: значит, история пишется. null — процесс stats не работает.
@@ -81,20 +84,13 @@ function latest() {
 
 // ---- График ----
 
-const SVGNS = 'http://www.w3.org/2000/svg';
 const CW = 600, CH = 100;
 // Ряды: место значения в точке и классы (цвет Действия, пунктир — от устройств).
 const SERIES = [
 	{ i: 1, cls: 'tunnel' }, { i: 2, cls: 'tunnel up' },
 	{ i: 3, cls: 'direct' }, { i: 4, cls: 'direct up' }
 ];
-
-function svgEl(tag, attrs) {
-	const el = document.createElementNS(SVGNS, tag);
-	for (let k in attrs)
-		el.setAttribute(k, attrs[k]);
-	return el;
-}
+const svgEl = common.svgEl;
 
 // Верх шкалы — круглое число бит/с (1, 2, 5 × 10ⁿ), не меньше 1 Мбит/с. Возвращает байт/с.
 function scaleTop(peak) {
@@ -222,9 +218,8 @@ function warnings(st) {
 	const a = st.applied || {}, nb = st.neighbours || {}, up = st.upnp || {}, big = st.health?.big;
 	const res = [];
 	const add = (text, tab) => res.push({ text, tab });
-	const W_TABS = { lists_missing: 'dns', zones_without_devices: 'routing', tunnel_not_configured: 'tunnel', lists_rolled_back: 'dns' };
 	for (let w of (a.warnings || []))
-		add(common.WARNING_LABELS[w] || w, W_TABS[w]);
+		add(common.WARNINGS[w]?.text || w, common.WARNINGS[w]?.tab);
 	if ((a.missing || []).length)
 		add(common.missingText(a.missing), 'routing');
 	if ((a.invalid || []).length)
@@ -249,20 +244,15 @@ function warnings(st) {
 	return res;
 }
 
-// Значок или точка: уровень и текст.
-function setState(el, level, text) {
-	common.setLevel(el, level);
-	common.setText(el, text);
-}
+const setState = common.setState;
 
 function buildPage(iface) {
 	const r = { warnKey: null };
-	const span = (cls) => E('span', cls ? { 'class': cls } : {});
 	const line = () => E('div', { 'class': 'truba-muted' }, NBSP);
 
 	// Плитка: заголовок со значком, главная цифра, две строки, переключатель и ссылка на вкладку.
 	const tile = (title, tab, linkText, sw) => {
-		const t = { badge: span('truba-badge'), big: E('div', { 'class': 'truba-big' }, NBSP), l1: line(), l2: line() };
+		const t = { badge: common.span('truba-badge'), big: E('div', { 'class': 'truba-big' }, NBSP), l1: line(), l2: line() };
 		t.el = E('div', { 'class': 'truba-tile' }, [
 			E('div', { 'class': 'truba-tile-h' }, [ E('h3', {}, title), t.badge ]),
 			t.big, t.l1, t.l2,
@@ -290,14 +280,14 @@ function buildPage(iface) {
 	r.tDns = tile(_('DNS & lists'), 'dns', _('DNS and rule sets'));
 	r.tInbound = tile(_('Inbound'), 'inbound', _('NAT and port forwards'));
 
-	r.warnCount = span('truba-badge warn');
+	r.warnCount = common.span('truba-badge warn');
 	r.warnList = E('ul', { 'class': 'truba-warns' });
 
 	r.trDescr = E('p', { 'class': 'cbi-section-descr' });
 	r.tr = {};
 	// Ячейка: итог и под ним скорость (или пояснение).
 	const cell = () => {
-		const total = span('truba-num'), rate = span('truba-muted truba-num');
+		const total = common.span('truba-num'), rate = common.span('truba-muted truba-num');
 		return { total, rate, el: E('td', {}, [ total, rate ]) };
 	};
 	const label = (level, text) => E('td', {}, E('span', { 'class': 'truba-dot ' + level }, text));
@@ -309,7 +299,7 @@ function buildPage(iface) {
 	r.block = cell();
 	r.block.rate.textContent = _('packets dropped');
 	r.shareText = E('div', { 'class': 'truba-muted truba-num' }, NBSP);
-	r.share = { tunnel: span('tunnel'), direct: span('direct') };
+	r.share = { tunnel: common.span('tunnel'), direct: common.span('direct') };
 	r.chart = makeChart((s) => setSpan(r.chart, s));
 
 	r.el = E('div', {}, [

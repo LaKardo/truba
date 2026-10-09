@@ -48,11 +48,12 @@ const REASON_LABELS = {
 	mode: _('no category matched — the mode default applies')
 };
 
-const WARNING_LABELS = {
-	lists_missing: _('Rule sets are not downloaded yet — only the mode default applies. Download is in progress.'),
-	zones_without_devices: _('The selected firewall zones have no active devices.'),
-	tunnel_not_configured: _('The tunnel is not configured yet — import the configuration on the Tunnel tab.'),
-	lists_rolled_back: _('The current rule sets could not be read, so the previous ones were restored.')
+// Предупреждения службы (applied.warnings): текст и вкладка, где их исправляют.
+const WARNINGS = {
+	lists_missing: { tab: 'dns', text: _('Rule sets are not downloaded yet — only the mode default applies. Download is in progress.') },
+	zones_without_devices: { tab: 'routing', text: _('The selected firewall zones have no active devices.') },
+	tunnel_not_configured: { tab: 'tunnel', text: _('The tunnel is not configured yet — import the configuration on the Tunnel tab.') },
+	lists_rolled_back: { tab: 'dns', text: _('The current rule sets could not be read, so the previous ones were restored.') }
 };
 
 // Почему «Проверка NAT» не дала результата (поле error итога).
@@ -97,21 +98,23 @@ function missingText(list) {
 	return _('Configured but missing from the current rule set (ignored): %s').format(list.join(', '));
 }
 
-function fmtBytes(n) {
-	n = +n || 0;
-	const u = [ 'B', 'KiB', 'MiB', 'GiB', 'TiB' ];
+// Число в наибольших единицах, где оно не меньше 1: каждая следующая — в base раз больше.
+function scaled(n, base, units) {
 	let i = 0;
-	while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
-	return '%.1f %s'.format(n, u[i]);
+	while (n >= base && i < units.length - 1) { n /= base; i++; }
+	return '%.1f %s'.format(n, units[i]);
+}
+
+const BYTE_UNITS = [ 'B', 'KiB', 'MiB', 'GiB', 'TiB' ];
+const RATE_UNITS = [ _('bit/s'), _('kbit/s'), _('Mbit/s'), _('Gbit/s') ];
+
+function fmtBytes(n) {
+	return scaled(+n || 0, 1024, BYTE_UNITS);
 }
 
 // Байт/с → бит/с в десятичных единицах, как у провайдеров.
 function fmtRate(bps) {
-	let n = (+bps || 0) * 8;
-	const u = [ _('bit/s'), _('kbit/s'), _('Mbit/s'), _('Gbit/s') ];
-	let i = 0;
-	while (n >= 1000 && i < u.length - 1) { n /= 1000; i++; }
-	return '%.1f %s'.format(n, u[i]);
+	return scaled((+bps || 0) * 8, 1000, RATE_UNITS);
 }
 
 function fmtAge(sec) {
@@ -137,9 +140,55 @@ function fmtNum(n) {
 	return (+n || 0).toLocaleString();
 }
 
+// ---- Элементы страниц ----
+
 // Значок состояния. level: ok / warn / err / info или '' (нейтральный).
 function pill(level, text) {
 	return E('span', { 'class': 'truba-badge ' + (level || '') }, text);
+}
+
+// Пустой span под значение, которое опрос потом обновляет.
+function span(cls) {
+	return E('span', cls ? { 'class': cls } : {});
+}
+
+const SVGNS = 'http://www.w3.org/2000/svg';
+function svgEl(tag, attrs) {
+	const el = document.createElementNS(SVGNS, tag);
+	for (let k in attrs)
+		el.setAttribute(k, attrs[k]);
+	return el;
+}
+
+// Таблица «название — значение»: rows — [ [ название, значение ], … ].
+function kvTable(rows) {
+	return E('table', { 'class': 'truba-kv' }, rows.map(([ label, value ]) =>
+		E('tr', {}, [ E('th', { 'scope': 'row' }, label), E('td', {}, value) ])));
+}
+
+// Таблица LuCI: заголовки колонок и строки из row().
+function table(headers, rows) {
+	return E('table', { 'class': 'table' }, [
+		E('tr', { 'class': 'tr table-titles' }, headers.map((h) => E('th', { 'class': 'th' }, h))),
+		...rows
+	]);
+}
+
+// Строка таблицы LuCI: ячейки и, если нужно, свои атрибуты строки.
+function row(cells, attrs) {
+	return E('tr', { 'class': 'tr', ...attrs }, cells.map((c) => E('td', { 'class': 'td' }, c)));
+}
+
+// Кнопки-фильтры, нажата одна: items — [ [ значение, содержимое кнопки ], … ].
+function chips(items, initial, onSelect) {
+	const buttons = items.map(([ value, content ], k) => E('button', {
+		'class': 'truba-chip', 'type': 'button', 'aria-pressed': String(value == initial),
+		'click': () => {
+			buttons.forEach((b, j) => b.setAttribute('aria-pressed', String(j == k)));
+			onSelect(value);
+		}
+	}, content));
+	return buttons;
 }
 
 // Идёт загрузка или проверка.
@@ -167,8 +216,14 @@ function setLevel(el, level) {
 		el.classList.toggle(l, l == level);
 }
 
+// Значок или точка: уровень и текст.
+function setState(el, level, text) {
+	setLevel(el, level);
+	setText(el, text);
+}
+
 // Неразрывный пробел: пустая строка ячейки сохраняет высоту.
-const NBSP = String.fromCharCode(160);
+const NBSP = ' ';
 
 // Откуда скачан Набор правил и почему не скачался: бэкенд пишет «tunnel», «direct»,
 // «mirror» и ошибки вида «tunnel: download failed».
@@ -224,7 +279,8 @@ function tabUrl(tab) {
 return baseclass.extend({
 	callStatus, callLists, callCategories, callSets, callCheck, callUpdateLists, callRollbackLists, callRates, callLog, callLeases,
 	runNatTest, runTunnelTest,
-	ACTION_LABELS, ACTION_LEVELS, REASON_LABELS, WARNING_LABELS, NAT_ERRORS, UPNP_MISSING, NBSP, TABS,
-	fmtBytes, fmtRate, fmtAge, fmtTime, fmtDate, fmtNum, pill, busy, empty, missingText,
-	setText, setLevel, setResult, setError, tunnelIface, tunnelState, tabUrl, invalidTab
+	ACTION_LABELS, ACTION_LEVELS, REASON_LABELS, WARNINGS, NAT_ERRORS, UPNP_MISSING, NBSP, TABS,
+	fmtBytes, fmtRate, fmtAge, fmtTime, fmtDate, fmtNum, missingText,
+	pill, busy, empty, span, svgEl, kvTable, table, row, chips,
+	setText, setLevel, setState, setResult, setError, tunnelIface, tunnelState, tabUrl, invalidTab
 });

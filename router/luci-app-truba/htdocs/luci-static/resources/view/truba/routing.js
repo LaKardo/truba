@@ -17,17 +17,20 @@ function currentAction(mode, set, tag) {
 	return s ? s.action : 'mode';
 }
 
+function addRule(mode, set, tag, action) {
+	const sid = uci.add('truba', 'rule');
+	uci.set('truba', sid, 'mode', mode);
+	uci.set('truba', sid, 'set', set);
+	uci.set('truba', sid, 'tag', tag);
+	uci.set('truba', sid, 'action', action);
+}
+
 function setAction(mode, set, tag, action) {
 	for (let s of ruleSections(mode))
 		if (s.set == set && s.tag == tag)
 			uci.remove('truba', s['.name']);
-	if (action != 'mode') {
-		const sid = uci.add('truba', 'rule');
-		uci.set('truba', sid, 'mode', mode);
-		uci.set('truba', sid, 'set', set);
-		uci.set('truba', sid, 'tag', tag);
-		uci.set('truba', sid, 'action', action);
-	}
+	if (action != 'mode')
+		addRule(mode, set, tag, action);
 }
 
 function typesText(c) {
@@ -40,14 +43,6 @@ function typesText(c) {
 const FILTERS = [ 'all', 'explicit', 'tunnel', 'direct', 'block' ];
 
 function renderTable(mode, cats, filterBox) {
-	const header = E('tr', { 'class': 'tr table-titles' }, [
-		E('th', { 'class': 'th' }, _('Rule set')),
-		E('th', { 'class': 'th' }, _('Category')),
-		E('th', { 'class': 'th' }, _('Entries')),
-		E('th', { 'class': 'th' }, _('Types')),
-		E('th', { 'class': 'th' }, _('Included in')),
-		E('th', { 'class': 'th' }, _('Action'))
-	]);
 	const rows = cats.map((c) => {
 		const sel = E('select', { 'class': 'cbi-input-select', 'change': (ev) => {
 			setAction(mode, c.set, c.tag, ev.target.value);
@@ -55,16 +50,16 @@ function renderTable(mode, cats, filterBox) {
 			apply();
 		} }, ACTIONS.map((a) => E('option', { 'value': a }, common.ACTION_LABELS[a])));
 		sel.value = currentAction(mode, c.set, c.tag);
-		return E('tr', { 'class': 'tr', 'data-search': (c.set + ':' + c.tag).toLowerCase(), 'data-action': sel.value }, [
-			E('td', { 'class': 'td' }, c.set),
-			E('td', { 'class': 'td' }, E('strong', {}, c.tag)),
-			E('td', { 'class': 'td' }, common.fmtNum(c.count)),
-			E('td', { 'class': 'td' }, E('small', {}, typesText(c))),
-			E('td', { 'class': 'td' }, E('small', {}, (c.subset_of || []).join(', ') || '—')),
-			E('td', { 'class': 'td' }, sel)
-		]);
+		return common.row([
+			c.set,
+			E('strong', {}, c.tag),
+			common.fmtNum(c.count),
+			E('small', {}, typesText(c)),
+			E('small', {}, (c.subset_of || []).join(', ') || '—'),
+			sel
+		], { 'data-search': (c.set + ':' + c.tag).toLowerCase(), 'data-action': sel.value });
 	});
-	const table = E('table', { 'class': 'table' }, [ header ].concat(rows));
+	const table = common.table([ _('Rule set'), _('Category'), _('Entries'), _('Types'), _('Included in'), _('Action') ], rows);
 
 	// Поиск и фильтр по Действию; числа на кнопках фильтра — Категории этого Режима.
 	function apply() {
@@ -77,7 +72,7 @@ function renderTable(mode, cats, filterBox) {
 				n.explicit++;
 				n[a]++;
 			}
-			const hit = (!q || r.getAttribute('data-search').indexOf(q) >= 0)
+			const hit = (!q || r.getAttribute('data-search').includes(q))
 				&& (f == 'all' || (f == 'explicit' ? a != 'mode' : a == f));
 			r.style.display = hit ? '' : 'none';
 		}
@@ -104,13 +99,8 @@ return view.extend({
 		return this.map.parse().then(() => {
 			for (let s of ruleSections(mode))
 				uci.remove('truba', s['.name']);
-			for (let r of starting.filter((x) => x.mode == mode)) {
-				const sid = uci.add('truba', 'rule');
-				uci.set('truba', sid, 'mode', r.mode);
-				uci.set('truba', sid, 'set', r.set);
-				uci.set('truba', sid, 'tag', r.tag);
-				uci.set('truba', sid, 'action', r.action);
-			}
+			for (let r of starting.filter((x) => x.mode == mode))
+				addRule(r.mode, r.set, r.tag, r.action);
 			return uci.save();
 		}).then(() => window.location.reload());
 	},
@@ -119,9 +109,7 @@ return view.extend({
 		const info = data[0] || {};
 		const cats = (info.cats || []).slice().sort((a, b) =>
 			(a.set == b.set) ? (a.tag < b.tag ? -1 : 1) : (a.set == 'geoip' ? -1 : 1));
-		const present = {};
-		for (let c of cats)
-			present[c.set + ':' + c.tag] = true;
+		const present = new Set(cats.map((c) => c.set + ':' + c.tag));
 
 		const m = this.map = new form.Map('truba', _('Routing'),
 			_('Which traffic goes through the tunnel. Categories are taken from geoip.dat and geosite.dat as they are; new categories are never created.'));
@@ -158,7 +146,7 @@ return view.extend({
 		};
 
 		// Исключения для устройств — до Категорий: политика устройства сильнее их.
-		const leases = (data[3] && data[3].dhcp_leases) || [];
+		const leases = data[3]?.dhcp_leases || [];
 		const ds = m.section(form.GridSection, 'device', _('Device policies'),
 			_('Per-device exceptions. A device is recognised by its MAC address, also behind mesh nodes in 4-address mode (it keeps client MACs). Block still applies to all devices.'));
 		ds.anonymous = true;
@@ -203,22 +191,19 @@ return view.extend({
 			direct: common.ACTION_LABELS.direct, block: common.ACTION_LABELS.block };
 		const sections = [];
 		for (let mode of [ 'all', 'selective' ]) {
-			const missing = ruleSections(mode).filter((r) => !present[r.set + ':' + r.tag]);
+			const missing = ruleSections(mode).filter((r) => !present.has(r.set + ':' + r.tag));
 			const filterBox = {
 				text: E('input', { 'type': 'search', 'class': 'cbi-input-text', 'placeholder': _('Search category…') }),
 				value: 'all',
 				counts: {}
 			};
-			// Кнопки фильтра: нажатая — aria-pressed; число Категорий — после названия.
-			const chips = FILTERS.map((f) => {
-				filterBox.counts[f] = E('span', { 'class': 'truba-num' });
-				const b = E('button', { 'class': 'truba-chip', 'type': 'button', 'aria-pressed': f == 'all' ? 'true' : 'false', 'click': () => {
-					filterBox.value = f;
-					for (let x of chips)
-						x.setAttribute('aria-pressed', x === b ? 'true' : 'false');
-					filterBox.apply();
-				} }, [ common.ACTION_LEVELS[f] ? E('span', { 'class': 'truba-dot ' + common.ACTION_LEVELS[f] }) : '', FILTER_LABELS[f], filterBox.counts[f] ]);
-				return b;
+			// Кнопки фильтра: число Категорий — после названия.
+			const chips = common.chips(FILTERS.map((f) => {
+				filterBox.counts[f] = common.span('truba-num');
+				return [ f, [ common.ACTION_LEVELS[f] ? common.span('truba-dot ' + common.ACTION_LEVELS[f]) : '', FILTER_LABELS[f], filterBox.counts[f] ] ];
+			}), filterBox.value, (f) => {
+				filterBox.value = f;
+				filterBox.apply();
 			});
 			// Пропавшие Категории не применяются: их можно убрать из настроек одной кнопкой.
 			const missingBox = missing.length ? E('div', { 'class': 'alert-message warning truba-toolbar' }, [
