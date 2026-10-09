@@ -28,7 +28,9 @@ uci -q commit firewall
 
 [ -f /etc/rc.local ] && sed -i '\#/etc/truba/reinstall.sh#d' /etc/rc.local
 
-# Последняя удачная копия правил (ADR 0006) — производная от настроек, без пакета не нужна.
-rm -rf /etc/truba/good
+# Данные службы: Наборы правил с предыдущими версиями и последняя удачная копия правил на
+# флеше, распакованные списки и итоги проверок в памяти.
+rm -rf /etc/truba/lists /etc/truba/state /etc/truba/good \
+	/var/lib/truba /var/run/truba /var/etc/truba /tmp/truba-dl
 
 exit 0

@@ -7,7 +7,6 @@ import * as C from 'truba.const';
 import * as U from 'truba.util';
 import * as F from 'truba.conf';
 import * as N from 'truba.net';
-import * as K from 'truba.core';
 
 function handshake_age(dev) {
 	let r = U.run('awg show ' + U.shq(dev) + ' latest-handshakes');
@@ -79,6 +78,8 @@ function run_tunnel_test() {
 	if (mtu > 84)
 		push(sizes, mtu);
 	let dir = trim(U.run('mktemp -d /tmp/truba-tt.XXXXXX').out);
+	if (!match(dir, /^\/tmp\/truba-tt\./))
+		return { error: 'tmp' };
 	let cmd = '';
 	for (let s in sizes)
 		cmd += sprintf('ping -c 5 -W 2 -s %d -I %s %s > %s/%d 2>&1 & ', s - 28, U.shq(st.device), U.shq(target), dir, s);
@@ -152,7 +153,7 @@ export function run() {
 		U.mkdirp(C.RUN_DIR);
 		U.write_json(C.HEALTH_FILE, { ...rec, state, since, fails, probes });
 		let c = F.load();
-		let table = K.routes(c, F.tunnel_info(c.iface));
+		let table = N.routes(c, F.tunnel_info(c.iface));
 		U.log(next == 'healthy' ? 'notice' : 'warning',
 			sprintf('Туннель %s (%s); таблица Туннеля: %s',
 				next == 'healthy' ? 'восстановлен' : 'не отвечает', info, table));

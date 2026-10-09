@@ -49,7 +49,7 @@ case 'teardown':
 	break;
 
 case 'routes':
-	print(load('core').routes(), '\n');
+	print(load('net').routes(), '\n');
 	break;
 
 case 'refresh-bypass':

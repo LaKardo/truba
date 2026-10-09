@@ -261,31 +261,29 @@ function upstream(u, mark) {
 // JSON — подмножество YAML, mosdns читает его как обычный конфиг.
 // gsdir — каталог списков доменов (по умолчанию распакованные в DATA_DIR).
 export function mosdns(cfg, plan, router_hosts, gsdir) {
-	let P = [];
-	let main = [];
-
-	main = [
+	let plugins = [];
+	let main = [
 		{ matches: [ 'qtype 28' ], exec: 'reject 0' },   // AAAA → пусто: Маршрутизация только IPv4 (ADR 0005)
 		{ exec: '$cache' },
 	];
 
 	if (length(router_hosts)) {
-		push(P, { tag: 'c_router', type: 'domain_set', args: { exps: map(router_hosts, h => 'full:' + h) } });
+		push(plugins, { tag: 'c_router', type: 'domain_set', args: { exps: map(router_hosts, h => 'full:' + h) } });
 		push(main, { matches: [ 'qname $c_router' ], exec: 'goto flow_router' });
 	}
 
 	let i = 0;
 	for (let g in plan.geosite) {
 		let tag = sprintf('c_%d', i++);
-		push(P, { tag, type: 'domain_set', args: { files: [ D.geosite_file(g.tag, gsdir) ] } });
+		push(plugins, { tag, type: 'domain_set', args: { files: [ D.geosite_file(g.tag, gsdir) ] } });
 		let ex = (g.action == 'block') ? 'reject 3' : ((g.action == 'tunnel') ? 'goto flow_tunnel' : 'goto flow_direct');
 		push(main, { matches: [ 'qname $' + tag ], exec: ex });
 	}
 	push(main, { exec: 'goto flow_default' });
 
-	push(P, { tag: 'up_tunnel', type: 'forward',
+	push(plugins, { tag: 'up_tunnel', type: 'forward',
 	          args: { concurrent: 2, upstreams: map(cfg.dns.tunnel, u => upstream(u, C.MARK_TUNNEL)) } });
-	push(P, { tag: 'up_direct', type: 'forward',
+	push(plugins, { tag: 'up_direct', type: 'forward',
 	          args: { concurrent: 2, upstreams: map(cfg.dns.direct, u => upstream(u, null)) } });
 	// Ленивый кэш: истёкшая запись отдаётся сразу (TTL 5 с) и проходит дальше по цепочке, в том числе
 	// через nftset, а свежий ответ запрашивается в фоне по тем же правилам. 0 — выключен.
@@ -294,38 +292,38 @@ export function mosdns(cfg, plan, router_hosts, gsdir) {
 	let cache = { size: cfg.dns.cache_size, dump_file: C.MOSDNS_DUMP };
 	if (cfg.dns.lazy_cache_ttl > 0)
 		cache.lazy_cache_ttl = cfg.dns.lazy_cache_ttl;
-	push(P, { tag: 'cache', type: 'cache', args: cache });
+	push(plugins, { tag: 'cache', type: 'cache', args: cache });
 
 	let ttl = sprintf('ttl 0-%d', cfg.dns.ttl_max);
 	// nftset в mosdns 5 — только встроенное действие: «семейство,таблица,набор,тип,маска».
 	let nftset = (set) => sprintf('nftset inet,%s,%s,ipv4_addr,32', C.NFT_TABLE, set);
 	// Ответ из кэша тоже проходит через nftset: после пересборки наборов IP возвращаются сами.
-	push(P, { tag: 'flow_tunnel', type: 'sequence', args: [
+	push(plugins, { tag: 'flow_tunnel', type: 'sequence', args: [
 		{ matches: [ '!has_resp' ], exec: '$up_tunnel' },
 		{ exec: ttl },
 		{ exec: nftset('gs_tunnel4') },
 	] });
-	push(P, { tag: 'flow_direct', type: 'sequence', args: [
+	push(plugins, { tag: 'flow_direct', type: 'sequence', args: [
 		{ matches: [ '!has_resp' ], exec: '$up_direct' },
 		{ exec: ttl },
 		{ exec: nftset('gs_direct4') },
 	] });
-	push(P, { tag: 'flow_router', type: 'sequence', args: [
+	push(plugins, { tag: 'flow_router', type: 'sequence', args: [
 		{ matches: [ '!has_resp' ], exec: '$up_direct' },
 	] });
-	push(P, { tag: 'flow_default', type: 'sequence', args: [
+	push(plugins, { tag: 'flow_default', type: 'sequence', args: [
 		{ matches: [ '!has_resp' ], exec: (plan.mode_default == 'tunnel') ? '$up_tunnel' : '$up_direct' },
 	] });
 
-	push(P, { tag: 'main', type: 'sequence', args: main });
+	push(plugins, { tag: 'main', type: 'sequence', args: main });
 
 	let listen = sprintf('127.0.0.1:%d', cfg.dns.port);
-	push(P, { tag: 'udp_in', type: 'udp_server', args: { entry: 'main', listen } });
-	push(P, { tag: 'tcp_in', type: 'tcp_server', args: { entry: 'main', listen } });
+	push(plugins, { tag: 'udp_in', type: 'udp_server', args: { entry: 'main', listen } });
+	push(plugins, { tag: 'tcp_in', type: 'tcp_server', args: { entry: 'main', listen } });
 
 	// API — ради счётчиков кэша (/metrics) на «Обзоре». Только 127.0.0.1: там же mosdns отдаёт
 	// и /debug/pprof, снаружи Роутера их не видно. Нет адреса — порт занят, без API.
-	let conf = { log: { level: 'warn' }, plugins: P };
+	let conf = { log: { level: 'warn' }, plugins };
 	if (cfg.dns.api)
 		conf.api = { http: cfg.dns.api };
 	return conf;

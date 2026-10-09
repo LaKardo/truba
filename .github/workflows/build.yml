@@ -90,6 +90,10 @@ jobs:
       fail-fast: false
       matrix:
         version: ${{ fromJson(needs.matrix.outputs.versions) }}
+    # Версия и имя файла SDK попадают в скрипты через окружение, а не подстановкой в их текст:
+    # так они остаются данными, даже если в списке выпусков окажется что-то чужое.
+    env:
+      IWRT_VERSION: ${{ matrix.version }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
@@ -102,7 +106,7 @@ jobs:
           FULL: ${{ inputs.full }}
         run: |
           set -euo pipefail
-          dir="${{ matrix.version }}/$TARGET/$SUBTARGET"
+          dir="$IWRT_VERSION/$TARGET/$SUBTARGET"
           fp=$( { echo "$AWG_BUILD_REV"; git ls-files -s router/awg; } | sha256sum | cut -c1-16)
           echo "fingerprint=$fp" >> "$GITHUB_OUTPUT"
           reuse=false
@@ -134,7 +138,7 @@ jobs:
         id: sdk
         run: |
           set -euo pipefail
-          base="https://downloads.immortalwrt.org/releases/${{ matrix.version }}/targets/$TARGET/$SUBTARGET"
+          base="https://downloads.immortalwrt.org/releases/$IWRT_VERSION/targets/$TARGET/$SUBTARGET"
           wget -q --tries=3 --timeout=60 "$base/sha256sums"
           sdk=$(grep -oE 'immortalwrt-sdk-[^ ]+\.tar\.zst' sha256sums | head -1)
           [ -n "$sdk" ] || { echo "SDK не найден в $base"; exit 1; }
@@ -153,13 +157,18 @@ jobs:
 
       - name: Скачать SDK
         if: steps.sdk-cache.outputs.cache-hit != 'true'
-        run: wget -q --tries=3 "${{ steps.sdk.outputs.url }}"
+        env:
+          SDK_URL: ${{ steps.sdk.outputs.url }}
+        run: wget -q --tries=3 "$SDK_URL"
 
       - name: Проверить и распаковать SDK
+        env:
+          SDK_FILE: ${{ steps.sdk.outputs.file }}
+          SDK_SHA256: ${{ steps.sdk.outputs.sha256 }}
         run: |
           set -euo pipefail
-          echo "${{ steps.sdk.outputs.sha256 }}  ${{ steps.sdk.outputs.file }}" | sha256sum -c -
-          mkdir sdk && tar -I zstd -xf "${{ steps.sdk.outputs.file }}" -C sdk --strip-components=1
+          echo "$SDK_SHA256  $SDK_FILE" | sha256sum -c -
+          mkdir sdk && tar -I zstd -xf "$SDK_FILE" -C sdk --strip-components=1
 
       # Сохраняем сразу после проверки, а не в конце задания: кэш пригодится, даже если сборка упадёт.
       - name: SDK в кэш
@@ -307,12 +316,12 @@ jobs:
       - name: Каталог фида
         run: |
           set -euo pipefail
-          dst="publish/${{ matrix.version }}/$TARGET/$SUBTARGET"
+          dst="publish/$IWRT_VERSION/$TARGET/$SUBTARGET"
           mkdir -p "$dst" publish/keys
           cp -a sdk/bin/truba-feed/. "$dst/"
           cp sdk/public-key.pem publish/keys/truba.pem
           printf '{"version":"%s","target":"%s","subtarget":"%s","built":"%s"}\n' \
-            "${{ matrix.version }}" "$TARGET" "$SUBTARGET" "$(date -u +%FT%TZ)" > "$dst/feed.json"
+            "$IWRT_VERSION" "$TARGET" "$SUBTARGET" "$(date -u +%FT%TZ)" > "$dst/feed.json"
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:

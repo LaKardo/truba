@@ -214,6 +214,10 @@ msgid "no address to ping"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/diagnostics.js
+msgid "no room for temporary files on the router"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/diagnostics.js
 msgid "the rule sets are being unpacked, try again in a minute"
 msgstr ""
 
@@ -1254,15 +1258,15 @@ msgid "since the interface came up, including the router's own traffic"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/tunnel.js
-msgid "Latency over 10 min"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/tunnel.js
 msgid "Points are the watchdog checks; a gap is a lost ping."
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/tunnel.js
 msgid "%d–%d ms"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/tunnel.js
+msgid "Latency over %d min"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/tunnel.js
@@ -1426,7 +1430,7 @@ msgid "Keeps the provider NAT mapping open so inbound connections via the Truba 
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/tunnel.js
-msgid "Pings the Truba inside the tunnel and checks the handshake age; restarts the interface after repeated failures. Every 5 minutes it also checks that full-size packets get through."
+msgid "Pings the Truba inside the tunnel and checks the handshake age; restarts the interface after repeated failures. Every tenth check also makes sure that full-size packets get through."
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/tunnel.js

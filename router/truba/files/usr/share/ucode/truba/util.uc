@@ -67,14 +67,19 @@ export function read_json(path, dflt) {
 	}
 };
 
-// Атомарная запись: во временный файл и rename.
+// Атомарная запись: во временный файл и rename. Записано не всё (флеш заполнен) — прежний
+// файл остаётся: обрезанная копия не должна заменять целую.
 export function write_atomic(path, data, mode) {
 	let tmp = path + '.tmp';
 	let fd = open(tmp, 'w', mode ?? 0644);
 	if (!fd)
 		return false;
-	fd.write(data);
+	let ok = (fd.write(data) == length(data));
 	fd.close();
+	if (!ok) {
+		unlink(tmp);
+		return false;
+	}
 	return rename(tmp, path);
 };
 
@@ -151,6 +156,21 @@ export function cidr_range(cidr) {
 export function cidr_contains(cidr, ip) {
 	let r = cidr_range(cidr), n = ip2int(ip);
 	return (r != null && n != null && n >= r[0] && n <= r[1]);
+};
+
+// IPv4-адреса имени через nslookup (busybox); server — DNS-сервер, по умолчанию системный.
+// Адреса ответа идут после строки «Name:», до неё — адрес самого DNS-сервера.
+export function nslookup(host, server) {
+	let r = run('nslookup ' + shq(host) + (server ? ' ' + shq(server) : ''));
+	let ips = [], answer = false;
+	for (let line in split(r.out, '\n')) {
+		if (match(line, /^Name:/))
+			answer = true;
+		let m = answer ? match(line, /^Address( [0-9]+)?:\s*([0-9.]+)\s*$/) : null;
+		if (m)
+			push(ips, m[2]);
+	}
+	return uniq(ips);
 };
 
 export function is_ipv4(s) {

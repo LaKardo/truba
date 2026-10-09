@@ -7,15 +7,17 @@
 section "Проверка NAT: STUN через Туннель"
 # Два STUN-сервера в netns vps отвечают IP Трубы и портом источника; .83 и .84 молчат.
 # По очереди молчащие стоили бы по 4,5 с каждый, разом — одно окно повторов.
+# Молчащие — первыми в списке: ответ должен достаться своему серверу, а не первому ждущему.
 for a in 81 82; do
 	ip -n vps addr add 203.0.113.$a/32 dev lo
 	ip netns exec vps ucode /repo/tests/lib/stun_server.uc 203.0.113.$a 3478 198.51.100.2 >/dev/null 2>&1 &
 done
-for a in 81 82 83 84; do uci add_list truba.main.stun="203.0.113.$a:3478"; done
+for a in 83 84 81 82; do uci add_list truba.main.stun="203.0.113.$a:3478"; done
 uci commit truba
 T0=$(date +%s); truba nat-test > /tmp/nat.json; T1=$(date +%s)
 nat() { jsonfilter -i /tmp/nat.json -e "$1"; }
-check "ответили два сервера из четырёх, молчащий — тайм-аут" eval '[ "$(nat @.answered)" = 2 ] && [ "$(nat "@.servers[3].error")" = timeout ]'
+check "ответили два сервера из четырёх" test "$(nat @.answered)" = 2
+check "ответ записан своему серверу, молчащие — тайм-аут" eval '[ "$(nat "@.servers[0].error")" = timeout ] && [ "$(nat "@.servers[1].error")" = timeout ] && [ -n "$(nat "@.servers[2].mapped.port")" ] && [ -n "$(nat "@.servers[3].mapped.port")" ]'
 check "внешний IP — IP Трубы, порт сохранён, отображение одинаково, итог OK" eval '[ "$(nat @.ip_is_vps)" = true ] && [ "$(nat @.port_preserved)" = true ] && [ "$(nat @.consistent)" = true ] && [ "$(nat @.ok)" = true ]'
 check "серверы опрашиваются разом (не дольше 7 с, было $((T1 - T0)) с)" test $((T1 - T0)) -le 7
 check "status: итог для «Обзора»" test "$(truba status | jsonfilter -e '@.nat.ok')" = true

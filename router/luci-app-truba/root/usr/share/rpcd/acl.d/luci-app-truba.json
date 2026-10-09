@@ -4,9 +4,9 @@
 		"read": {
 			"ubus": {
 				"truba": [ "status", "lists", "categories", "sets", "check", "nat_result", "tunnel_result", "rates", "log" ],
-				"luci-rpc": [ "getDHCPLeases", "getHostHints" ]
+				"luci-rpc": [ "getDHCPLeases" ]
 			},
-			"uci": [ "truba", "network", "firewall", "dhcp", "upnpd" ]
+			"uci": [ "truba", "network", "firewall", "upnpd" ]
 		},
 		"write": {
 			"ubus": {

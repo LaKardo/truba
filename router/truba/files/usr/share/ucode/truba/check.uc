@@ -116,19 +116,6 @@ function any_of(tags, wanted) {
 	return false;
 }
 
-function resolve(domain) {
-	let r = U.run('nslookup ' + U.shq(domain) + ' 127.0.0.1');
-	let ips = [], seen_server = false;
-	for (let line in split(r.out, '\n')) {
-		if (match(line, /^Name:/))
-			seen_server = true;
-		let m = match(line, /^Address( [0-9]+)?:\s*([0-9.]+)\s*$/);
-		if (m && seen_server)
-			push(ips, m[2]);
-	}
-	return uniq(ips);
-}
-
 // Решение для адреса — по тому же Приоритету (P.PRIORITY), из которого строится цепочка
 // classify. kern — наборы из ядра (bypass4, gs_tunnel4, gs_direct4: их наполняют интерфейсы
 // и mosdns). Наборы geoip выводятся из Категорий адреса и плана: в ядре каждый из них —
@@ -231,7 +218,7 @@ export function check(target, mac) {
 
 	// Резолв через Роутер: mosdns заодно кладёт IP в набор своей Категории,
 	// поэтому итог по IP совпадает с тем, что увидит nftables для нового соединения.
-	res.ips = verdicts(cfg, plan, cats, resolve(d), mac);
+	res.ips = verdicts(cfg, plan, cats, U.nslookup(d, '127.0.0.1'), mac);
 	if (length(res.ips)) {
 		res.action = res.ips[0].action;
 		res.reason = res.ips[0].reason;

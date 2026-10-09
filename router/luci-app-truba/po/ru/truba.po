@@ -563,7 +563,7 @@ msgid "bit/s"
 msgstr "бит/с"
 
 msgid "kbit/s"
-msgstr "Кбит/с"
+msgstr "кбит/с"
 
 msgid "Mbit/s"
 msgstr "Мбит/с"
@@ -683,7 +683,7 @@ msgid "Packet loss"
 msgstr "Потери"
 
 msgid "Interface traffic"
-msgstr "Через интерфейс"
+msgstr "Трафик интерфейса"
 
 msgid "No warnings"
 msgstr "Без предупреждений"
@@ -704,7 +704,7 @@ msgid "%d%% over %d min"
 msgstr "%d%% за %d мин"
 
 msgid "not used: routing is off"
-msgstr "не нужен: Маршрутизация выключена"
+msgstr "не используется: Маршрутизация выключена"
 
 msgid "%d%% from cache · %d%% expired"
 msgstr "%d%% из кэша · %d%% устаревших"
@@ -857,7 +857,7 @@ msgid "Cache filled"
 msgstr "Заполнение кэша"
 
 msgid "Counted"
-msgstr "Считается"
+msgstr "Отсчёт"
 
 msgid "mosdns running"
 msgstr "mosdns работает"
@@ -995,7 +995,7 @@ msgid "In the sets now"
 msgstr "В наборах сейчас"
 
 msgid "nothing: routing is off"
-msgstr "пусто: маршрутизация выключена"
+msgstr "пусто: Маршрутизация выключена"
 
 msgid "In the network"
 msgstr "В сети"
@@ -1015,8 +1015,8 @@ msgstr "Фильтр по Действию"
 msgid "Full-size packets"
 msgstr "Крупные пакеты"
 
-msgid "Latency over 10 min"
-msgstr "Задержка за 10 мин"
+msgid "Latency over %d min"
+msgstr "Задержка за %d мин"
 
 msgid "Points are the watchdog checks; a gap is a lost ping."
 msgstr "Точки — проверки контроля Туннеля; разрыв — потерянный ping."
@@ -1033,8 +1033,8 @@ msgstr "теряются (%d из %d) · %d байт: уменьшите MTU"
 msgid "install-vps.sh picks it for the VPS network. If full-size packets do not get through (see State above), lower it on both sides."
 msgstr "install-vps.sh подбирает его под сеть VPS. Если крупные пакеты не проходят (см. «Состояние» выше), уменьшите его на обеих сторонах."
 
-msgid "Pings the Truba inside the tunnel and checks the handshake age; restarts the interface after repeated failures. Every 5 minutes it also checks that full-size packets get through."
-msgstr "Пингует Трубу внутри Туннеля и следит за возрастом handshake; после нескольких неудач подряд перезапускает интерфейс. Раз в 5 минут проверяет, что проходят крупные пакеты."
+msgid "Pings the Truba inside the tunnel and checks the handshake age; restarts the interface after repeated failures. Every tenth check also makes sure that full-size packets get through."
+msgstr "Пингует Трубу внутри Туннеля и следит за возрастом handshake; после нескольких неудач подряд перезапускает интерфейс. Раз в 10 проверок убеждается, что проходят крупные пакеты."
 
 msgid "Connection"
 msgstr "Подключение"
@@ -1109,7 +1109,10 @@ msgid "24 h ago"
 msgstr "24 ч назад"
 
 msgid "Period"
-msgstr "Срок"
+msgstr "Период"
 
 msgid "Speed is not being recorded: the Truba service is not running."
 msgstr "Скорость не записывается: служба Трубы не запущена."
+
+msgid "no room for temporary files on the router"
+msgstr "на Роутере нет места для временных файлов"

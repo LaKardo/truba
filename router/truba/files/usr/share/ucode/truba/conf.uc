@@ -236,13 +236,7 @@ export function vps_ip(tinfo) {
 		return null;
 	if (U.is_ipv4(tinfo.endpoint))
 		return tinfo.endpoint;
-	let r = U.run('nslookup ' + U.shq(tinfo.endpoint));
-	let ips = [];
-	for (let line in split(r.out, '\n')) {
-		let m = match(line, /^Address( [0-9]+)?:\s*([0-9.]+)\s*$/);
-		if (m && m[2] != '127.0.0.1')
-			push(ips, m[2]);
-	}
+	let ips = U.nslookup(tinfo.endpoint);
 	return ips[length(ips) - 1];
 };
 

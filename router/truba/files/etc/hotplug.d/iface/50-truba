@@ -8,7 +8,8 @@ IFACE="$(uci -q get truba.main.iface)"
 IFACE="${IFACE:-awg0}"
 
 if [ "$INTERFACE" = "$IFACE" ]; then
-	[ "$ACTION" = ifup ] && [ -n "$DEVICE" ] && sysctl -qw "net.ipv4.conf.$DEVICE.rp_filter=0"
+	# В ключе sysctl точка разделяет уровни: точку в имени устройства (VLAN) пишут как «/».
+	[ "$ACTION" = ifup ] && [ -n "$DEVICE" ] && sysctl -qw "net.ipv4.conf.$(echo "$DEVICE" | tr . /).rp_filter=0"
 	/usr/sbin/truba routes >/dev/null 2>&1
 fi
 

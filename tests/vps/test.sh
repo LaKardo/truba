@@ -176,6 +176,13 @@ SSH_PORT=51022 SSH_CONFIRMED=0 SSH_FALLBACK=50022; save_state
 ( unset SSH_FALLBACK; load_state; [ "$SSH_FALLBACK" = 50022 ] ) && ok "pipe.env хранит запасной порт SSH" || fail "pipe.env: SSH_FALLBACK"
 unset OPT_SSH_PORT
 
+# Параметры: порт без значения или не число — понятная ошибка до любых изменений, а не
+# «unbound variable» и не отказ nftables посреди установки.
+arg_err() { ( main install "$@" ) 2>&1 >/dev/null; }
+case "$(arg_err --ssh-port)" in *"укажите номер порта"*) ok "параметры: порт без значения";; *) fail "параметры: порт без значения: $(arg_err --ssh-port)";; esac
+case "$(arg_err --awg-port 70000)" in *"неверный номер порта"*) ok "параметры: порт вне 1–65535";; *) fail "параметры: порт вне 1–65535: $(arg_err --awg-port 70000)";; esac
+case "$(arg_err --ssh-port 22x)" in *"неверный номер порта"*) ok "параметры: порт не число";; *) fail "параметры: порт не число: $(arg_err --ssh-port 22x)";; esac
+
 echo
 [ "$FAILS" -eq 0 ] && echo "ALL OK" || echo "$FAILS FAILED"
 exit "$FAILS"

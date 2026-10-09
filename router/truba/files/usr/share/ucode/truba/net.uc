@@ -5,6 +5,7 @@ import { cursor } from 'uci';
 import { readfile, stat, unlink } from 'fs';
 import * as C from 'truba.const';
 import * as U from 'truba.util';
+import * as F from 'truba.conf';
 
 const T = '' + C.RT_TABLE;
 
@@ -56,6 +57,23 @@ export function set_table(state, iface, tinfo, killswitch) {
 	}
 	system('ip -4 route del default table ' + T + ' 2>/dev/null');
 	return 'fallback';
+};
+
+// Таблица 77 по здоровью Туннеля: его состояние watchdog пишет в HEALTH_FILE.
+export function routes(cfg, tinfo) {
+	cfg ??= F.load();
+	tinfo ??= F.tunnel_info(cfg.iface);
+	let st = iface_up(cfg.iface);
+	let h = U.read_json(C.HEALTH_FILE, null);
+	let state;
+	if (tinfo.disabled || !st.up)
+		state = 'down';
+	else if (cfg.watchdog.enabled && h?.state == 'down')
+		state = 'down';
+	else
+		state = 'healthy';
+	// Аварийная блокировка имеет смысл только при включённой Маршрутизации.
+	return set_table(state, cfg.iface, tinfo, cfg.routing && cfg.killswitch);
 };
 
 export function set_rp_filter(dev) {

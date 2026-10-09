@@ -32,6 +32,9 @@ function parseLog(text) {
 				level = /ERROR|FATAL|PANIC/.test(lv) ? 'err' : lv == 'WARN' ? 'warn' : 'info';
 				msg = p.slice(2).join(' ');
 			}
+			// Дампа кэша нет после каждой загрузки Роутера (он в памяти) — это не ошибка.
+			if (/failed to load cache dump.*no such file/.test(msg))
+				level = 'info';
 		}
 		return { time: '%02d.%02d %s'.format(+m[2], MONTHS[m[1]] || 0, m[3]), src: m[5], level, text: msg };
 	});
@@ -53,7 +56,8 @@ const TT_ERRORS = {
 	not_configured: common.NAT_ERRORS.not_configured,
 	tunnel_down: common.NAT_ERRORS.tunnel_down,
 	timeout: common.NAT_ERRORS.timeout,
-	no_target: _('no address to ping')
+	no_target: _('no address to ping'),
+	tmp: _('no room for temporary files on the router')
 };
 
 // Почему «Проверить домен/IP» не дала результата.

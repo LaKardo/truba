@@ -154,6 +154,7 @@ check "без Трубы ответ на входящее уходит мимо 
 
 section "uninstall"
 sh /usr/share/truba/uninstall.sh
-check "зона truba удалена, аппаратное ускорение возвращено, копия правил удалена" eval '[ -z "$(uci -q get firewall.truba)" ] && [ "$(uci -q get firewall.@defaults[0].flow_offloading_hw)" = 1 ] && [ ! -e /etc/truba/good ]'
+check "зона truba удалена, аппаратное ускорение возвращено" eval '[ -z "$(uci -q get firewall.truba)" ] && [ "$(uci -q get firewall.@defaults[0].flow_offloading_hw)" = 1 ]'
+check "данные службы удалены: Наборы правил, копия правил, распакованные списки" eval '[ ! -e /etc/truba/lists ] && [ ! -e /etc/truba/state ] && [ ! -e /etc/truba/good ] && [ ! -e /var/lib/truba ]'
 
 finish

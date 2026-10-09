@@ -59,23 +59,6 @@ function table_loaded() {
 	return system('nft list chain inet ' + C.NFT_TABLE + ' prerouting >/dev/null 2>&1') == 0;
 }
 
-// Состояние таблицы 77 по здоровью Туннеля.
-export function routes(cfg, tinfo) {
-	cfg ??= F.load();
-	tinfo ??= F.tunnel_info(cfg.iface);
-	let st = N.iface_up(cfg.iface);
-	let h = S.health_state();
-	let state;
-	if (tinfo.disabled || !st.up)
-		state = 'down';
-	else if (cfg.watchdog.enabled && h?.state == 'down')
-		state = 'down';
-	else
-		state = 'healthy';
-	// Аварийная блокировка имеет смысл только при включённой Маршрутизации.
-	return N.set_table(state, cfg.iface, tinfo, cfg.routing && cfg.killswitch);
-};
-
 // ---- Наборы правил на флеше: текущие и предыдущие ----
 
 // Поменять местами текущие и предыдущие Наборы правил. Вызывать под блокировкой LOCK_LISTS.
@@ -100,8 +83,8 @@ function swap_lists() {
 	return swapped;
 }
 
-// Распаковать Наборы правил. Если текущие не читаются (остались от версий, которые не
-// проверяли скачанное, или повреждены на флеше), вернуть предыдущие и распаковать их.
+// Распаковать Наборы правил. Если текущие не читаются (повреждены на флеше), вернуть
+// предыдущие и распаковать их.
 // Блокировку списков не ждём: её держит update-lists, а он сам применит новые, когда закончит.
 function unpack_lists(warnings) {
 	try {
@@ -279,7 +262,7 @@ function apply_config(res, prev) {
 	N.ensure_rules(st.device);
 	if (st.up)
 		N.set_rp_filter(st.device);
-	res.table = routes(cfg, tinfo);
+	res.table = N.routes(cfg, tinfo);
 	N.cron_set(cfg.routing && cfg.lists.auto_update, cfg.lists.update_utc);
 	N.upnp_set(cfg.upnp, cfg.iface, vps);
 
@@ -331,7 +314,7 @@ function keep_running(res, prev) {
 		N.ensure_rules(st.device);
 		if (st.up)
 			N.set_rp_filter(st.device);
-		out.table = routes(cfg, tinfo);
+		out.table = N.routes(cfg, tinfo);
 	}
 	catch (e) {
 		U.err('таблица Туннеля не пересчитана: ' + U.errmsg(e));

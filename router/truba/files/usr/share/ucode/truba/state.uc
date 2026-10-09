@@ -81,14 +81,13 @@ function traffic(raw) {
 	};
 }
 
-// Соседи, которые искажают учёт или проверки Трубы.
+// Соседи, которые искажают учёт Трубы: программное ускорение (аппаратное выключает установка).
 function neighbours() {
 	let c = cursor();
-	let res = { offload: false, offload_hw: false };
+	let res = { offload: false };
 	if (c.load('firewall'))
 		c.foreach('firewall', 'defaults', (s) => {
 			res.offload ||= (s.flow_offloading == '1');
-			res.offload_hw ||= (s.flow_offloading_hw == '1');
 		});
 	return res;
 }

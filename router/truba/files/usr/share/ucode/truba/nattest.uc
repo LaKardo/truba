@@ -57,9 +57,11 @@ function query(s, servers) {
 			r.error = 'dns';
 			continue;
 		}
+		// Свой случайный transaction ID у каждого сервера: по нему ответ находит свой запрос.
+		// rand() в ucode — целое от 0 до RAND_MAX, а не дробь.
 		let tid = '';
 		for (let i = 0; i < 12; i++)
-			tid += chr(int(rand() * 256) & 255);
+			tid += chr(rand() % 256);
 		r.error = 'timeout';
 		push(pending, { r, tid, addr: ai[0].addr, req: chr(0, 1, 0, 0, 0x21, 0x12, 0xa4, 0x42) + tid });
 	}

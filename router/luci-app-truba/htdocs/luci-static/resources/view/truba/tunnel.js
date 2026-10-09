@@ -9,6 +9,9 @@
 // ---- Состояние Туннеля: строки постоянны, опрос раз в 5 с меняет только значения ----
 
 const SW = 200, SH = 50;
+// Окно последних проверок watchdog (PROBE_WINDOW в truba.watchdog): его длина во времени
+// зависит от интервала проверки.
+const PROBE_WINDOW = 20;
 const span = common.span, setState = common.setState;
 
 function buildState() {
@@ -22,6 +25,8 @@ function buildState() {
 	r.table = span();
 	r.iface = span('truba-num');
 	r.scale = span('truba-num');
+	r.window = span();
+	r.from = span();
 	const svg = common.svgEl('svg', { 'viewBox': '0 0 %d %d'.format(SW, SH), 'preserveAspectRatio': 'none', 'aria-hidden': 'true' });
 	r.spark = svg.appendChild(common.svgEl('path', { 'class': 'line tunnel' }));
 
@@ -39,9 +44,9 @@ function buildState() {
 					E('div', { 'class': 'truba-muted' }, _('since the interface came up, including the router\'s own traffic')) ] ]
 			]),
 			E('div', {}, [
-				E('div', { 'class': 'truba-legend' }, _('Latency over 10 min')),
+				E('div', { 'class': 'truba-legend' }, r.window),
 				E('div', { 'class': 'truba-chart small' }, svg),
-				E('div', { 'class': 'truba-chart-axis' }, [ E('span', {}, _('10 min ago')), r.scale, E('span', {}, _('now')) ]),
+				E('div', { 'class': 'truba-chart-axis' }, [ r.from, r.scale, E('span', {}, _('now')) ]),
 				E('p', { 'class': 'truba-muted' }, _('Points are the watchdog checks; a gap is a lost ping.'))
 			])
 		])
@@ -88,6 +93,11 @@ function updateState(r, st) {
 
 	// Окно пустое — проверок ещё не было (или не с чем: нет адреса для ping): не «нет ответа».
 	const probes = Array.isArray(h.probes) ? h.probes : [];
+	const interval = h.interval || +uci.get('truba', 'watchdog', 'interval') || 30;
+	const mins = (n) => Math.max(1, Math.round(n * interval / 60));
+	const win = mins(probes.length || PROBE_WINDOW);
+	common.setText(r.window, _('Latency over %d min').format(win));
+	common.setText(r.from, _('%d min ago').format(win));
 	if (!wdOn || !probes.length || !t.up) {
 		const why = !wdOn ? _('the watchdog is off') : '—';
 		setState(r.rtt, '', why);
@@ -104,7 +114,7 @@ function updateState(r, st) {
 		const lost = probes.length - got.length;
 		const pct = Math.round(lost * 100 / probes.length);
 		setState(r.loss, !lost ? 'ok' : pct < 20 ? 'warn' : 'err',
-			_('%d%% over %d min').format(pct, Math.max(1, Math.round(probes.length * (h.interval || 30) / 60))));
+			_('%d%% over %d min').format(pct, mins(probes.length)));
 		const b = h.big;
 		if (!b)
 			setState(r.big, '', _('not checked yet'));
@@ -339,7 +349,7 @@ return view.extend({
 
 		const mt = new form.Map('truba');
 		s = mt.section(form.NamedSection, 'watchdog', 'watchdog', _('Tunnel watchdog'),
-			_('Pings the Truba inside the tunnel and checks the handshake age; restarts the interface after repeated failures. Every 5 minutes it also checks that full-size packets get through.'));
+			_('Pings the Truba inside the tunnel and checks the handshake age; restarts the interface after repeated failures. Every tenth check also makes sure that full-size packets get through.'));
 		s.addremove = false;
 		o = s.option(form.Flag, 'enabled', _('Enabled'));
 		o.default = '1';

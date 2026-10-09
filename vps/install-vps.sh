@@ -8,7 +8,7 @@
 #   install-vps.sh rotate-keys
 #   install-vps.sh random-trailers on|off
 #   install-vps.sh status
-#   install-vps.sh uninstall
+#   install-vps.sh uninstall [--purge]
 #
 # Повторный запуск install безопасен: ключи и порты берутся из /etc/truba/pipe.env.
 
@@ -728,8 +728,13 @@ main() {
 	fi
 	while [ $# -gt 0 ]; do
 		case "$1" in
-			--ssh-port) OPT_SSH_PORT=$2; shift 2 ;;
-			--awg-port) OPT_AWG_PORT=$2; shift 2 ;;
+			--ssh-port|--awg-port)
+				[ $# -ge 2 ] || die "$1: укажите номер порта"
+				if ! [[ $2 =~ ^[0-9]{1,5}$ ]] || [ "$2" -lt 1 ] || [ "$2" -gt 65535 ]; then
+					die "$1: неверный номер порта «$2»"
+				fi
+				if [ "$1" = --ssh-port ]; then OPT_SSH_PORT=$2; else OPT_AWG_PORT=$2; fi
+				shift 2 ;;
 			--no-confirm) NO_CONFIRM=1; shift ;;
 			--purge) PURGE=1; shift ;;
 			*) die "неизвестный параметр: $1" ;;
