@@ -85,6 +85,24 @@ grep -qx 'nf_conntrack' "$MODULES_FILE" && ok "nf_conntrack загружаетс
 grep -q 'default_qdisc = fq_codel$' "$SYSCTL_FILE" && ok "sysctl: очередь fq_codel, не fq" || fail "sysctl: default_qdisc"
 grep -qx 'qdisc replace dev eth0 root fq_codel' "$STATE_DIR/tc.txt" && ok "очередь WAN заменяется сразу, без перезагрузки" || fail "tc: очередь WAN"
 
+# Заголовки ядра: метапакеты под метапакеты ядра — иначе DKMS не соберёт amneziawg для ядра,
+# которое поставит unattended-upgrades, и после перезагрузки VPS Туннель не поднимется.
+dpkg-query() { printf '%s\n' 'ii  linux-image-6.8.0-45-generic' 'ii  linux-image-generic-hwe-24.04' \
+	'ii  linux-image-virtual' 'rc  linux-image-azure' 'ii  linux-image-extra-virtual' 'ii  linux-image-unsigned-6.8.0-45-generic'; }
+apt-cache() { case "$2" in linux-headers-generic-hwe-24.04|linux-headers-virtual|linux-headers-azure) return 0 ;; *) return 1 ;; esac; }
+got=$(kernel_headers_metas | xargs)
+unset -f dpkg-query apt-cache
+[ "$got" = "linux-headers-generic-hwe-24.04 linux-headers-virtual" ] && ok "заголовки: метапакеты под установленные метапакеты ядра" || fail "заголовки: «$got»"
+
+# Модуль для ядра, которое VPS загрузит после перезагрузки (самое новое в /boot).
+BOOT_DIR="$STATE_DIR/boot"; MODULES_DIR="$STATE_DIR/modules"
+mkdir -p "$BOOT_DIR" "$MODULES_DIR/6.8.0-45-generic/updates/dkms" "$MODULES_DIR/6.8.0-100-generic"
+touch "$BOOT_DIR/vmlinuz-6.8.0-45-generic" "$BOOT_DIR/vmlinuz-6.8.0-100-generic" "$MODULES_DIR/6.8.0-45-generic/updates/dkms/amneziawg.ko.zst"
+out=$(kernel_module_check 2>&1); rc=$?
+[ "$rc" -ne 0 ] && grep -q 'нет для ядра 6.8.0-100-generic' <<< "$out" && ok "новое ядро без модуля — предупреждение" || fail "новое ядро без модуля: $rc $out"
+mkdir -p "$MODULES_DIR/6.8.0-100-generic/updates/dkms"; touch "$MODULES_DIR/6.8.0-100-generic/updates/dkms/amneziawg.ko.zst"
+kernel_module_check >/dev/null 2>&1 && ok "новое ядро с модулем — без предупреждения" || fail "новое ядро с модулем"
+
 # Конфиги AWG
 AWG_PROTO=2; gen_params
 VPS_PRIV=vpriv; VPS_PUB=vpub; RTR_PRIV=rpriv; RTR_PUB=rpub; PSK=psk
