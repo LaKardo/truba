@@ -1,0 +1,123 @@
+table inet truba
+delete table inet truba
+table inet truba {
+	set lan_if {
+		type ifname;
+		elements = { "br-lan" }
+	}
+	set bypass4 {
+		type ipv4_addr;
+		flags interval;
+		auto-merge;
+		elements = { 192.168.1.0/24, 10.77.77.0/30, 203.0.113.10/32 }
+	}
+	set gi_block4 {
+		type ipv4_addr;
+		flags interval;
+		auto-merge;
+	}
+	set gi_tunnel4 {
+		type ipv4_addr;
+		flags interval;
+		auto-merge;
+		elements = { 100.64.0.0/10 }
+	}
+	set gi_direct4 {
+		type ipv4_addr;
+		flags interval;
+		auto-merge;
+		elements = { 5.0.0.0/8, 10.0.0.0/8 }
+	}
+	set gs_tunnel4 {
+		type ipv4_addr;
+		flags timeout;
+		timeout 86400s;
+		elements = { 198.51.100.1 expires 100s, 198.51.100.2 expires 86400s }
+	}
+	set gs_direct4 {
+		type ipv4_addr;
+		flags timeout;
+		timeout 86400s;
+		elements = { 198.51.100.4, 198.51.100.5 }
+	}
+	set dev_tunnel {
+		type ether_addr;
+		elements = { aa:bb:cc:dd:ee:ff }
+	}
+	set dev_direct {
+		type ether_addr;
+	}
+	counter c_tunnel { }
+	counter c_direct { }
+	counter c_block { }
+	counter c_inbound { }
+	counter c_tunnel_down { }
+	counter c_tunnel_up { packets 3 bytes 900 }
+	counter c_direct_down { }
+	counter c_direct_up { }
+	counter c_inbound_down { }
+	counter c_inbound_up { }
+
+	chain prerouting {
+		type filter hook prerouting priority mangle; policy accept;
+		meta nfproto != ipv4 return
+		iifname "awg0" ct state new counter name c_inbound
+		iifname "awg0" meta mark set meta mark and 0xff00ffff or 0x00040000 return
+		iifname != @lan_if ct state new meta mark set meta mark and 0xff00ffff or 0x00020000 return
+		ct mark and 0x00ff0000 != 0 goto restore
+		iifname != @lan_if return
+		ip daddr @bypass4 return
+		jump classify
+		meta mark and 0x00ff0000 == 0x00010000 counter name c_tunnel
+		meta mark and 0x00ff0000 == 0x00020000 counter name c_direct
+	}
+
+	chain restore {
+		ct mark and 0x00ff0000 == 0x00040000 meta mark set meta mark and 0xff00ffff or 0x00010000 return
+		ct mark and 0x00ff0000 == 0x00010000 meta mark set meta mark and 0xff00ffff or 0x00010000 return
+		ct mark and 0x00ff0000 == 0x00020000 meta mark set meta mark and 0xff00ffff or 0x00020000 return
+	}
+
+	chain classify {
+		ip daddr @gi_block4 counter name c_block drop
+		ether saddr @dev_direct meta mark set meta mark and 0xff00ffff or 0x00020000 return
+		ether saddr @dev_tunnel meta mark set meta mark and 0xff00ffff or 0x00010000 return
+		ip daddr @gs_tunnel4 meta mark set meta mark and 0xff00ffff or 0x00010000 return
+		ip daddr @gs_direct4 meta mark set meta mark and 0xff00ffff or 0x00020000 return
+		ip daddr @gi_tunnel4 meta mark set meta mark and 0xff00ffff or 0x00010000 return
+		ip daddr @gi_direct4 meta mark set meta mark and 0xff00ffff or 0x00020000 return
+		meta mark set meta mark and 0xff00ffff or 0x00010000
+	}
+
+	chain persist {
+		type filter hook postrouting priority 300; policy accept;
+		meta nfproto != ipv4 return
+		meta mark and 0x00ff0000 == 0x00040000 ct mark set ct mark and 0xff00ffff or 0x00040000 return
+		meta mark and 0x00ff0000 == 0x00010000 ct mark set ct mark and 0xff00ffff or 0x00010000 return
+		meta mark and 0x00ff0000 == 0x00020000 ct mark set ct mark and 0xff00ffff or 0x00020000 return
+	}
+
+	chain stats {
+		type filter hook forward priority filter + 10; policy accept;
+		meta nfproto != ipv4 return
+		iifname @lan_if oifname @lan_if return
+		iifname @lan_if oifname "awg0" ct direction original counter name c_tunnel_up return
+		iifname "awg0" oifname @lan_if ct direction reply counter name c_tunnel_down return
+		iifname "awg0" oifname @lan_if counter name c_inbound_down return
+		iifname @lan_if oifname "awg0" counter name c_inbound_up return
+		iifname @lan_if ct direction original counter name c_direct_up return
+		oifname @lan_if ct direction reply counter name c_direct_down return
+	}
+
+	chain output {
+		type route hook output priority mangle + 10; policy accept;
+		meta nfproto != ipv4 return
+		ip daddr 203.0.113.10 meta mark set meta mark and 0xff00ffff or 0x00020000 return
+		socket mark and 0x00ff0000 == 0x00010000 meta mark set meta mark and 0xff00ffff or 0x00010000
+	}
+
+	chain dns_hijack {
+		type nat hook prerouting priority dstnat - 5; policy accept;
+		meta nfproto ipv4 iifname @lan_if meta l4proto { tcp, udp } th dport 53 redirect to :53
+	}
+}
