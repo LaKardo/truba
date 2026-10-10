@@ -83,7 +83,7 @@ function inbound_rules(iface) {
 // проходит классификацию), c_block — отброшенные пакеты, c_inbound — новые входящие
 // через Туннель. Остальные — байты трафика устройств по направлениям (цепочка stats).
 const CONN_COUNTERS = [ 'c_tunnel', 'c_direct', 'c_block', 'c_inbound' ];
-export const TRAFFIC_COUNTERS = [ 'c_tunnel_down', 'c_tunnel_up', 'c_direct_down', 'c_direct_up',
+const TRAFFIC_COUNTERS = [ 'c_tunnel_down', 'c_tunnel_up', 'c_direct_down', 'c_direct_up',
                                   'c_inbound_down', 'c_inbound_up' ];
 
 // Значения из прежней таблицы (carry) переносятся: «Сохранить и применить» не обнуляет учёт.

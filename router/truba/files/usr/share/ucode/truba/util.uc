@@ -208,8 +208,3 @@ export function lock_busy(name) {
 	fd.close();
 	return false;
 };
-
-export function file_mtime(path) {
-	let st = stat(path);
-	return st ? st.mtime : null;
-};

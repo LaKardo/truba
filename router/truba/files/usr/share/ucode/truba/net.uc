@@ -40,7 +40,7 @@ export function remove_rules() {
 //   down + Аварийная блок.  → blackhole default
 //   down без неё            → без default: трафик проваливается в main (Напрямую)
 // Подсеть Туннеля держится в таблице всегда, пока интерфейс поднят: по ней ходит проверка Туннеля.
-export function set_table(state, iface, tinfo, killswitch) {
+function set_table(state, iface, tinfo, killswitch) {
 	let st = iface_up(iface);
 	let dev = st.device;
 
@@ -57,7 +57,7 @@ export function set_table(state, iface, tinfo, killswitch) {
 	}
 	system('ip -4 route del default table ' + T + ' 2>/dev/null');
 	return 'fallback';
-};
+}
 
 // Таблица 77 по здоровью Туннеля: его состояние watchdog пишет в HEALTH_FILE.
 export function routes(cfg, tinfo) {

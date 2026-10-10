@@ -282,5 +282,5 @@ return baseclass.extend({
 	ACTION_LABELS, ACTION_LEVELS, REASON_LABELS, WARNINGS, NAT_ERRORS, UPNP_MISSING, NBSP, TABS,
 	fmtBytes, fmtRate, fmtAge, fmtTime, fmtDate, fmtNum, missingText,
 	pill, busy, empty, span, svgEl, kvTable, table, row, chips,
-	setText, setLevel, setState, setResult, setError, tunnelIface, tunnelState, tabUrl, invalidTab
+	setText, setState, setResult, setError, tunnelIface, tunnelState, tabUrl, invalidTab
 });

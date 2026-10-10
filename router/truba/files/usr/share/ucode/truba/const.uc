@@ -37,8 +37,7 @@ export const UPNP_BACKUP = '/etc/truba/state/upnpd.json';
 
 // Последняя удачная копия правил (ADR 0006) — на флеше: нужна после перезагрузки,
 // когда применить настройки не удалось, а прежних правил в памяти уже нет.
-export const GOOD_DIR     = '/etc/truba/good';
-export const GOOD_NFT     = '/etc/truba/good/truba.nft';
+export const GOOD_NFT    = '/etc/truba/good/truba.nft';
 export const GOOD_MOSDNS  = '/etc/truba/good/mosdns.json';
 export const GOOD_GEOSITE = '/etc/truba/good/geosite';
 export const GOOD_META    = '/etc/truba/good/meta.json';

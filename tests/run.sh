@@ -10,15 +10,24 @@
 #   DAT_DIR=…       — свой каталог с geoip.dat и geosite.dat
 #   UPDATE_GOLDEN=1 — записать эталоны tests/golden заново (часть units)
 #   UI_OUT=…        — каталог для снимков вкладок LuCI (часть ui)
+#   IMAGE_CACHE=…   — каталог архивов образов Docker: образ берётся оттуда, а не из Docker Hub
+#                     (CI хранит его в actions/cache и обновляет раз в неделю)
 set -euo pipefail
 # Git Bash иначе переписывает пути контейнера (/repo) в аргументах docker.
 export MSYS_NO_PATHCONV=1
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
+# Роутер — последняя ImmortalWrt 25.12.x: тег плавающий намеренно, проверки идут на той же
+# ветке выпусков, что ставят на Роутер (в CI образ обновляется с недельным кэшем).
 IMG=immortalwrt/rootfs:x86-64-openwrt-25.12
-TEST_IMG=truba-test:wg
+# Образ Роутера с зависимостями Трубы. Имя — по базовому образу и списку пакетов: другой
+# список или другая база — другой образ, а не старый из локального кэша.
+TEST_PKGS="mosdns ucode-mod-socket curl ip-full wireguard-tools"
+TEST_IMG=truba-test:$(printf '%s %s' "$IMG" "$TEST_PKGS" | sha256sum | cut -c1-12)
 # Браузер — по дайджесту: образ не меняется сам.
 BROWSER_IMG=zenika/alpine-chrome@sha256:ee10e24217aa27443e6b58da628f3b09ea9b814459915b8b62fe15a555f9692a
+VPS_IMG=ubuntu:24.04
+NODE_IMG=node:22-alpine
 ROUTER_PARTS=(router-net router-dns router-lists router-life router-tunnel router-stats)
 ALL=(units dat vps luci ui "${ROUTER_PARTS[@]}")
 # Имена контейнеров этого запуска: два запуска рядом друг другу не мешают.
@@ -58,13 +67,28 @@ dat_dir() {
 	export DAT_DIR=$d
 }
 
+# ---- образы: локально, из IMAGE_CACHE или из Docker Hub (тогда — в IMAGE_CACHE) ----
+
+img_file() { echo "$IMAGE_CACHE/$(echo "$1" | tr '/:@' '___').tar"; }
+img_cached() {
+	docker image inspect "$1" >/dev/null 2>&1 && return 0
+	[ -n "${IMAGE_CACHE:-}" ] && [ -f "$(img_file "$1")" ] && docker load -q -i "$(img_file "$1")" >/dev/null
+}
+img_save() {
+	[ -n "${IMAGE_CACHE:-}" ] || return 0
+	mkdir -p "$IMAGE_CACHE"
+	docker save -o "$(img_file "$1")" "$1"
+}
+img() { img_cached "$1" || { docker pull -q "$1" >/dev/null && img_save "$1"; }; }
+
 # Образ Роутера с зависимостями Трубы — заранее: под procd у контейнера нет сети.
 test_img() {
-	docker image inspect "$TEST_IMG" >/dev/null 2>&1 && return 0
+	img_cached "$TEST_IMG" && return 0
 	docker rm -f "$RUN_ID-base" >/dev/null 2>&1 || true
-	docker run --name "$RUN_ID-base" "$IMG" sh -c 'apk update >/dev/null && apk add mosdns ucode-mod-socket curl ip-full wireguard-tools >/dev/null'
+	docker run --name "$RUN_ID-base" "$IMG" sh -c "apk update >/dev/null && apk add $TEST_PKGS >/dev/null"
 	docker commit "$RUN_ID-base" "$TEST_IMG" >/dev/null
 	docker rm "$RUN_ID-base" >/dev/null
+	img_save "$TEST_IMG"
 }
 
 # ---- стенд: Роутер под настоящим procd ----
@@ -103,11 +127,17 @@ t_dat() {
 }
 
 t_vps() {
-	docker run --rm --cap-add NET_ADMIN -v "$REPO:/repo:ro" ubuntu:24.04 bash /repo/tests/vps/test.sh
+	docker run --rm --cap-add NET_ADMIN -v "$REPO:/repo:ro" "$VPS_IMG" bash /repo/tests/vps/test.sh
 }
 
+# Node есть на машине (и на раннере CI) — без контейнера.
+host_node() { command -v node >/dev/null 2>&1 && [ "$(node -p 'process.versions.node.split(".")[0]')" -ge 18 ]; }
 t_luci() {
-	docker run --rm -v "$REPO:/repo:ro" node:22-alpine node /repo/tests/luci/static.mjs
+	if host_node; then
+		node "$REPO/tests/luci/static.mjs"
+	else
+		docker run --rm -v "$REPO:/repo:ro" "$NODE_IMG" node /repo/tests/luci/static.mjs
+	fi
 }
 
 # Часть Роутера: свой стенд, сценарий tests/router/<часть>.sh.
@@ -168,7 +198,12 @@ trap 'exit 130' INT TERM
 # shellcheck disable=SC2254 # шаблоны частей — намеренно glob
 need() { local p w; for p in "${PARTS[@]}"; do for w in "$@"; do case "$p" in $w) return 0 ;; esac; done; done; return 1; }
 if need dat ui 'router-*'; then dat_dir; fi
+# Образы — до параллельного запуска: одна часть не тянет тот же образ, пока его пишет другая.
+if need dat; then img "$IMG"; fi
 if need units ui 'router-*'; then test_img; fi
+if need vps; then img "$VPS_IMG"; fi
+if need ui; then img "$BROWSER_IMG"; fi
+if need luci && ! host_node; then img "$NODE_IMG"; fi
 
 if [ ${#PARTS[@]} -eq 1 ]; then
 	echo "=== ${PARTS[0]}"

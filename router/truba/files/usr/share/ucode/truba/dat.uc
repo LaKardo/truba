@@ -173,9 +173,9 @@ export function validate(set, path) {
 };
 
 // Имя файла из тега: только безопасные символы.
-export function fname(tag) {
+function fname(tag) {
 	return replace(tag, /[^a-z0-9._!@-]/g, '_');
-};
+}
 
 // Вложенность Категорий geosite: A ⊂ B, если каждая запись A есть в B.
 function compute_subsets(cats) {

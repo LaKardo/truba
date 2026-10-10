@@ -1,7 +1,15 @@
 #!/bin/sh
-# Жизненный цикл и отказы: ошибка применения при работе и при загрузке (ADR 0006),
-# переустановка после sysupgrade (ADR 0004).
+# Жизненный цикл и отказы: обновление пакета, ошибка применения при работе и при загрузке
+# (ADR 0006), переустановка после sysupgrade (ADR 0004).
 . /repo/tests/router/stand.sh
+
+section "обновление пакета: убранные Категории не возвращаются"
+# uci-defaults идёт и после каждого обновления; Стартовые правила — только при первой установке.
+while uci -q delete 'truba.@rule[0]'; do :; done
+uci commit truba
+sh /etc/uci-defaults/90-truba
+check "после повторного uci-defaults правил по-прежнему нет" test -z "$(uci show truba | grep '=rule$')"
+truba reset-rules all >/dev/null; truba reset-rules selective >/dev/null
 
 section "последняя удачная копия правил (ADR 0006)"
 check "копия на флеше: правила, конфиг mosdns, описание" eval '[ -s /etc/truba/good/truba.nft ] && [ -s /etc/truba/good/mosdns.json ] && [ -s /etc/truba/good/meta.json ]'

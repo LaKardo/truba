@@ -29,9 +29,22 @@ jobs:
         part: [ units, dat, vps, luci, ui, router-net, router-dns, router-lists, router-life, router-tunnel, router-stats ]
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      # Образы Docker — из кэша на неделю: задание не ходит в Docker Hub (лимит раннеров GitHub
+      # там общий и кончается) и не ставит заново зависимости в образ Роутера. Раз в неделю
+      # кэш обновляется — и с ним последняя ImmortalWrt 25.12.x. Ключ тот же, что в upstream-lists.yml.
+      - id: week
+        run: echo "week=$(date -u +%G-%V)" >> "$GITHUB_OUTPUT"
+      - name: Образы Docker из кэша
+        # luci идёт на Node раннера, без образов.
+        if: matrix.part != 'luci'
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ${{ runner.temp }}/docker-images
+          key: images-${{ matrix.part }}-${{ hashFiles('tests/run.sh') }}-${{ steps.week.outputs.week }}
       - name: Проверки (${{ matrix.part }})
         env:
           UI_OUT: ${{ github.workspace }}/ui-screens
+          IMAGE_CACHE: ${{ runner.temp }}/docker-images
         run: bash tests/run.sh ${{ matrix.part }}
       # Снимки всех вкладок — посмотреть интерфейс из PR, не поднимая стенд.
       - name: Снимки вкладок LuCI

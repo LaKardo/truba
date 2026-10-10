@@ -10,10 +10,10 @@ import * as C from 'truba.const';
 import * as U from 'truba.util';
 import * as S from 'truba.state';
 
-export const STEP = 5;           // точки — раз в 5 с
-export const FINE_SPAN = 3600;   // за последний час
-export const MIN_STEP = 60;      // поминутные средние
-export const MIN_SPAN = 86400;   // за сутки
+const STEP = 5;           // точки — раз в 5 с
+const FINE_SPAN = 3600;   // за последний час
+const MIN_STEP = 60;      // поминутные средние
+const MIN_SPAN = 86400;   // за сутки
 
 // Значения точки после времени: байт/с к устройствам и от них по Действиям, затем новых
 // соединений в минуту. В поминутных средних — только первые MIN_VALUES: их рисует график.

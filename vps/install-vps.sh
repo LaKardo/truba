@@ -634,7 +634,7 @@ cmd_install() {
 	echo "  Скопировать на компьютер:  scp -P $SSH_PORT root@$PUB_IP:$ROUTER_CONF ."
 	echo "  Затем: LuCI → Службы → Труба → Туннель → Импорт .conf"
 	echo
-	echo "  Версия AmneziaWG для сборки модуля Роутера: $AWG_VERSION"
+	echo "  AmneziaWG на Трубе: $AWG_VERSION — модуль Роутера собирается из router/awg/SOURCES, протокол должен совпадать"
 	kernel_module_check >/dev/null || true
 }
 

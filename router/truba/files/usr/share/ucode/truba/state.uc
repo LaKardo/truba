@@ -48,9 +48,9 @@ export function counters_raw() {
 	return out;
 };
 
-export function health_state() {
+function health_state() {
 	return U.read_json(C.HEALTH_FILE, null);
-};
+}
 
 // sums — с контрольной суммой: она нужна только вкладке «DNS и списки».
 function list_info(dir, file, sums) {

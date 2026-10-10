@@ -46,13 +46,13 @@ function ping_stats(out) {
 // Крупные пакеты: ping Трубы пакетом во весь MTU Туннеля. Обычный ping мелкий и не видит
 // пути, который теряет полноразмерные пакеты (MTU, фрагменты): при нём сайты открываются
 // с задержкой, а загрузки замирают на секунды. size — размер пакета в байтах (= MTU).
-export function big_probe(dev, target) {
+function big_probe(dev, target) {
 	let mtu = iface_mtu(dev);
 	if (mtu < 576)
 		return null;
 	let s = ping_stats(U.run(sprintf('ping -c 3 -W 2 -s %d -I %s %s', mtu - 28, U.shq(dev), U.shq(target))).out);
 	return { ok: s.received >= 2, sent: s.sent, received: s.received, size: mtu, time: time() };
-};
+}
 
 // Крупные пакеты проверяются раз в BIG_EVERY проверок (5 мин при интервале 30 с) и сразу
 // после подъёма Туннеля: ping пакетом во весь MTU дороже обычного.

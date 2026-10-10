@@ -23,7 +23,17 @@ jobs:
         part: [ dat, router-net, router-dns, router-lists, router-life, router-tunnel, router-stats ]
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      # Те же образы и тот же ключ кэша, что в tests.yml: эта задача идёт на main и прогревает
+      # кэш, который берут проверки на PR.
+      - id: week
+        run: echo "week=$(date -u +%G-%V)" >> "$GITHUB_OUTPUT"
+      - name: Образы Docker из кэша
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ${{ runner.temp }}/docker-images
+          key: images-${{ matrix.part }}-${{ hashFiles('tests/run.sh') }}-${{ steps.week.outputs.week }}
       - name: Свежие списки (${{ matrix.part }})
         env:
           DAT_FRESH: '1'
+          IMAGE_CACHE: ${{ runner.temp }}/docker-images
         run: bash tests/run.sh ${{ matrix.part }}

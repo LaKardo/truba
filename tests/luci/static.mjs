@@ -1,4 +1,4 @@
-// Интерфейс LuCI без стенда: синтаксис JS, полнота русского перевода, каждый вызов truba.*
+// Интерфейс LuCI без стенда: синтаксис JS, полнота русского перевода, схемы DNS как у службы, каждый вызов truba.*
 // есть в ubus-API пакета truba и в ACL.
 //   node tests/luci/static.mjs           — проверить
 //   node tests/luci/static.mjs --pot     — напечатать шаблон .pot (po/templates/truba.pot)
@@ -62,6 +62,16 @@ for (const f of files) {
 		if (!provided.has(m[1])) { console.log(`FAIL  метода truba.${m[1]} нет в rpcd-плагине (${rel(f)})`); fails++; }
 		if (!allowed.has(m[1])) { console.log(`FAIL  метода truba.${m[1]} нет в ACL (${rel(f)})`); fails++; }
 	}
+}
+
+// Схемы адресов DNS-серверов: поле в интерфейсе (dns.js) и служба (conf.uc) проверяют одно и то же.
+// Разойдутся — интерфейс пропустит адрес, который служба отбросит, или наоборот.
+const schemes = (src) => (src.match(/UPSTREAM_SCHEMES = \[([^\]]*)\]/)?.[1].match(/'[^']+'/g) ?? []).sort().join(' ');
+const uiSchemes = schemes(readFileSync(join(root, 'htdocs/luci-static/resources/view/truba/dns.js'), 'utf8'));
+const svcSchemes = schemes(readFileSync(join(root, '../truba/files/usr/share/ucode/truba/conf.uc'), 'utf8'));
+if (!uiSchemes || uiSchemes !== svcSchemes) {
+	console.log(`FAIL  схемы DNS в dns.js (${uiSchemes || '—'}) и conf.uc (${svcSchemes || '—'}) разошлись`);
+	fails++;
 }
 
 const po = readFileSync(join(root, 'po/ru/truba.po'), 'utf8');

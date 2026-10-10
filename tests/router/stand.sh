@@ -13,9 +13,7 @@
 . /repo/tests/lib/check.sh
 
 section "стенд"
-for p in mosdns ucode-mod-socket curl ip-full wireguard-tools; do
-	apk list -I "$p" 2>/dev/null | grep -q "^$p-" || { echo "нет пакета $p в образе"; exit 1; }
-done
+# Зависимости Трубы уже в образе (tests/run.sh, TEST_PKGS): под procd сети нет.
 
 # Файлы пакета. С каталога Windows они приходят с правами 777, а такие плагины rpcd не загружает.
 cp -a /repo/router/truba/files/. /

@@ -4,6 +4,11 @@
 STATE=/etc/truba/state
 mkdir -p "$STATE"
 
+# Этот скрипт идёт и после каждого обновления пакета. Первая установка — пока нет
+# firewall.orig: он пишется ниже и удаляется только вместе с пакетом.
+FIRST=0
+[ -f "$STATE/firewall.orig" ] || FIRST=1
+
 # Исходные значения межсетевого экрана — чтобы вернуть их при удалении.
 if [ ! -f "$STATE/firewall.orig" ]; then
 	{
@@ -58,8 +63,9 @@ fi
 
 uci -q commit firewall
 
-# Стартовые настройки Категорий — только при первой установке.
-if [ -z "$(uci -q show truba | grep '=rule$')" ]; then
+# Стартовые настройки Категорий — только при первой установке и если правил ещё нет:
+# Категории, которые владелец убрал, обновление пакета не возвращает.
+if [ "$FIRST" = 1 ] && [ -z "$(uci -q show truba | grep '=rule$')" ]; then
 	/usr/sbin/truba reset-rules all >/dev/null 2>&1
 	/usr/sbin/truba reset-rules selective >/dev/null 2>&1
 fi
