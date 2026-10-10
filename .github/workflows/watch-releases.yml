@@ -23,8 +23,14 @@ jobs:
           releases=$(curl -fsSL https://downloads.immortalwrt.org/releases/ \
             | grep -oE 'href="25\.12\.[0-9]+/"' | grep -oE '25\.12\.[0-9]+' | sort -uV)
           site="https://${GITHUB_REPOSITORY_OWNER}.github.io/${GITHUB_REPOSITORY#*/}"
+          # Только выпуски новее последнего опубликованного фида: каталог прежней версии
+          # из фида убирают намеренно, заново его не собираем (вернуть — router/VERSIONS).
+          newest=$(curl -fsSL "$site/versions.txt" 2>/dev/null | grep -E '^25\.12\.[0-9]+$' | sort -V | tail -1 || true)
           missing=""
           for v in $releases; do
+            if [ -n "$newest" ] && printf '%s\n' "$v" "$newest" | sort -VC; then
+              continue
+            fi
             if ! curl -fsI "$site/$v/mediatek/filogic/packages.adb" >/dev/null 2>&1; then
               missing="${missing:+$missing,}$v"
             fi
