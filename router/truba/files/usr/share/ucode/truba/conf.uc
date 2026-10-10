@@ -6,7 +6,9 @@ import { connect } from 'ubus';
 import * as U from 'truba.util';
 import * as C from 'truba.const';
 
-const DEFAULT_TUNNEL_DNS = [ 'https://1.1.1.1/dns-query', 'https://8.8.8.8/dns-query' ];
+// DNS-сервер на Трубе (install-vps.sh, ADR 0013) и запасной DoH: каждый запрос идёт к обоим. Без сервера
+// на Трубе (VPS ставился другим способом) порт сразу отвечает «закрыт», и отвечает DoH.
+const DEFAULT_TUNNEL_DNS = [ 'udp://10.77.77.1', 'https://1.1.1.1/dns-query' ];
 // Два сервера: mosdns спрашивает оба разом и берёт первый ответ, поэтому обрыв одного
 // соединения не оставляет запросы без ответа (на живом роутере DoH 77.88.8.8 изредка рвался).
 // pipelining: запросы, пришедшие разом, идут по одному соединению, а не открывают по TLS на каждый.

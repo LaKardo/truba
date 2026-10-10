@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # install-vps.sh без настоящего VPS: shellcheck, параметры AWG 1.x/2.x/3.1, конфиги обеих сторон,
-# правила nftables с загрузкой в ядро, sysctl, заголовки ядра, MTU по сети VPS, порт SSH.
+# правила nftables с загрузкой в ядро, sysctl, заголовки ядра, MTU по сети VPS, DNS для Роутера (unbound), порт SSH.
 # Контейнер ubuntu:24.04 с --cap-add NET_ADMIN (tests/run.sh vps).
 set -uo pipefail
 
@@ -175,6 +175,36 @@ read -r p c f <<< "$(ssh_case '' 0 '' '')"
 SSH_PORT=51022 SSH_CONFIRMED=0 SSH_FALLBACK=50022; save_state
 ( unset SSH_FALLBACK; load_state; [ "$SSH_FALLBACK" = 50022 ] ) && ok "pipe.env хранит запасной порт SSH" || fail "pipe.env: SSH_FALLBACK"
 unset OPT_SSH_PORT
+
+# DNS для Роутера (ADR 0013): unbound на адресе Трубы в Туннеле отвечает только Роутеру,
+# стартует раньше Туннеля и наружу не слушает. Конфиг — в каталоге пакета, вместе с его
+# собственными файлами; пересылка по TLS проверяется по конфигу: интернет проверкам не нужен.
+if apt-get install -y -qq unbound bind9-dnsutils ca-certificates >/dev/null 2>&1; then
+	systemctl() { :; }
+	UNBOUND_CONF=/etc/unbound/unbound.conf.d/truba.conf
+	write_unbound_conf
+	unset -f systemctl
+	# Ключ корневой зоны пакет кладёт при запуске службы (ExecStartPre) — так же и здесь.
+	/usr/libexec/unbound-helper root_trust_anchor_update >/dev/null 2>&1
+	if out=$(unbound-checkconf 2>&1); then ok "unbound: конфиг вместе с файлами пакета проходит проверку"; else fail "unbound-checkconf: $out"; fi
+	grep -qx '    forward-tls-upstream: yes' "$UNBOUND_CONF" && [ "$(grep -cE '^    forward-addr: [0-9.]+@853#(cloudflare-dns\.com|dns\.google)$' "$UNBOUND_CONF")" -eq 4 ] \
+		&& ok "unbound: к Cloudflare и Google — только по TLS, с проверкой имени сервера" || fail "unbound: пересылка по TLS"
+	# Адреса Туннеля ещё нет: awg0 поднимается позже, а unbound всё равно стартует.
+	unbound -d >"$STATE_DIR/unbound.log" 2>&1 & UB=$!
+	listening() { ss -Hlnu '( sport = :53 )' | grep -q '10.77.77.1:53'; }
+	for _ in $(seq 20); do listening && break; sleep 0.5; done
+	kill -0 "$UB" 2>/dev/null && listening && ok "unbound: стартует до Туннеля (ip-freebind)" || fail "unbound: старт без адреса Туннеля: $(tail -3 "$STATE_DIR/unbound.log")"
+	[ "$(ss -Hlnu '( sport = :53 )' | grep -v '127.0.0.5[34]' | awk '{print $4}' | xargs)" = 10.77.77.1:53 ] \
+		&& ok "unbound: слушает только адрес Трубы в Туннеле" || fail "unbound слушает: $(ss -Hlnu '( sport = :53 )' | awk '{print $4}' | xargs)"
+	ip addr add 10.77.77.1/32 dev lo; ip addr add 10.77.77.2/32 dev lo; ip addr add 10.77.77.3/32 dev lo
+	ask() { dig +time=2 +tries=1 @10.77.77.1 -b "$1" localhost A; }
+	ask 10.77.77.2 | grep -qE '^localhost\.[[:space:]].*A[[:space:]]+127\.0\.0\.1$' && ok "unbound: отвечает Роутеру" || fail "unbound: Роутеру: $(ask 10.77.77.2 | grep -E 'status|^localhost')"
+	# Сам VPS (127.0.0.0/8) unbound обслуживает по умолчанию; из сети Туннеля — только Роутер.
+	ask 10.77.77.3 | grep -q 'status: REFUSED' && ok "unbound: другим адресам — отказ" || fail "unbound: другим адресам: $(ask 10.77.77.3 | grep status)"
+	kill "$UB" 2>/dev/null; for a in 1 2 3; do ip addr del 10.77.77.$a/32 dev lo; done
+else
+	fail "apt-get install unbound"
+fi
 
 # Параметры: порт без значения или не число — понятная ошибка до любых изменений, а не
 # «unbound variable» и не отказ nftables посреди установки.

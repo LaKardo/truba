@@ -27,6 +27,7 @@ F2B_JAIL=/etc/fail2ban/jail.d/truba.local
 PIPE_UNIT=/etc/systemd/system/truba-pipe.service
 SYSCTL_FILE=/etc/sysctl.d/90-truba.conf
 MODULES_FILE=/etc/modules-load.d/truba.conf
+UNBOUND_CONF=/etc/unbound/unbound.conf.d/truba.conf
 
 VPS_TUN=10.77.77.1
 RTR_TUN=10.77.77.2
@@ -173,8 +174,10 @@ install_packages() {
 		sed -i 's/^Types: deb$/Types: deb deb-src/' /etc/apt/sources.list.d/ubuntu.sources
 	fi
 	apt-get update -qq
+	# Конфиг unbound — до пакета: служба сразу стартует с ним, а не на 127.0.0.1.
+	write_unbound_conf
 	apt-get install -y -qq software-properties-common python3-launchpadlib gnupg2 \
-		"linux-headers-$(uname -r)" nftables fail2ban unattended-upgrades curl >/dev/null
+		"linux-headers-$(uname -r)" nftables fail2ban unattended-upgrades curl unbound >/dev/null
 	local metas
 	metas=$(kernel_headers_metas)
 	if [ -n "$metas" ]; then
@@ -465,6 +468,49 @@ setup_awg_service() {
 	fi
 }
 
+# ---------- DNS для Роутера ----------
+
+# unbound на адресе Трубы в Туннеле (ADR 0013). Роутер шлёт ему обычные запросы внутри Туннеля
+# (Туннель и так шифрован), а TLS до Cloudflare и Google держит VPS — в миллисекундах от них.
+# Новое соединение стоит тогда миллисекунды, а не две поездки через Туннель, как у DoH с Роутера.
+write_unbound_conf() {
+	mkdir -p "$(dirname "$UNBOUND_CONF")"
+	cat > "$UNBOUND_CONF" <<-EOF
+		# Труба: DNS для Роутера. Сгенерировано install-vps.sh
+		server:
+		    interface: $VPS_TUN
+		    # Адрес появляется вместе с $AWG_IF, а unbound стартует раньше.
+		    ip-freebind: yes
+		    access-control: $RTR_TUN/32 allow
+		    do-ip6: no
+		    # DNSSEC проверяют сами Cloudflare и Google: своя проверка — лишние запросы на промахах.
+		    module-config: "iterator"
+		    tls-cert-bundle: /etc/ssl/certs/ca-certificates.crt
+		    hide-identity: yes
+		    hide-version: yes
+		    # Счётчики ответов по кодам (SERVFAIL) — для install-vps.sh status.
+		    extended-statistics: yes
+
+		forward-zone:
+		    name: "."
+		    forward-tls-upstream: yes
+		    forward-addr: 1.1.1.1@853#cloudflare-dns.com
+		    forward-addr: 1.0.0.1@853#cloudflare-dns.com
+		    forward-addr: 8.8.8.8@853#dns.google
+		    forward-addr: 8.8.4.4@853#dns.google
+	EOF
+}
+
+setup_unbound() {
+	write_unbound_conf
+	# Пакет может прописать unbound DNS-сервером самого VPS (resolvconf). VPS резолвит как прежде:
+	# этот unbound отвечает только Роутеру.
+	systemctl disable --now unbound-resolvconf.service >/dev/null 2>&1 || true
+	systemctl enable unbound >/dev/null 2>&1
+	systemctl restart unbound
+	systemctl is-active -q unbound || die "unbound не запустился: journalctl -u unbound"
+}
+
 # ---------- SSH ----------
 
 ssh_apply() {
@@ -620,6 +666,7 @@ cmd_install() {
 	nft -f "$NFT_FILE"
 	write_pipe_unit
 	setup_awg_service
+	setup_unbound
 	setup_fail2ban
 	setup_unattended
 
@@ -629,6 +676,7 @@ cmd_install() {
 	echo "  SSH VPS:         ssh -p $SSH_PORT root@$PUB_IP"
 	echo "  Туннель:         udp/$AWG_PORT, AmneziaWG $AWG_VERSION (протокол ${AWG_PROTO}.x)"
 	echo "  MTU Туннеля:     $(tunnel_mtu) (сеть VPS: $(cat "/sys/class/net/$WAN_IF/mtu"))"
+	echo "  DNS для Роутера: udp://$VPS_TUN — первый сервер «Туннеля» на вкладке «DNS и списки»"
 	echo "  Конфиг Роутера:  $ROUTER_CONF"
 	echo
 	echo "  Скопировать на компьютер:  scp -P $SSH_PORT root@$PUB_IP:$ROUTER_CONF ."
@@ -695,7 +743,11 @@ cmd_status() {
 	echo
 	printf 'conntrack: %s из %s\n' "$(cat /proc/sys/net/netfilter/nf_conntrack_count 2>/dev/null || echo ?)" \
 		"$(cat /proc/sys/net/netfilter/nf_conntrack_max 2>/dev/null || echo ?)"
-	systemctl --no-pager --lines=0 status truba-pipe.service "awg-quick@$AWG_IF" 2>/dev/null | grep -E '●|Active:' || true
+	# Запросы Роутера и ошибки пересылки: если unbound не отвечает, Роутер молча уходит на запасной DoH.
+	unbound-control stats_noreset 2>/dev/null | awk -F= '
+		$1 == "total.num.queries" { q = $2 } $1 == "num.answer.rcode.SERVFAIL" { s = $2 }
+		END { if (q != "") printf "DNS для Роутера (unbound на %s): запросов %d, SERVFAIL %d\n", ip, q, s }' ip="$VPS_TUN" || true
+	systemctl --no-pager --lines=0 status truba-pipe.service "awg-quick@$AWG_IF" unbound 2>/dev/null | grep -E '●|Active:' || true
 }
 
 cmd_uninstall() {
@@ -705,9 +757,10 @@ cmd_uninstall() {
 	systemctl disable --now "awg-quick@$AWG_IF" >/dev/null 2>&1 || true
 	systemctl disable --now truba-awg.service >/dev/null 2>&1 || true
 	systemctl disable --now truba-pipe.service >/dev/null 2>&1 || true
+	systemctl disable --now unbound >/dev/null 2>&1 || true
 	nft delete table ip truba_nat 2>/dev/null || true
 	nft delete table inet truba_filter 2>/dev/null || true
-	rm -f "$PIPE_UNIT" /etc/systemd/system/truba-awg.service "$F2B_JAIL" "$SYSCTL_FILE" "$MODULES_FILE"
+	rm -f "$PIPE_UNIT" /etc/systemd/system/truba-awg.service "$F2B_JAIL" "$SYSCTL_FILE" "$MODULES_FILE" "$UNBOUND_CONF"
 	systemctl restart fail2ban >/dev/null 2>&1 || true
 	say "SSH возвращается на порт 22 (текущая сессия сохранится)"
 	rm -f "$SSHD_DROPIN"
@@ -716,7 +769,7 @@ cmd_uninstall() {
 	if [ "${1:-}" = "--purge" ]; then
 		rm -rf "$STATE_DIR" "$OUT_DIR" "$AWG_CONF"
 	fi
-	say "Готово. Пакеты amneziawg не удалялись"
+	say "Готово. Пакеты amneziawg и unbound не удалялись"
 }
 
 main() {

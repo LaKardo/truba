@@ -195,7 +195,7 @@ check('настройки: пропущенное перечислено',
 	same(sort(map(cfg.invalid, x => x.key)), [ 'device.mac', 'dns.port', 'dns.set_timeout', 'dns.tunnel_upstream', 'watchdog.probe' ]),
 	join(' ', sort(map(cfg.invalid, x => x.key))));
 check('настройки: все адреса DNS неверные — стандартные, а не mosdns без серверов',
-	same(cfg.dns.tunnel, [ 'https://1.1.1.1/dns-query', 'https://8.8.8.8/dns-query' ]), sprintf('%J', cfg.dns.tunnel));
+	same(cfg.dns.tunnel, [ 'udp://10.77.77.1', 'https://1.1.1.1/dns-query' ]), sprintf('%J', cfg.dns.tunnel));
 check('настройки: верный MAC — в нижнем регистре', same(cfg.devices, [ { name: '', mac: 'aa:bb:cc:dd:ee:ff', policy: 'direct' } ]));
 check('настройки: API mosdns — на соседнем порту', cfg.dns.port == 5335 && cfg.dns.api == '127.0.0.1:5336');
 config("config dns 'dns'\n\toption set_timeout '0'\n");

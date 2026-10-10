@@ -149,8 +149,8 @@ return view.extend({
 		s.tab('advanced', _('Advanced'));
 
 		let o = s.taboption('general', form.DynamicList, 'tunnel_upstream', _('For «Tunnel»'),
-			_('Used for categories with action Tunnel and, in mode «All via tunnel», for everything else. Requests go through the tunnel. Formats: https://…, tls://…, tls+pipeline://… (several requests in one connection), udp://…; «address@IP» sets the IP to connect to.'));
-		o.default = [ 'https://1.1.1.1/dns-query', 'https://8.8.8.8/dns-query' ];
+			_('Used for categories with action Tunnel and, in mode «All via tunnel», for everything else. Requests go through the tunnel, each one to all servers at once. udp://10.77.77.1 is the DNS server on the Truba itself (install-vps.sh). Formats: https://…, tls://…, tls+pipeline://… (several requests in one connection), udp://…; «address@IP» sets the IP to connect to.'));
+		o.default = [ 'udp://10.77.77.1', 'https://1.1.1.1/dns-query' ];
 		o.validate = validateUpstream;
 
 		o = s.taboption('general', form.DynamicList, 'direct_upstream', _('For «Direct»'),

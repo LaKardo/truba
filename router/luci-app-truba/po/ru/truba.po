@@ -175,8 +175,8 @@ msgstr "DNS Роутера идёт через mosdns: он узнаёт Кат�
 msgid "For «Tunnel»"
 msgstr "Для «Туннель»"
 
-msgid "Used for categories with action Tunnel and, in mode «All via tunnel», for everything else. Requests go through the tunnel. Formats: https://…, tls://…, tls+pipeline://… (several requests in one connection), udp://…; «address@IP» sets the IP to connect to."
-msgstr "Для Категорий с Действием «Туннель», а в Режиме «Всё в туннель» — для всего остального. Запросы идут через Туннель. Форматы: https://…, tls://…, tls+pipeline://… (несколько запросов в одном соединении), udp://…; «адрес@IP» задаёт IP для подключения."
+msgid "Used for categories with action Tunnel and, in mode «All via tunnel», for everything else. Requests go through the tunnel, each one to all servers at once. udp://10.77.77.1 is the DNS server on the Truba itself (install-vps.sh). Formats: https://…, tls://…, tls+pipeline://… (several requests in one connection), udp://…; «address@IP» sets the IP to connect to."
+msgstr "Для Категорий с Действием «Туннель», а в Режиме «Всё в туннель» — для всего остального. Запросы идут через Туннель, каждый — сразу ко всем серверам. udp://10.77.77.1 — DNS-сервер на самой Трубе (install-vps.sh). Форматы: https://…, tls://…, tls+pipeline://… (несколько запросов в одном соединении), udp://…; «адрес@IP» задаёт IP для подключения."
 
 msgid "For «Direct»"
 msgstr "Для «Напрямую»"

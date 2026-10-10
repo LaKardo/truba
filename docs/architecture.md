@@ -15,6 +15,7 @@
               │    udp/<AWG_PORT>  ──► AmneziaWG awg0                   │
               │    всё остальное   ──► DNAT → 10.77.77.2 (Роутер)       │
               │  выход от 10.77.77.2 ──► SNAT → <VPS_IP>, порт сохраняется│
+              │  DNS Роутера: 10.77.77.1:53 ──► unbound ─TLS─► 1.1.1.1  │
               └─────────────┬───────────────────────────────────────────┘
                             │  udp <VPS_IP>:<AWG_PORT>
                  ═══════════╪═══ Туннель AmneziaWG ≥2.0, MTU ≤1380 ═══
@@ -62,8 +63,9 @@
 ```
 ПК 192.168.1.10:51000 → youtube.com
   1. DNS: dnsmasq → mosdns. Домен в Категории с Действием «Туннель»
-     (или «По режиму» в Режиме «Всё в туннель») → DoH 1.1.1.1 через
-     Туннель (so_mark TUNNEL); IP ответа → набор gs_tunnel4 (если Категория явная).
+     (или «По режиму» в Режиме «Всё в туннель») → через Туннель (so_mark TUNNEL)
+     сразу к unbound на Трубе (10.77.77.1) и к DoH 1.1.1.1, ответ — первый;
+     IP ответа → набор gs_tunnel4 (если Категория явная).
   2. Пакет SYN: prerouting/mangle (table inet truba)
        iif br-lan, новый, не bypass → classify → meta mark = TUNNEL
        postrouting (persist, последним): ct mark = TUNNEL — все следующие пакеты
@@ -121,8 +123,8 @@ truba-watchdog: 3 неудачи подряд (handshake > 180 с или нет 
 | `show-config` | Печатает `.conf` для импорта в Роутер |
 | `rotate-keys` | Новые ключи и параметры AWG под версию модуля на сейчас (в том числе переход на AWG 3.1); после этого конфиг Роутера нужно импортировать заново |
 | `random-trailers on\|off` | RandomTrailers на Трубе и в `router.conf` (AWG 3.1); на Роутере переключить так же сразу после |
-| `status` | Туннель, handshake, MTU и очередь, правила nft, счётчики conntrack; есть ли модуль amneziawg у ядра, которое загрузится после перезагрузки |
-| `uninstall [--purge]` | Снимает правила, останавливает Туннель, возвращает SSH на порт 22; `--purge` удаляет и ключи, параметры и `router.conf`. Пакеты amneziawg остаются |
+| `status` | Туннель, handshake, MTU и очередь, правила nft, счётчики conntrack, запросы и SERVFAIL у unbound; есть ли модуль amneziawg у ядра, которое загрузится после перезагрузки |
+| `uninstall [--purge]` | Снимает правила, останавливает Туннель, возвращает SSH на порт 22; `--purge` удаляет и ключи, параметры и `router.conf`. Пакеты amneziawg и unbound остаются |
 
 ### 3.2 Шаги `install`
 
@@ -131,7 +133,7 @@ truba-watchdog: 3 неудачи подряд (handshake > 180 с или нет 
    - VPS — полноценная ВМ, а не контейнер (`systemd-detect-virt --container`): KVM, VMware, Xen, Hyper-V подходят, OpenVZ/LXC — нет;
    - в `/root/.ssh/authorized_keys` есть ключ: после переноса SSH вход по паролю закрывается;
    - IPv4 на интерфейсе маршрута по умолчанию совпадает с внешним IP (`curl -4 https://api.ipify.org`): значит, Труба не за NAT провайдера.
-2. **Пакеты:** `nftables fail2ban unattended-upgrades software-properties-common`, заголовки текущего ядра и метапакеты заголовков под метапакеты ядра, что стоят в системе (`linux-image-generic` → `linux-headers-generic` и т.п.). Метапакет нужен, чтобы ядро, которое поставит unattended-upgrades, пришло вместе со своими заголовками и DKMS собрал под него модуль. ufw выключается: он мешает нашим правилам nftables.
+2. **Пакеты:** `nftables fail2ban unattended-upgrades software-properties-common unbound`, заголовки текущего ядра и метапакеты заголовков под метапакеты ядра, что стоят в системе (`linux-image-generic` → `linux-headers-generic` и т.п.). Метапакет нужен, чтобы ядро, которое поставит unattended-upgrades, пришло вместе со своими заголовками и DKMS собрал под него модуль. ufw выключается: он мешает нашим правилам nftables.
 3. **AmneziaWG:** `add-apt-repository ppa:amnezia/ppa`, `apt install amneziawg` (DKMS + tools), `modprobe amneziawg`. Версия пакета записывается в `/etc/truba/pipe.env` и видна в `status`. Модуль для Роутера CI собирает не по ней, а из `router/awg/SOURCES` (закреплённый коммит awg-openwrt): VPS он не видит. Версии протокола у сторон сверяет владелец — по `status` и `SOURCES`.
 4. **SSH на высокий порт.** В Ubuntu 24.04 SSH запускается через сокет-активацию, поэтому нужно:
    - `/etc/ssh/sshd_config.d/10-truba.conf`: `Port <SSH_PORT>`, `PasswordAuthentication no`, `PermitRootLogin prohibit-password`;
@@ -226,9 +228,10 @@ truba-watchdog: 3 неудачи подряд (handshake > 180 с или нет 
    }
    ```
    Применение безопасное: скрипт загружает правила и ждёт 120 с, пока пользователь подтвердит вход по SSH на новом порту. Без подтверждения правила и SSH откатываются.
-9. **fail2ban:** jail `sshd` на `<SSH_PORT>`, `banaction = nftables-multiport`.
-10. **unattended-upgrades:** включён. DKMS сам пересобирает модуль AWG при обновлении ядра Ubuntu; `status` предупреждает, если у ядра, которое загрузится следующим, модуля нет.
-11. **Итог:** `/root/truba/router.conf` — стандартный AWG-`.conf` для Роутера (`Address = 10.77.77.2/30`, `Endpoint = <VPS_IP>:<AWG_PORT>`, `AllowedIPs = 0.0.0.0/0`, `PersistentKeepalive = 25`, все параметры маскировки).
+9. **DNS для Роутера (ADR 0013):** unbound слушает только `10.77.77.1:53` (`ip-freebind`: стартует раньше `awg0`) и отвечает только `10.77.77.2`. Запросы он пересылает по TLS в Cloudflare и Google, с проверкой имени сервера; DNSSEC проверяют они, своей проверки нет. Конфиг — `/etc/unbound/unbound.conf.d/truba.conf`, пишется до установки пакета, чтобы служба сразу стартовала с ним. `unbound-resolvconf` выключается: сам VPS резолвит как прежде. Новых правил nftables не нужно: вход из `awg0` от Роутера уже открыт, а с WAN порт 53 уходит на Роутер (DNAT).
+10. **fail2ban:** jail `sshd` на `<SSH_PORT>`, `banaction = nftables-multiport`.
+11. **unattended-upgrades:** включён. DKMS сам пересобирает модуль AWG при обновлении ядра Ubuntu; `status` предупреждает, если у ядра, которое загрузится следующим, модуля нет.
+12. **Итог:** `/root/truba/router.conf` — стандартный AWG-`.conf` для Роутера (`Address = 10.77.77.2/30`, `Endpoint = <VPS_IP>:<AWG_PORT>`, `AllowedIPs = 0.0.0.0/0`, `PersistentKeepalive = 25`, все параметры маскировки).
 
 ---
 
@@ -436,9 +439,9 @@ plugins:
 
   # Серверы одного пути: свой forward на каждый, запрос сразу ко всем, ответ — первый годный.
   # idle_timeout 180: соединение живёт в паузах до 3 мин (сам mosdns закрыл бы DoH через 30 с).
-  - { tag: up_tunnel_0, type: forward, args: { upstreams: [ { addr: "https://1.1.1.1/dns-query", idle_timeout: 180, so_mark: 0x00010000 } ] } }
+  - { tag: up_tunnel_0, type: forward, args: { upstreams: [ { addr: "udp://10.77.77.1", idle_timeout: 180, so_mark: 0x00010000 } ] } }   # unbound на Трубе (ADR 0013)
   - { tag: up_tunnel_0_ok, type: sequence, args: [ { exec: $up_tunnel_0 }, { matches: [ "!rcode 0 3" ], exec: drop_resp } ] }   # SERVFAIL, REFUSED… — ждать другой сервер
-  - { tag: up_tunnel_1, type: forward, args: { upstreams: [ { addr: "https://8.8.8.8/dns-query", idle_timeout: 180, so_mark: 0x00010000 } ] } }
+  - { tag: up_tunnel_1, type: forward, args: { upstreams: [ { addr: "https://1.1.1.1/dns-query", idle_timeout: 180, so_mark: 0x00010000 } ] } }   # запасной
   - { tag: up_tunnel_1_ok, type: sequence, args: [ { exec: $up_tunnel_1 }, { matches: [ "!rcode 0 3" ], exec: drop_resp } ] }
   - { tag: up_tunnel, type: fallback, args: { primary: up_tunnel_0_ok, secondary: up_tunnel_1_ok, threshold: 1, always_standby: true } }
   # up_direct — так же из tls+pipeline://common.dot.dns.yandex.net с dial_addr 77.88.8.8 и 77.88.8.1;
@@ -490,7 +493,7 @@ plugins:
 
 Настоящий конфиг генерирует [render.uc](../router/truba/files/usr/share/ucode/truba/render.uc) в виде JSON (подмножество YAML). Эталон — `tests/golden/mosdns.json`, запуск проверяется на mosdns 5.3.3 из фида в тестах Роутера.
 
-**Серверы DNS.** Каждый запрос, которого нет в кэше, уходит сразу ко всем серверам своего пути, и в ответ идёт первый годный: NOERROR или NXDOMAIN. Поэтому зависший или оборвавший соединение сервер не задерживает ответ. Штатный `concurrent` плагина forward для этого не годится: он выбирает сервер для каждого параллельного запроса случайно и с повторами, и при двух серверах половина запросов ушла бы дважды к одному. Простаивающее соединение mosdns держит 3 минуты (`idle_timeout`). Его собственный срок для DoH — 30 с, хотя серверы держат соединение дольше: Google — 4 мин, Cloudflare — 6,5 мин. Без этого первый промах кэша после паузы ждал бы новых TCP и TLS: через Туннель это 100–170 мс. Если сервер закрывает соединение раньше (Яндекс — через 30 с), mosdns просто открывает новое. DoT «Напрямую» идёт с pipelining (`tls+pipeline://`): несколько запросов, пришедших разом, идут по одному соединению, а не открывают TLS на каждый. Яндекс, Cloudflare и Google отвечают на такие запросы в любом порядке, как требует RFC 7766. Без pipelining mosdns не применяет к DoT и `idle_timeout`.
+**Серверы DNS.** Каждый запрос, которого нет в кэше, уходит сразу ко всем серверам своего пути, и в ответ идёт первый годный: NOERROR или NXDOMAIN. Поэтому зависший или оборвавший соединение сервер не задерживает ответ. Штатный `concurrent` плагина forward для этого не годится: он выбирает сервер для каждого параллельного запроса случайно и с повторами, и при двух серверах половина запросов ушла бы дважды к одному. Простаивающее соединение mosdns держит 3 минуты (`idle_timeout`). Его собственный срок для DoH — 30 с, хотя серверы держат соединение дольше: Google — 4 мин, Cloudflare — 6,5 мин. Без этого первый промах кэша после паузы ждал бы новых TCP и TLS: через Туннель это 100–170 мс. Если сервер закрывает соединение раньше (Яндекс — через 30 с), mosdns просто открывает новое. Первый сервер «Туннеля» по умолчанию — unbound на самой Трубе (`udp://10.77.77.1`, ADR 0013). Ему Роутер шлёт обычный UDP внутри Туннеля, а TLS до Cloudflare и Google держит VPS, рядом с ними. Поэтому промах через Туннель стоит одну поездку через Туннель всегда, даже после долгой паузы. DoH 1.1.1.1 — запасной: если сервера на Трубе нет, его порт сразу отвечает «закрыт». DoT «Напрямую» идёт с pipelining (`tls+pipeline://`): несколько запросов, пришедших разом, идут по одному соединению, а не открывают TLS на каждый. Яндекс, Cloudflare и Google отвечают на такие запросы в любом порядке, как требует RFC 7766. Без pipelining mosdns не применяет к DoT и `idle_timeout`.
 
 **Порядок проверки Категорий («узость»).** Категории сортируются по числу записей: вложенная всегда меньше объемлющей, поэтому вложенность соблюдается сама. При равенстве — Блок → Туннель → Напрямую. Вложенность (A ⊂ B, если все записи A есть в B) распаковщик вычисляет для колонки «Вложена в» в интерфейсе.
 
@@ -588,8 +591,8 @@ config device                      # Политика устройства
 	option policy 'tunnel'         # tunnel | direct | rules
 
 config dns 'dns'
+	list   tunnel_upstream 'udp://10.77.77.1'            # unbound на Трубе (ADR 0013)
 	list   tunnel_upstream 'https://1.1.1.1/dns-query'
-	list   tunnel_upstream 'https://8.8.8.8/dns-query'
 	list   direct_upstream 'tls+pipeline://common.dot.dns.yandex.net@77.88.8.8'
 	list   direct_upstream 'tls+pipeline://common.dot.dns.yandex.net@77.88.8.1'
 	option port            '5335'
@@ -817,6 +820,7 @@ netifd загружает обработчики протоколов тольк
 | Провайдер включит IPv6 | Устройства получат «белые» IPv6, трафик мог бы пойти мимо Туннеля | Правило `lan → wan` IPv6 REJECT и фильтр AAAA уже стоят; полная поддержка IPv6 — отдельное расширение (ADR 0005) |
 | Кто-то выключит IPv6 на `br-lan` (например, `network.lan.ipv6='0'`) | mesh-узлы перестанут находить друг друга | Труба IPv6 домашней сети не меняет; в README — предупреждение не выключать IPv6 на `br-lan` |
 | Другая служба на Роутере перезапишет метки | Ответы на входящие уходят в `wan`, свои сокеты Роутера — мимо Туннеля | Свой байт метки, решение в ct mark пишется последним, метка своих сокетов — из `socket mark` (ADR 0011). Не лечится: чужая маска с байтом `0x00ff0000`, DNAT в nat output |
+| DNS-сервер на Трубе не отвечает (VPS ставился раньше или unbound упал) | Ответы идут от запасного DoH 1.1.1.1: DNS работает, но холодные соединения снова стоят две поездки через Туннель | `install-vps.sh status` — запросы и SERVFAIL у unbound; ошибки сервера — в журнале mosdns («Диагностика»). Повторный `install-vps.sh install` ставит unbound на прежних ключах |
 | DPI начнёт узнавать Туннель по размерам пакетов | Туннель блокируется или режется | В запасе RandomTrailers: `install-vps.sh random-trailers on` и флаг Random Trailers у `awg0` на Роутере. Цена — трафик на мелких пакетах, поэтому по умолчанию выключен |
 
 ---

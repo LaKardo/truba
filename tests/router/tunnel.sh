@@ -1,6 +1,6 @@
 #!/bin/sh
 # Туннель: «Проверить NAT» (STUN через Туннель), «Проверка Туннеля» (три размера пакетов),
-# долгие проверки через rpcd в фоне, контроль Туннеля (задержка, окно проверок, крупные
+# DNS-сервер на Трубе, долгие проверки через rpcd в фоне, контроль Туннеля (задержка, окно проверок, крупные
 # пакеты, проверка NAT после подъёма, перезапуск с новым кодом, устаревшая запись).
 . /repo/tests/router/stand.sh
 
@@ -21,6 +21,15 @@ check "ответ записан своему серверу, молчащие �
 check "внешний IP — IP Трубы, порт сохранён, отображение одинаково, итог OK" eval '[ "$(nat @.ip_is_vps)" = true ] && [ "$(nat @.port_preserved)" = true ] && [ "$(nat @.consistent)" = true ] && [ "$(nat @.ok)" = true ]'
 check "серверы опрашиваются разом (не дольше 7 с, было $((T1 - T0)) с)" test $((T1 - T0)) -le 7
 check "status: итог для «Обзора»" test "$(truba status | jsonfilter -e '@.nat.ok')" = true
+
+section "DNS Туннеля: сервер на Трубе"
+# На Трубе — DNS-сервер на её адресе в Туннеле, как его ставит install-vps.sh (ADR 0013). DoH из
+# списка по умолчанию на стенде недоступен (интернета нет): ответ может прийти только через Туннель.
+ip netns exec vps dnsmasq --conf-file=/dev/null --port=53 --listen-address=10.77.77.1 --bind-interfaces \
+	--no-resolv --no-hosts --address=/#/44.0.0.9 --pid-file=/tmp/vpsdns.pid
+check "серверы «Туннеля» по умолчанию: первый — DNS на Трубе" test "$(uci -q get truba.dns.tunnel_upstream | cut -d' ' -f1)" = udp://10.77.77.1
+check "новое имя — ответ DNS-сервера Трубы через Туннель" eval 'nslookup -port="$(dns_port)" vpsdns.trubatest 127.0.0.1 2>&1 | grep -q 44.0.0.9'
+kill "$(cat /tmp/vpsdns.pid)"
 
 section "Проверка Туннеля: пакеты трёх размеров"
 MTU="$(cat /sys/class/net/awg0/mtu)"
