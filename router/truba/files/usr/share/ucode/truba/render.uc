@@ -58,12 +58,15 @@ function persist_chain() {
 //   и Туннель пошёл бы не через провайдера.
 // Метка «Напрямую» ставится в байт Трубы: правило с точной чужой меткой уже не
 // сработает, а правило 1000 Трубы — только для «Туннеля». Без IP Трубы цепочки нет.
+// DSCP у них — 0: модуль ставит рукопожатию AF41, как WireGuard, а мусорным пакетам —
+// случайный, и по этому Туннель узнают. ECN не трогается.
 function output_chain(ctx) {
 	if (!ctx.vps)
 		return '';
 	let s = '\n\tchain output {\n';
 	s += '\t\ttype route hook output priority mangle + 10; policy accept;\n';
 	s += '\t\tmeta nfproto != ipv4 return\n';
+	s += '\t\tip daddr ' + ctx.vps + ' ip dscp != cs0 ip dscp set cs0\n';
 	s += '\t\tip daddr ' + ctx.vps + ' ' + set_meta(C.MARK_DIRECT) + ' return\n';
 	if (ctx.socket_mark)
 		s += '\t\tsocket mark and ' + hex(C.MARK_MASK) + ' == ' + hex(C.MARK_TUNNEL) + ' ' + set_meta(C.MARK_TUNNEL) + '\n';

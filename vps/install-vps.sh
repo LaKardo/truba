@@ -38,6 +38,13 @@ RTR_TUN=10.77.77.2
 # каждый полноразмерный пакет на два фрагмента: у части провайдеров сеть VPS — 1400, а не 1500.
 MTU_MAX=1380
 TUN_OVERHEAD=87
+# AWG 3.1. Добавка к пакетам данных — случайная, вместо дополнения до кратного 16: иначе длины
+# всех пакетов Туннеля дают один и тот же остаток от деления на 16. В среднем это те же ~7,5 байта,
+# а полноразмерные пакеты не растут: добавка не выходит за самый большой пакет Туннеля.
+AWG_PADDING=0-15
+# Keepalive Роутера держит открытым NAT его провайдера. Период случайный, чтобы у простаивающего
+# Туннеля не было ровного ритма; верхняя граница — прежние 25 с, так что NAT не закроется раньше.
+AWG_KEEPALIVE=15-25
 CONFIRM_TIMEOUT=120
 # Сколько ждать apt, занятый другим процессом (на свежем VPS — cloud-init и автообновления), с.
 APT_WAIT=600
@@ -300,11 +307,12 @@ awg_version() {
 }
 
 # Какой протокол AWG поддерживает модуль: 3 — AWG 3.1 (защита заголовков, DisableCookies,
-# RandomTrailers), 2 — AWG 2.0 (S3/S4, диапазоны H, I1), иначе 1.
+# RandomTrailers, ContentPaddingAddition, диапазон PersistentKeepalive), 2 — AWG 2.0 (S3/S4,
+# диапазоны H, I1), иначе 1.
 # Проверяется тем же разбором конфига, что и у настоящего интерфейса. Код 1 — интерфейс
 # AmneziaWG не создаётся: модуля нет (например, DKMS не собрал его под новое ядро).
 awg_proto_supported() {
-	local t=awgprobe$$ proto=1 f base
+	local t=awgprobe$$ proto=1 f base key
 	ip link add "$t" type amneziawg 2>/dev/null || return 1
 	f=$(mktemp)
 	base=$(printf '[Interface]\nPrivateKey = %s\nS1 = 20\nS2 = 40\nS3 = 20\nS4 = 20\nH1 = 100-200\nH2 = 300-400\nH3 = 500-600\nH4 = 700-800' \
@@ -312,7 +320,10 @@ awg_proto_supported() {
 	printf '%s\n' "$base" > "$f"
 	if awg setconf "$t" "$f" 2>/dev/null; then
 		proto=2
-		printf '%s\nHeaderProtectionKey = %s\nDisableCookies = on\nRandomTrailers = off\n' "$base" "$(awg genkey)" > "$f"
+		# Пир без Endpoint: интерфейс выключен, и пробный keepalive никуда не уходит.
+		key=$(awg genkey)
+		printf '%s\nHeaderProtectionKey = %s\nDisableCookies = on\nRandomTrailers = off\nContentPaddingAddition = %s\n\n[Peer]\nPublicKey = %s\nPersistentKeepalive = %s\n' \
+			"$base" "$key" "$AWG_PADDING" "$key" "$AWG_KEEPALIVE" > "$f"
 		if awg setconf "$t" "$f" 2>/dev/null; then
 			proto=3
 		fi
@@ -394,7 +405,12 @@ awg_params_block() {
 		# Ответы cookie шлются только под нагрузкой; с одним пиром они не нужны, а их размер узнаваем.
 		echo "DisableCookies = on"
 		# Запас на случай DPI по размерам пакетов: дорого по трафику, включается отдельной командой.
-		[ "${RANDOM_TRAILERS:-0}" = 1 ] && echo "RandomTrailers = on"
+		# Добавку модуль берёт вместо RandomTrailers, поэтому с ним её нет.
+		if [ "${RANDOM_TRAILERS:-0}" = 1 ]; then
+			echo "RandomTrailers = on"
+		else
+			echo "ContentPaddingAddition = $AWG_PADDING"
+		fi
 	fi
 	return 0
 }
@@ -428,7 +444,11 @@ router_conf() {
 	echo "PresharedKey = $PSK"
 	echo "Endpoint = $PUB_IP:$AWG_PORT"
 	echo "AllowedIPs = 0.0.0.0/0"
-	echo "PersistentKeepalive = 25"
+	if [ "${AWG_PROTO:-1}" -ge 3 ]; then
+		echo "PersistentKeepalive = $AWG_KEEPALIVE"
+	else
+		echo "PersistentKeepalive = 25"
+	fi
 }
 
 # AWG_CONF_CHANGED=1 — конфиг Туннеля стал другим, и Туннель надо перезапустить.
@@ -438,7 +458,7 @@ write_awg_conf() {
 	AWG_CONF_CHANGED=$FILE_CHANGED
 }
 
-# ROUTER_CONF_NEW=1 — прежний router.conf стал другим (адрес, порт, MTU): Роутеру нужен новый.
+# ROUTER_CONF_NEW=1 — прежний router.conf стал другим (адрес, порт, MTU, параметры AWG): Роутеру нужен новый.
 write_router_conf() {
 	local existed=0
 	[ -f "$ROUTER_CONF" ] && existed=1
@@ -504,6 +524,12 @@ write_nft() {
 			chain mss {
 				type filter hook forward priority mangle; policy accept;
 				tcp flags syn tcp option maxseg size set rt mtu
+			}
+			# DSCP пакетов Туннеля — 0: модуль ставит рукопожатию AF41, как WireGuard, а мусорным
+			# пакетам — случайный, и по этому их узнают. ECN не трогается.
+			chain dscp {
+				type filter hook output priority mangle; policy accept;
+				udp sport $AWG_PORT ip dscp != cs0 ip dscp set cs0
 			}
 		}
 	EOF
@@ -888,7 +914,7 @@ cmd_install() {
 	echo
 	echo "  AmneziaWG на Трубе: $ver — модуль Роутера собирается из router/awg/SOURCES, протокол должен совпадать"
 	if [ "${ROUTER_CONF_NEW:-0}" = 1 ]; then
-		warn "router.conf изменился (адрес, порт или MTU Туннеля) — импортируйте его в Роутер заново"
+		warn "router.conf изменился (адрес, порт, MTU или параметры Туннеля) — импортируйте его в Роутер заново"
 	fi
 	kernel_module_check >/dev/null || true
 }
@@ -931,10 +957,14 @@ cmd_random_trailers() {
 	save_state
 	write_awg_conf
 	write_router_conf
-	awg set "$AWG_IF" random-trailers "$1" || warn "Туннель не поднят: настройка применится при его запуске"
-	say "RandomTrailers $1 на Трубе. Сразу переключите так же на Роутере:"
-	echo "  LuCI → Сеть → Интерфейсы → $AWG_IF → AmneziaWG → Random Trailers → Сохранить и применить"
-	echo "  (или импортируйте заново $ROUTER_CONF)"
+	# Добавка к пакетам данных у модуля главнее RandomTrailers: с ним её нет, без него — снова есть.
+	local pad=0
+	[ "$RANDOM_TRAILERS" = 1 ] || pad=$AWG_PADDING
+	awg set "$AWG_IF" random-trailers "$1" content-padding-addition "$pad" \
+		|| warn "Туннель не поднят: настройка применится при его запуске"
+	say "RandomTrailers $1 на Трубе. Сразу импортируйте заново $ROUTER_CONF в Роутер:"
+	echo "  LuCI → Службы → Труба → Туннель → Импорт .conf"
+	echo "  (с RandomTrailers меняется и добавка к пакетам, поэтому одного флага у $AWG_IF мало)"
 }
 
 cmd_status() {
@@ -943,7 +973,9 @@ cmd_status() {
 	echo "IP Трубы: ${PUB_IP:-?}   SSH: ${SSH_PORT:-?}   Туннель: udp/${AWG_PORT:-?}   AmneziaWG $(awg_version), протокол ${AWG_PROTO:-?}.x"
 	echo "MTU Туннеля: $(cat "$SYS_NET/$AWG_IF/mtu" 2>/dev/null || echo ?) (по сети VPS — не больше $(tunnel_mtu))   очередь ${WAN_IF:-?}: $(wan_qdisc_show)"
 	if [ "${AWG_PROTO:-1}" -ge 3 ]; then
-		echo "Защита заголовков: $([ -n "${HPK:-}" ] && echo вкл || echo выкл)   DisableCookies: вкл   RandomTrailers: $([ "${RANDOM_TRAILERS:-0}" = 1 ] && echo вкл || echo выкл)"
+		local rt="выкл   добавка к пакетам: $AWG_PADDING байт"
+		[ "${RANDOM_TRAILERS:-0}" = 1 ] && rt=вкл
+		echo "Защита заголовков: $([ -n "${HPK:-}" ] && echo вкл || echo выкл)   DisableCookies: вкл   RandomTrailers: $rt"
 	fi
 	kernel_module_check || true
 	local over

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # install-vps.sh без настоящего VPS: shellcheck, запись файлов, apt, заголовки ядра, протокол AWG,
-# параметры AWG 1.x/2.x/3.1, конфиги обеих сторон и их перезапуск, правила nftables с загрузкой
+# параметры AWG 1.x/2.x/3.1, конфиги обеих сторон и их перезапуск, правила nftables (и DSCP Туннеля) с загрузкой
 # в ядро, sysctl, очередь WAN, MTU по сети VPS, DNS для Роутера (unbound), порт SSH.
 # Контейнер ubuntu:24.04 с --cap-add NET_ADMIN (tests/run.sh vps).
 set -uo pipefail
@@ -127,13 +127,19 @@ out=$( (detect_awg_proto; echo "дальше: $AWG_PROTO_NOW") 2>&1 )
 grep -q 'интерфейс AmneziaWG не создаётся' <<< "$out" && ! grep -q 'дальше' <<< "$out" \
 	&& ok "протокол AWG: без модуля — выход до изменений" || fail "протокол AWG: без модуля: $out"
 ip() { :; }
-awg() { case $1 in genkey) echo a2V5 ;; setconf) return 0 ;; esac; }
+awg() { case $1 in genkey) echo a2V5 ;; setconf) cp "$3" "$T/probe" ;; esac; }
 p3=$(awg_proto_supported)
 awg() { case $1 in genkey) echo a2V5 ;; setconf) ! grep -q HeaderProtectionKey "$3" ;; esac; }
 p2=$(awg_proto_supported)
 awg() { case $1 in genkey) echo a2V5 ;; setconf) return 1 ;; esac; }
 p1=$(awg_proto_supported)
 [ "$p3 $p2 $p1" = "3 2 1" ] && ok "протокол AWG: 3.1, 2.0 и 1.x по разбору пробного конфига" || fail "протокол AWG: $p3 $p2 $p1"
+# AWG 3.1 — только если модуль принимает всё, что Труба пишет для него: и добавку к пакетам,
+# и диапазон keepalive у пира.
+grep -qx 'ContentPaddingAddition = 0-15' "$T/probe" && grep -qx 'PersistentKeepalive = 15-25' "$T/probe" \
+	&& ok "протокол AWG 3.1: проба с добавкой к пакетам и диапазоном keepalive" || fail "проба AWG 3.1:"$'\n'"$(cat "$T/probe")"
+awg() { case $1 in genkey) echo a2V5 ;; setconf) ! grep -q ContentPaddingAddition "$3" ;; esac; }
+[ "$(awg_proto_supported)" = 2 ] && ok "протокол AWG: без добавки к пакетам — 2.0" || fail "протокол AWG без ContentPaddingAddition"
 unset -f ip awg
 
 # Версия AWG для сверки с router/awg/SOURCES: модуль и сборка PPA.
@@ -191,11 +197,41 @@ grep -q 'tcp dport != 52222 dnat to $RTR' "$NFT_FILE" && ok "итоговый р
 grep -q 'snat to $PUB' "$NFT_FILE" && ok "SNAT от IP VPS" || fail "SNAT"
 grep -q 'udp dport 68 return' "$NFT_FILE" && ok "DHCP-клиент VPS не уходит на Роутер" || fail "DHCP"
 grep -q 'udp sport 547 udp dport 546 accept' "$NFT_FILE" && ok "ответы DHCPv6 доходят до VPS" || fail "DHCPv6"
+grep -q 'udp sport 51820 ip dscp != cs0 ip dscp set cs0' "$NFT_FILE" && ok "DSCP пакетов Туннеля обнуляется" || fail "DSCP Туннеля"
+
+# udp_tos SPORT TOS — UDP-пакет на 127.0.0.1:9 с порта SPORT и байтом TOS (IP_TOS, hex).
+# TOS — числом: строку setsockopt передал бы как байты.
+udp_tos() {
+	perl -MSocket -e 'socket(my $s, PF_INET, SOCK_DGRAM, 0) or die; setsockopt($s, 0, 1, hex($ARGV[1])) or die;
+		bind($s, sockaddr_in($ARGV[0], INADDR_ANY)) or die; send($s, "x", 0, sockaddr_in(9, inet_aton("127.0.0.1"))) or die' "$1" "$2"
+}
+# packets ИМЯ — пакеты счётчика из проверочной таблицы t_dscp.
+packets() { nft list counter inet t_dscp "$1" | awk '/packets/ { print $2 }'; }
 
 # Загрузка правил в ядро и проверка, что они реально стоят.
 if nft -f "$NFT_FILE"; then
 	nft list chain ip truba_nat prerouting > "$STATE_DIR/chain.txt"
 	grep -q 'dnat to 10.77.77.2' "$STATE_DIR/chain.txt" && ok "правила загружены в ядро" || fail "правила в ядре"
+	# Что уходит после цепочки dscp: AF41 с ECT(0) с порта Туннеля — DSCP 0, ECN тот же;
+	# с другого порта — как было.
+	nft -f - <<-'EOF'
+		table inet t_dscp {
+			counter tun_clean { }
+			counter tun_other { }
+			counter other_af41 { }
+			chain post {
+				type filter hook postrouting priority filter; policy accept;
+				udp sport 51820 ip dscp cs0 ip ecn ect0 counter name tun_clean
+				udp sport 51820 ip dscp != cs0 counter name tun_other
+				udp sport 51821 ip dscp af41 counter name other_af41
+			}
+		}
+	EOF
+	udp_tos 51820 0x8a; udp_tos 51821 0x88
+	[ "$(packets tun_clean) $(packets tun_other) $(packets other_af41)" = "1 0 1" ] \
+		&& ok "DSCP в ядре: у пакетов Туннеля 0, ECN не тронут, у остальных как был" \
+		|| fail "DSCP в ядре: $(packets tun_clean) $(packets tun_other) $(packets other_af41)"
+	nft delete table inet t_dscp
 	nft delete table ip truba_nat; nft delete table inet truba_filter
 else
 	fail "nft -f"
@@ -294,7 +330,7 @@ diff <(grep -E '^(S[1-4]|H[1-4]) = ' "$AWG_CONF") <(grep -E '^(S[1-4]|H[1-4]) = 
 	&& ok "S1–S4 и H1–H4 совпадают у сторон" || fail "S/H различаются"
 [ "$(stat -c %a "$ROUTER_CONF") $(stat -c %a "$AWG_CONF") $(stat -c %a "$AWG_DIR") $(stat -c %a "$OUT_DIR")" = "600 600 700 700" ] \
 	&& ok "router.conf, awg0.conf и их каталоги доступны только root" || fail "права конфигов AWG"
-! grep -qE '^(HeaderProtectionKey|DisableCookies|RandomTrailers)' "$AWG_CONF" "$ROUTER_CONF" \
+! grep -qE '^(HeaderProtectionKey|DisableCookies|RandomTrailers|ContentPaddingAddition)' "$AWG_CONF" "$ROUTER_CONF" \
 	&& ok "AWG 2.0: без параметров 3.1" || fail "AWG 2.0: лишние параметры 3.1"
 
 # Конфиги AWG 3.1: ключ защиты заголовков одинаковый, DisableCookies у обеих сторон,
@@ -307,14 +343,28 @@ for f in "$AWG_CONF" "$ROUTER_CONF"; do
 		|| { fail "AWG 3.1: $(basename "$f")"; bad=1; }
 done
 [ "$bad" -eq 0 ] && ok "AWG 3.1: HeaderProtectionKey и DisableCookies у обеих сторон, RandomTrailers выкл"
+grep -qx 'ContentPaddingAddition = 0-15' "$AWG_CONF" && grep -qx 'ContentPaddingAddition = 0-15' "$ROUTER_CONF" \
+	&& ok "AWG 3.1: добавка к пакетам 0–15 у обеих сторон" || fail "AWG 3.1: ContentPaddingAddition"
+grep -qx 'PersistentKeepalive = 15-25' "$ROUTER_CONF" && ! grep -q '^PersistentKeepalive' "$AWG_CONF" \
+	&& ok "AWG 3.1: keepalive Роутера — случайный 15–25 с, у Трубы его нет" || fail "AWG 3.1: keepalive: $(grep -h '^PersistentKeepalive' "$AWG_CONF" "$ROUTER_CONF")"
+# Добавку модуль берёт вместо RandomTrailers: с ним её нет ни у одной стороны.
 RANDOM_TRAILERS=1; write_awg_conf; write_router_conf
 grep -qx 'RandomTrailers = on' "$AWG_CONF" && grep -qx 'RandomTrailers = on' "$ROUTER_CONF" \
-	&& ok "AWG 3.1: RandomTrailers у обеих сторон" || fail "AWG 3.1: RandomTrailers"
+	&& ! grep -q '^ContentPaddingAddition' "$AWG_CONF" "$ROUTER_CONF" \
+	&& ok "AWG 3.1: RandomTrailers у обеих сторон, без добавки к пакетам" || fail "AWG 3.1: RandomTrailers"
 STATE="$STATE_DIR/pipe.env"; save_state
 ( unset HPK RANDOM_TRAILERS; load_state; [ "$HPK" = 'aHBrLXRlc3Qta2V5LTMyLWJ5dGVzLWxvbmctLS0tLS0=' ] && [ "$RANDOM_TRAILERS" = 1 ] ) \
 	&& ok "pipe.env хранит HeaderProtectionKey и RandomTrailers" || fail "pipe.env: HPK/RandomTrailers"
 [ "$(stat -c %a "$STATE") $(stat -c %a "$STATE_DIR")" = "600 700" ] && ok "pipe.env и его каталог доступны только root" || fail "права pipe.env"
 [ "$(umask)" = 0022 ] && ok "запись ключей не меняет umask: юниты и конфиги остаются читаемыми" || fail "umask после записи ключей: $(umask)"
+# random-trailers переключает на ходу и RandomTrailers, и добавку к пакетам: модуль берёт её вместо них.
+awg() { echo "$*" >> "$T/awgset"; }
+: > "$T/awgset"
+out=$( (cmd_random_trailers off; cmd_random_trailers on) 2>&1 )
+[ "$(cat "$T/awgset")" = $'set awg0 random-trailers off content-padding-addition 0-15\nset awg0 random-trailers on content-padding-addition 0' ] \
+	&& grep -q 'Импорт .conf' <<< "$out" \
+	&& ok "random-trailers: на ходу вместе с добавкой к пакетам, на Роутере — импорт router.conf" || fail "random-trailers: $(cat "$T/awgset") $out"
+unset -f awg
 
 # Повторный install: Туннель перезапускается, только если его конфиг изменился, а о новом
 # router.conf (адрес, порт, MTU) install предупреждает.

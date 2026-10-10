@@ -1,6 +1,6 @@
 #!/bin/sh
 # Путь пакетов: что ставит установка, правила и маршруты после применения, входящие через
-# Туннель, свои сокеты Роутера, чужие цепочки nftables (ADR 0011), учёт трафика, Политика
+# Туннель, свои сокеты Роутера, чужие цепочки nftables (ADR 0011), DSCP Туннеля, учёт трафика, Политика
 # устройства, Аварийная блокировка, Маршрутизация выкл, Режим «Выборочный», teardown, uninstall.
 . /repo/tests/router/stand.sh
 
@@ -85,6 +85,44 @@ foreign_checks() {
 	foreign_off
 }
 foreign_checks "Маршрутизация вкл"
+
+section "DSCP пакетов Туннеля"
+# Ядро ставит рукопожатию AF41 — по нему WireGuard и AmneziaWG узнают. Труба обнуляет DSCP всего,
+# что Роутер шлёт на IP Трубы: до её цепочки output рукопожатие (148 байт, udp length 156) ещё
+# с AF41, у Трубы (netns vps) — уже с 0. Новое рукопожатие — снятием и возвратом пира.
+nft -f - <<-'EOF'
+	table inet t_dscp {
+		counter hs_af41 { }
+		chain out {
+			type filter hook output priority mangle - 10; policy accept;
+			ip daddr 198.51.100.2 udp length 156 ip dscp af41 counter name hs_af41
+		}
+	}
+EOF
+ip netns exec vps nft -f - <<-'EOF'
+	table inet t_dscp {
+		counter hs_zero { }
+		counter not_zero { }
+		chain in {
+			type filter hook prerouting priority raw; policy accept;
+			udp dport 51820 udp length 156 ip dscp cs0 counter name hs_zero
+			udp dport 51820 ip dscp != cs0 counter name not_zero
+		}
+	}
+EOF
+# cnt [vps] СЧЁТЧИК — пакеты счётчика проверочной таблицы на Роутере или у Трубы.
+cnt() {
+	if [ "$1" = vps ]; then ip netns exec vps nft list counter inet t_dscp "$2"; else nft list counter inet t_dscp "$1"; fi \
+		| awk '/packets/ { print $2 }'
+}
+hs_at_vps() { [ "$(cnt vps hs_zero)" -gt 0 ]; }
+VPUB="$(wg show awg0 peers)"
+wg set awg0 peer "$VPUB" remove
+wg set awg0 peer "$VPUB" endpoint 198.51.100.2:51820 allowed-ips 0.0.0.0/0 persistent-keepalive 5
+check "рукопожатие: от ядра — AF41, у Трубы — DSCP 0" eval 'wait_for 10 hs_at_vps && [ "$(cnt hs_af41)" -gt 0 ]'
+check "у Трубы ни одного пакета Туннеля с DSCP" test "$(cnt vps not_zero)" = 0
+check "Туннель жив после нового рукопожатия" ping -c 2 -W 2 10.77.77.1
+nft delete table inet t_dscp; ip netns exec vps nft delete table inet t_dscp
 
 section "учёт трафика устройств"
 probe >/dev/null 2>&1
