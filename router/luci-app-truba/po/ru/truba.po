@@ -1,0 +1,1118 @@
+msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\n"
+"Language: ru\n"
+"Plural-Forms: nplurals=3; plural=(n%10==1 && n%100!=11 ? 0 : n%10>=2 && n%10<=4 && (n%100<10 || n%100>=20) ? 1 : 2);\n"
+
+msgid "Truba"
+msgstr "Труба"
+
+msgid "Overview"
+msgstr "Обзор"
+
+msgid "Tunnel"
+msgstr "Туннель"
+
+msgid "Routing"
+msgstr "Маршрутизация"
+
+msgid "DNS"
+msgstr "DNS"
+
+msgid "Inbound"
+msgstr "Входящие"
+
+msgid "Diagnostics"
+msgstr "Диагностика"
+
+msgid "By mode"
+msgstr "По режиму"
+
+msgid "Direct"
+msgstr "Напрямую"
+
+msgid "Block"
+msgstr "Блок"
+
+msgid "local network or the Truba itself — never routed"
+msgstr "локальная сеть или сама Труба — не маршрутизируется"
+
+msgid "geoip category with action Block"
+msgstr "Категория geoip с Действием «Блок»"
+
+msgid "device policy"
+msgstr "Политика устройства"
+
+msgid "geosite category"
+msgstr "Категория geosite"
+
+msgid "IP was resolved for a geosite category"
+msgstr "IP получен при резолве домена из Категории geosite"
+
+msgid "geosite category with action Block (DNS answers NXDOMAIN)"
+msgstr "Категория geosite с Действием «Блок» (DNS отвечает NXDOMAIN)"
+
+msgid "shared CDN address: Tunnel wins over Direct"
+msgstr "общий CDN-адрес: Туннель побеждает Напрямую"
+
+msgid "geoip category"
+msgstr "Категория geoip"
+
+msgid "no category matched — the mode default applies"
+msgstr "ни одна Категория не подошла — действует Режим"
+
+msgid "Rule sets are not downloaded yet — only the mode default applies. Download is in progress."
+msgstr "Наборы правил ещё не скачаны — действует только Режим. Идёт загрузка."
+
+msgid "The selected firewall zones have no active devices."
+msgstr "В выбранных зонах межсетевого экрана нет активных устройств."
+
+msgid "The tunnel is not configured yet — import the configuration on the Tunnel tab."
+msgstr "Туннель ещё не настроен — импортируйте конфиг на вкладке «Туннель»."
+
+msgid "never"
+msgstr "никогда"
+
+msgid "%d s ago"
+msgstr "%d с назад"
+
+msgid "%d min ago"
+msgstr "%d мин назад"
+
+msgid "%d h ago"
+msgstr "%d ч назад"
+
+msgid "Per-device exceptions. A device is recognised by its MAC address, also behind mesh nodes in 4-address mode (it keeps client MACs). Block still applies to all devices."
+msgstr "Исключения для отдельных устройств. Устройство узнаётся по MAC-адресу, в том числе за mesh-узлами в 4-адресном режиме (он сохраняет MAC клиентов). Блок действует на все устройства."
+
+msgid "Device policies"
+msgstr "Политики устройств"
+
+msgid "Enabled"
+msgstr "Включено"
+
+msgid "Name"
+msgstr "Название"
+
+msgid "MAC address"
+msgstr "MAC-адрес"
+
+msgid "Policy"
+msgstr "Политика"
+
+msgid "All via tunnel"
+msgstr "Всё в туннель"
+
+msgid "All direct"
+msgstr "Всё напрямую"
+
+msgid "By rules"
+msgstr "По правилам"
+
+msgid "«All via tunnel» is recommended for game consoles: then all their traffic gets the Truba IP and full cone NAT."
+msgstr "Для игровых приставок рекомендуется «Всё в туннель»: тогда весь их трафик получает IP Трубы и Full cone NAT."
+
+msgid "Error: %s"
+msgstr "Ошибка: %s"
+
+msgid "Why: %s"
+msgstr "Почему: %s"
+
+msgid "geosite categories containing the domain"
+msgstr "Категории geosite, в которых есть домен"
+
+msgid "Category"
+msgstr "Категория"
+
+msgid "Matching entry"
+msgstr "Совпавшая запись"
+
+msgid "Entries"
+msgstr "Записей"
+
+msgid "Action"
+msgstr "Действие"
+
+msgid "none"
+msgstr "нет"
+
+msgid "Decisive category (the narrowest one with an explicit action): %s"
+msgstr "Решающая Категория (самая узкая с явным Действием): %s"
+
+msgid "Addresses"
+msgstr "Адреса"
+
+msgid "geoip categories"
+msgstr "Категории geoip"
+
+msgid "Why"
+msgstr "Почему"
+
+msgid "domain or IPv4, e.g. gosuslugi.ru"
+msgstr "домен или IPv4, например gosuslugi.ru"
+
+msgid "— any device —"
+msgstr "— любое устройство —"
+
+msgid "Checking…"
+msgstr "Проверка…"
+
+msgid "Check domain / IP"
+msgstr "Проверить домен / IP"
+
+msgid "Shows which category and action apply and why. A domain is resolved through the router, the same way a device would."
+msgstr "Показывает, какая Категория и какое Действие сработают и почему. Домен резолвится через Роутер — так же, как это сделало бы устройство."
+
+msgid "Check"
+msgstr "Проверить"
+
+msgid "Refresh"
+msgstr "Обновить"
+
+msgid "Router DNS goes through mosdns: it recognises geosite categories, picks the upstream and puts resolved IPs into the routing sets."
+msgstr "DNS Роутера идёт через mosdns: он узнаёт Категории geosite, выбирает DNS-сервер и кладёт полученные IP в наборы маршрутизации."
+
+msgid "For «Tunnel»"
+msgstr "Для «Туннель»"
+
+msgid "Used for categories with action Tunnel and, in mode «All via tunnel», for everything else. Requests go through the tunnel, each one to all servers at once. udp://10.77.77.1 is the DNS server on the Truba itself (install-vps.sh). Formats: https://…, tls://…, tls+pipeline://… (several requests in one connection), udp://…; «address@IP» sets the IP to connect to."
+msgstr "Для Категорий с Действием «Туннель», а в Режиме «Всё в туннель» — для всего остального. Запросы идут через Туннель, каждый — сразу ко всем серверам. udp://10.77.77.1 — DNS-сервер на самой Трубе (install-vps.sh). Форматы: https://…, tls://…, tls+pipeline://… (несколько запросов в одном соединении), udp://…; «адрес@IP» задаёт IP для подключения."
+
+msgid "For «Direct»"
+msgstr "Для «Напрямую»"
+
+msgid "Used for categories with action Direct, for the router's own hosts (NTP, list mirrors) and, in mode «Selective», for everything else."
+msgstr "Для Категорий с Действием «Напрямую», для служебных хостов самого Роутера (NTP, зеркала списков), а в Режиме «Выборочный» — для всего остального."
+
+msgid "Maximum TTL, s"
+msgstr "Максимальный TTL, с"
+
+msgid "Upper limit for answers of classified domains, so devices re-resolve quickly after the rules change."
+msgstr "Верхний предел для ответов по Категориям: после смены правил устройства быстро перерезолвят адреса."
+
+msgid "Cache size, entries"
+msgstr "Размер кэша, записей"
+
+msgid "Keep expired answers, s"
+msgstr "Хранить истёкшие ответы, с"
+
+msgid "An expired answer is returned at once and refreshed in the background, so familiar sites open without waiting for DNS. 0 — off."
+msgstr "Истёкший ответ отдаётся сразу и обновляется в фоне: знакомые сайты открываются без ожидания DNS. 0 — выключено."
+
+msgid "mosdns port"
+msgstr "Порт mosdns"
+
+msgid "Intercept DNS (port 53)"
+msgstr "Перехватывать DNS (порт 53)"
+
+msgid "IPv4 DNS requests of devices to any server are redirected to the router, so domain categories work for them too. Encrypted DNS in browsers (DoH) is not affected."
+msgstr "DNS-запросы устройств по IPv4 к любому серверу перенаправляются на Роутер, и доменные Категории работают и для них. Шифрованный DNS в браузерах (DoH) это не затрагивает."
+
+msgid "All ports of the Truba IP %s (except the VPS SSH and tunnel ports) reach the router. Full cone NAT keeps mappings open for any remote host; ports for home devices are opened manually or via UPnP."
+msgstr "Все порты IP Трубы %s (кроме SSH VPS и порта Туннеля) приходят на Роутер. Full cone NAT держит отображения открытыми для любого внешнего узла; порты для домашних устройств открываются вручную или через UPnP."
+
+msgid "UPnP / NAT-PMP"
+msgstr "UPnP / NAT-PMP"
+
+msgid "Enable UPnP and NAT-PMP on the tunnel"
+msgstr "Включить UPnP и NAT-PMP на Туннеле"
+
+msgid "Devices open ports themselves; miniupnpd reports the Truba IP as the external address."
+msgstr "Устройства открывают порты сами; miniupnpd сообщает им IP Трубы как внешний адрес."
+
+msgid "Package luci-app-upnp is not installed."
+msgstr "Пакет luci-app-upnp не установлен."
+
+msgid "disabled"
+msgstr "выключен"
+
+msgid "enabled"
+msgstr "включён"
+
+msgid "Port forwards from the tunnel"
+msgstr "Пробросы портов из Туннеля"
+
+msgid "Protocol"
+msgstr "Протокол"
+
+msgid "External port"
+msgstr "Внешний порт"
+
+msgid "Device"
+msgstr "Устройство"
+
+msgid "State"
+msgstr "Состояние"
+
+msgid "No port forwards with source zone «truba»."
+msgstr "Нет пробросов портов из зоны «truba»."
+
+msgid "Edit port forwards"
+msgstr "Изменить пробросы портов"
+
+msgid "Choose source zone «truba»."
+msgstr "Выберите зону-источник «truba»."
+
+msgid "Update in progress…"
+msgstr "Идёт обновление…"
+
+msgid "Applying settings…"
+msgstr "Применяются настройки…"
+
+msgid "Keep DNS addresses in routing sets, s"
+msgstr "Срок адресов из DNS в наборах, с"
+
+msgid "IPs from answers for categories with action Tunnel or Direct stay in the routing sets this long after they were added; a later answer adds them again. A CDN address the domain no longer uses stops steering traffic at the latest after this time. 0 — keep until the rules or lists change."
+msgstr "IP из ответов для Категорий с Действием «Туннель» или «Напрямую» остаются в наборах маршрутизации столько после добавления; следующий ответ добавляет их снова. Адрес CDN, которым домен больше не пользуется, перестаёт направлять трафик не позже этого срока. 0 — держать до смены правил или списков."
+
+msgid "Rule sets are being updated, try again later."
+msgstr "Наборы правил обновляются, попробуйте позже."
+
+msgid "File"
+msgstr "Файл"
+
+msgid "Current version"
+msgstr "Текущая версия"
+
+msgid "Previous version"
+msgstr "Предыдущая версия"
+
+msgid "updated"
+msgstr "обновлён"
+
+msgid "no changes"
+msgstr "без изменений"
+
+msgid "Last check: %s"
+msgstr "Последняя проверка: %s"
+
+msgid "geoip.dat and geosite.dat from kirilllavrov/geoip-builder and kirilllavrov/geosite-builder. Files are used unchanged; the checksum is verified before every replacement."
+msgstr "geoip.dat и geosite.dat из kirilllavrov/geoip-builder и kirilllavrov/geosite-builder. Файлы используются без изменений; контрольная сумма проверяется перед каждой заменой."
+
+msgid "geoip.dat"
+msgstr "geoip.dat"
+
+msgid "geoip.dat mirror"
+msgstr "Зеркало geoip.dat"
+
+msgid "Downloaded directly if the main source failed."
+msgstr "Скачивается напрямую, если основной источник не ответил."
+
+msgid "geosite.dat"
+msgstr "geosite.dat"
+
+msgid "geosite.dat mirror"
+msgstr "Зеркало geosite.dat"
+
+msgid "Download via tunnel"
+msgstr "Скачивать через Туннель"
+
+msgid "The main source is fetched through the tunnel; the mirror always goes direct."
+msgstr "Основной источник скачивается через Туннель, зеркало — всегда напрямую."
+
+msgid "Update automatically"
+msgstr "Обновлять автоматически"
+
+msgid "Update time (UTC)"
+msgstr "Время обновления (UTC)"
+
+msgid "Format: HH:MM"
+msgstr "Формат: ЧЧ:ММ"
+
+msgid "Update started."
+msgstr "Обновление запущено."
+
+msgid "Update now"
+msgstr "Обновить сейчас"
+
+msgid "Swap current and previous rule sets?"
+msgstr "Поменять местами текущие и предыдущие Наборы правил?"
+
+msgid "Rolled back: %s"
+msgstr "Откат выполнен: %s"
+
+msgid "No previous version."
+msgstr "Предыдущей версии нет."
+
+msgid "Roll back"
+msgstr "Откатить"
+
+msgid "not configured"
+msgstr "не настроен"
+
+msgid "working"
+msgstr "работает"
+
+msgid "not responding"
+msgstr "не отвечает"
+
+msgid "down"
+msgstr "не поднят"
+
+msgid "service stopped"
+msgstr "служба остановлена"
+
+msgid "emergency block (tunnel traffic is dropped)"
+msgstr "Аварийная блокировка (трафик «Туннель» отбрасывается)"
+
+msgid "via tunnel"
+msgstr "через Туннель"
+
+msgid "fallback to direct (no tunnel route)"
+msgstr "обход напрямую (маршрута через Туннель нет)"
+
+msgid "Last handshake"
+msgstr "Последний handshake"
+
+msgid "Tunnel address"
+msgstr "Адрес в Туннеле"
+
+msgid "Tunnel route table"
+msgstr "Таблица Туннеля"
+
+msgid "Tunnel watchdog"
+msgstr "Контроль Туннеля"
+
+msgid "healthy since"
+msgstr "в порядке с"
+
+msgid "down since"
+msgstr "не работает с"
+
+msgid "no data"
+msgstr "нет данных"
+
+msgid "Inbound via Truba"
+msgstr "Входящие через Трубу"
+
+msgid "Error while applying rules: %s"
+msgstr "Ошибка при применении правил: %s"
+
+msgid "problem"
+msgstr "проблема"
+
+msgid "External IP is the Truba IP"
+msgstr "Внешний IP — это IP Трубы"
+
+msgid "yes"
+msgstr "да"
+
+msgid "no"
+msgstr "нет"
+
+msgid "Port preserved"
+msgstr "Порт сохраняется"
+
+msgid "Same mapping for different servers"
+msgstr "Одинаковое отображение для разных серверов"
+
+msgid "This checks the Truba layer only. For the full RFC 5780 test run NatTypeTester on a PC in the home network whose device policy is «All via tunnel»."
+msgstr "Проверяется только слой Трубы. Для полного теста по RFC 5780 запустите NatTypeTester на ПК в домашней сети с Политикой «Всё в туннель»."
+
+msgid "Home network through your own VPS: the VPS gives the router its public IP, the router decides what goes through the tunnel."
+msgstr "Домашняя сеть через собственный VPS: VPS отдаёт Роутеру свой публичный IP, а Роутер решает, что пустить через Туннель."
+
+msgid "NAT check"
+msgstr "Проверка NAT"
+
+msgid "Testing…"
+msgstr "Проверка…"
+
+msgid "Check NAT"
+msgstr "Проверить NAT"
+
+msgid "Rule set"
+msgstr "Набор правил"
+
+msgid "Types"
+msgstr "Типы"
+
+msgid "Included in"
+msgstr "Вложена в"
+
+msgid "Reset all category actions of this mode to the starting settings?"
+msgstr "Сбросить Действия всех Категорий этого Режима к Стартовым настройкам?"
+
+msgid "Which traffic goes through the tunnel. Categories are taken from geoip.dat and geosite.dat as they are; new categories are never created."
+msgstr "Какой трафик идёт через Туннель. Категории берутся из geoip.dat и geosite.dat как есть; новые Категории не создаются."
+
+msgid "Mode"
+msgstr "Режим"
+
+msgid "Emergency block"
+msgstr "Аварийная блокировка"
+
+msgid "While the tunnel is down, traffic with action Tunnel is dropped instead of going direct."
+msgstr "Пока Туннель не работает, трафик с Действием «Туннель» отбрасывается, а не уходит напрямую."
+
+msgid "Zones"
+msgstr "Зоны"
+
+msgid "Firewall zones whose devices are routed. Other zones go direct."
+msgstr "Зоны межсетевого экрана, на устройства которых действует Маршрутизация. Остальные зоны идут напрямую."
+
+msgid "Search category…"
+msgstr "Поиск Категории…"
+
+msgid "Actions: «All via tunnel»"
+msgstr "Действия: «Всё в туннель»"
+
+msgid "Actions: «Selective»"
+msgstr "Действия: «Выборочный»"
+
+msgid "By mode = Tunnel. Narrower categories are checked first; on a tie: Block → Tunnel → Direct. A domain category wins over a geoip category."
+msgstr "«По режиму» = Туннель. Узкие Категории проверяются раньше широких; при равенстве — Блок → Туннель → Напрямую. Доменная Категория побеждает Категорию geoip."
+
+msgid "By mode = Direct. Only categories with action Tunnel go through the tunnel."
+msgstr "«По режиму» = Напрямую. Через Туннель идут только Категории с Действием «Туннель»."
+
+msgid "Reset to starting settings"
+msgstr "Сбросить к Стартовым настройкам"
+
+msgid "No PrivateKey in the [Interface] section"
+msgstr "В секции [Interface] нет PrivateKey"
+
+msgid "No [Peer] section with PublicKey"
+msgstr "Нет секции [Peer] с PublicKey"
+
+msgid "Import tunnel configuration"
+msgstr "Импорт конфигурации Туннеля"
+
+msgid "Paste router.conf produced by install-vps.sh on the VPS, or choose the file."
+msgstr "Вставьте router.conf, который выдал install-vps.sh на VPS, или выберите файл."
+
+msgid "Cancel"
+msgstr "Отмена"
+
+msgid "Import"
+msgstr "Импортировать"
+
+msgid "AmneziaWG interface %s. Settings are stored in the standard network configuration and are also visible in Network → Interfaces."
+msgstr "Интерфейс AmneziaWG %s. Настройки хранятся в стандартной конфигурации сети и видны также в «Сеть → Интерфейсы»."
+
+msgid "Interface"
+msgstr "Интерфейс"
+
+msgid "General"
+msgstr "Основное"
+
+msgid "Obfuscation"
+msgstr "Маскировка"
+
+msgid "Private key"
+msgstr "Приватный ключ"
+
+msgid "MTU"
+msgstr "MTU"
+
+msgid "Listen port"
+msgstr "Порт прослушивания"
+
+msgid "Not needed: the router connects to the Truba itself."
+msgstr "Не нужен: Роутер сам подключается к Трубе."
+
+msgid "A number or a range «from-to»; must match the Truba."
+msgstr "Число или диапазон «от-до»; должно совпадать с Трубой."
+
+msgid "Decoy packets before the handshake (CPS format); may differ from the Truba."
+msgstr "Пакеты-приманки перед handshake (формат CPS); могут отличаться от Трубы."
+
+msgid "Truba (peer)"
+msgstr "Труба (пир)"
+
+msgid "Truba public key"
+msgstr "Публичный ключ Трубы"
+
+msgid "Preshared key"
+msgstr "Общий ключ (PSK)"
+
+msgid "Truba address"
+msgstr "Адрес Трубы"
+
+msgid "Truba port"
+msgstr "Порт Трубы"
+
+msgid "Keepalive, s"
+msgstr "Keepalive, с"
+
+msgid "Keeps the provider NAT mapping open so inbound connections via the Truba IP reach the router."
+msgstr "Держит открытым отображение в NAT провайдера, чтобы входящие через IP Трубы доходили до Роутера."
+
+msgid "Check interval, s"
+msgstr "Интервал проверки, с"
+
+msgid "Max handshake age, s"
+msgstr "Максимальный возраст handshake, с"
+
+msgid "Failures before restart"
+msgstr "Неудач до перезапуска"
+
+msgid "Ping target"
+msgstr "Адрес для ping"
+
+msgid "Empty — the Truba address inside the tunnel. An internet address would not answer while the emergency block is active."
+msgstr "Пусто — адрес Трубы внутри Туннеля. Адрес в интернете не ответит, пока действует Аварийная блокировка."
+
+msgid "The tunnel is not configured yet. Run install-vps.sh on the VPS and import the resulting router.conf."
+msgstr "Туннель ещё не настроен. Запустите install-vps.sh на VPS и импортируйте полученный router.conf."
+
+msgid "Import .conf"
+msgstr "Импорт .conf"
+
+msgid "bit/s"
+msgstr "бит/с"
+
+msgid "kbit/s"
+msgstr "кбит/с"
+
+msgid "Mbit/s"
+msgstr "Мбит/с"
+
+msgid "Gbit/s"
+msgstr "Гбит/с"
+
+msgid "Log: Truba and mosdns"
+msgstr "Журнал: Труба и mosdns"
+
+msgid "UPnP is enabled, but miniupnpd is not installed: install luci-app-upnp."
+msgstr "UPnP включён, но miniupnpd не установлен: поставьте luci-app-upnp."
+
+msgid "UPnP is enabled, but miniupnpd is not running."
+msgstr "UPnP включён, но miniupnpd не запущен."
+
+msgid "no expiry"
+msgstr "бессрочно"
+
+msgid "Active UPnP / NAT-PMP mappings"
+msgstr "Действующие пробросы UPnP / NAT-PMP"
+
+msgid "Description"
+msgstr "Описание"
+
+msgid "Expires"
+msgstr "Истекает"
+
+msgid "No active mappings."
+msgstr "Пробросов нет."
+
+msgid "Replies always go back through the tunnel, even to Russian clients."
+msgstr "Ответы всегда возвращаются через Туннель, даже российским клиентам."
+
+msgid "Traffic of devices in the routed zones since %s. The router's own traffic (DNS, list downloads) is not included."
+msgstr "Трафик устройств из маршрутизируемых зон с %s. Собственный трафик Роутера (DNS, загрузка списков) не входит."
+
+msgid "Traffic of devices in the routed zones. The router's own traffic (DNS, list downloads) is not included."
+msgstr "Трафик устройств из маршрутизируемых зон. Собственный трафик Роутера (DNS, загрузка списков) не входит."
+
+msgid "To devices"
+msgstr "К устройствам"
+
+msgid "From devices"
+msgstr "От устройств"
+
+msgid "since the interface came up, including the router's own traffic"
+msgstr "с подъёма интерфейса, вместе с трафиком самого Роутера"
+
+msgid "New connections"
+msgstr "Новые соединения"
+
+msgid "Device traffic"
+msgstr "Трафик устройств"
+
+msgid "With header protection S1–S4 must be at least 12"
+msgstr "С защитой заголовков S1–S4 должны быть не меньше 12"
+
+msgid "Header protection key"
+msgstr "Ключ защиты заголовков"
+
+msgid "AmneziaWG 3.1: encrypts the header fields WireGuard is recognised by. Must match the Truba and needs S1–S4 of at least 12; comes with router.conf."
+msgstr "AmneziaWG 3.1: шифрует поля заголовка, по которым узнают WireGuard. Должен совпадать с Трубой, нужны S1–S4 не меньше 12; приходит с router.conf."
+
+msgid "Disable cookies"
+msgstr "Без ответов cookie"
+
+msgid "AmneziaWG 3.1: no cookie replies under load. Not needed with a single peer, and their size is recognisable."
+msgstr "AmneziaWG 3.1: не отвечать cookie под нагрузкой. С одним пиром они не нужны, а их размер узнаваем."
+
+msgid "Random trailers"
+msgstr "Случайные хвосты (RandomTrailers)"
+
+msgid "AmneziaWG 3.1, in reserve against DPI by packet sizes: pads packets to a random length, costly in traffic for small packets. Must match the Truba: on the VPS run «install-vps.sh random-trailers on» or «off» at the same time."
+msgstr "AmneziaWG 3.1, запас против DPI по размерам пакетов: добивает пакеты до случайной длины, дорого по трафику на мелких пакетах. Должен совпадать с Трубой: одновременно на VPS выполните «install-vps.sh random-trailers on» или «off»."
+
+msgid "geoip.dat is published every three days around 10–11 UTC, geosite.dat irregularly, usually by 09 UTC; at 12:00 a new release is picked up the same day. Converted to the router time zone for cron."
+msgstr "geoip.dat выходит раз в три дня около 10–11 UTC, geosite.dat — нерегулярно, обычно до 09 UTC; в 12:00 новый выпуск подхватывается в тот же день. Для cron время переводится в часовой пояс Роутера."
+
+msgid "update in progress"
+msgstr "идёт обновление"
+
+msgid "not checked yet"
+msgstr "ещё не проверялись"
+
+msgid "Rule sets have not been checked for more than 36 hours although auto-update is on: check that cron runs (System → Scheduled Tasks)."
+msgstr "Наборы правил не проверялись больше 36 часов, хотя автообновление включено: проверьте, что работает cron (Система → Планировщик)."
+
+msgid "The last rule set check failed: %s"
+msgstr "Последняя проверка Наборов правил не удалась: %s"
+
+msgid "DNS & lists"
+msgstr "DNS и списки"
+
+msgid "Local port; dnsmasq forwards requests here. The next port is taken by the mosdns statistics API (127.0.0.1 only)."
+msgstr "Локальный порт; сюда dnsmasq пересылает запросы. Следующий порт занимает API статистики mosdns (только 127.0.0.1)."
+
+msgid "Rule sets are not downloaded yet — see the DNS & lists tab."
+msgstr "Наборы правил ещё не скачаны — см. вкладку «DNS и списки»."
+
+msgid "Last check"
+msgstr "Последняя проверка"
+
+msgid "failed — %s"
+msgstr "ошибка — %s"
+
+msgid "10 min ago"
+msgstr "10 мин назад"
+
+msgid "now"
+msgstr "сейчас"
+
+msgid "Latency to the Truba"
+msgstr "Задержка до Трубы"
+
+msgid "Packet loss"
+msgstr "Потери"
+
+msgid "Interface traffic"
+msgstr "Трафик интерфейса"
+
+msgid "No warnings"
+msgstr "Без предупреждений"
+
+msgid "the watchdog is off"
+msgstr "Контроль Туннеля выключен"
+
+msgid "%d ms"
+msgstr "%d мс"
+
+msgid "average %d ms"
+msgstr "в среднем %d мс"
+
+msgid "no reply"
+msgstr "нет ответа"
+
+msgid "%d%% over %d min"
+msgstr "%d%% за %d мин"
+
+msgid "not used: routing is off"
+msgstr "не используется: Маршрутизация выключена"
+
+msgid "%d%% from cache · %d%% expired"
+msgstr "%d%% из кэша · %d%% устаревших"
+
+msgid "no queries yet"
+msgstr "запросов ещё не было"
+
+msgid "automatic update is off"
+msgstr "автообновление выключено"
+
+msgid "geoip subnets: %s"
+msgstr "подсетей geoip: %s"
+
+msgid "IPs from DNS: %s"
+msgstr "IP из DNS: %s"
+
+msgid "the tunnel is not configured"
+msgstr "Туннель не настроен"
+
+msgid "the tunnel is down"
+msgstr "Туннель не работает"
+
+msgid "cannot open a socket"
+msgstr "не удалось открыть сокет"
+
+msgid "no STUN server answered"
+msgstr "ни один STUN-сервер не ответил"
+
+msgid "Configured but missing from the current rule set (ignored): %s"
+msgstr "Заданы в настройках, но отсутствуют в текущем Наборе правил (пропускаются): %s"
+
+msgid "packets dropped"
+msgstr "пакетов отброшено"
+
+msgid "External address"
+msgstr "Внешний адрес"
+
+msgid "Checked"
+msgstr "Проверено"
+
+msgid "STUN servers"
+msgstr "STUN-серверы"
+
+msgid "not run yet"
+msgstr "ещё не запускалась"
+
+msgid "not checked: %s"
+msgstr "не проверено: %s"
+
+msgid "Truba layer OK"
+msgstr "Труба в порядке"
+
+msgid "nothing to compare: one server answered"
+msgstr "не с чем сравнить: ответил один сервер"
+
+msgid "runs by itself after the tunnel comes up"
+msgstr "запустится сама после подъёма Туннеля"
+
+msgid "automatically after the tunnel came up"
+msgstr "автоматически после подъёма Туннеля"
+
+msgid "manually"
+msgstr "вручную"
+
+msgid "name not resolved"
+msgstr "имя не найдено"
+
+msgid "no answer"
+msgstr "нет ответа"
+
+msgid "%s per min"
+msgstr "%s в мин"
+
+msgid "No outgoing connections yet."
+msgstr "Исходящих соединений пока нет."
+
+msgid "Outgoing connections: %d%% via tunnel, %d%% direct"
+msgstr "Исходящие соединения: %d%% через Туннель, %d%% напрямую"
+
+msgid "Nothing to show."
+msgstr "Показать нечего."
+
+msgid "no address to ping"
+msgstr "нет адреса для ping"
+
+msgid "Not checked: %s"
+msgstr "Не проверено: %s"
+
+msgid "%d bytes — the whole MTU"
+msgstr "%d байт — весь MTU"
+
+msgid "%d bytes"
+msgstr "%d байт"
+
+msgid "%d of %d"
+msgstr "%d из %d"
+
+msgid "Packet size"
+msgstr "Размер пакета"
+
+msgid "Replies"
+msgstr "Ответы"
+
+msgid "Latency"
+msgstr "Задержка"
+
+msgid "Full-size packets get through"
+msgstr "Крупные пакеты проходят"
+
+msgid "Packets are lost"
+msgstr "Пакеты теряются"
+
+msgid "MTU %d suits the path to the Truba."
+msgstr "MTU %d подходит к пути до Трубы."
+
+msgid "If only the largest packets are lost, lower the tunnel MTU on both sides (Tunnel tab and install-vps.sh)."
+msgstr "Если теряются только самые крупные пакеты, уменьшите MTU Туннеля на обеих сторонах: на вкладке «Туннель» и на VPS (install-vps.sh)."
+
+msgid "Checking… about 5 seconds"
+msgstr "Проверка… около 5 секунд"
+
+msgid "All"
+msgstr "Все"
+
+msgid "Warnings and errors"
+msgstr "Предупреждения и ошибки"
+
+msgid "Checks and the log. Nothing is configured on this tab."
+msgstr "Проверки и журнал. На этой вкладке ничего не настраивается."
+
+msgid "Tunnel check"
+msgstr "Проверка Туннеля"
+
+msgid "Pings the Truba inside the tunnel with packets of three sizes, up to the whole tunnel MTU. Shows loss of large packets that a normal ping does not see: with it pages open slowly and downloads stall."
+msgstr "Ping Трубы внутри Туннеля пакетами трёх размеров, до полного MTU Туннеля. Показывает потери крупных пакетов, которых не видно по обычному ping: при них сайты открываются с задержкой, а загрузки замирают."
+
+msgid "Check the tunnel"
+msgstr "Проверить Туннель"
+
+msgid "Log filter"
+msgstr "Фильтр журнала"
+
+msgid "DNS state"
+msgstr "Состояние DNS"
+
+msgid "Answers from cache"
+msgstr "Ответы из кэша"
+
+msgid "Cache filled"
+msgstr "Заполнение кэша"
+
+msgid "Counted"
+msgstr "Отсчёт"
+
+msgid "mosdns running"
+msgstr "mosdns работает"
+
+msgid "mosdns not running"
+msgstr "mosdns не работает"
+
+msgid "%s of %s entries"
+msgstr "%s из %s записей"
+
+msgid "since mosdns started"
+msgstr "с запуска mosdns"
+
+msgid "Next check: %s"
+msgstr "Следующая проверка: %s"
+
+msgid "Advanced"
+msgstr "Дополнительно"
+
+msgid "Rule sets"
+msgstr "Наборы правил"
+
+msgid "Sources"
+msgstr "Источники"
+
+msgid "Inbound traffic is on the Overview."
+msgstr "Трафик входящих — на «Обзоре»."
+
+msgid "Software flow offloading is on: packets of offloaded connections bypass the Truba counters, so device traffic is undercounted."
+msgstr "Включено программное ускорение: пакеты ускоренных соединений идут мимо счётчиков Трубы, поэтому трафик устройств занижен."
+
+msgid "Firewall"
+msgstr "Межсетевой экран"
+
+msgid "Full-size packets do not get through the tunnel: pages open slowly and downloads stall. Lower the tunnel MTU."
+msgstr "Крупные пакеты не проходят через Туннель: сайты открываются с задержкой, загрузки замирают. Уменьшите MTU Туннеля."
+
+msgid "The last NAT check found a problem."
+msgstr "Последняя проверка NAT нашла проблему."
+
+msgid "State and settings"
+msgstr "Состояние и настройки"
+
+msgid "Tunnel enabled"
+msgstr "Туннель включён"
+
+msgid "Mode and categories"
+msgstr "Режим и Категории"
+
+msgid "Routing enabled"
+msgstr "Маршрутизация включена"
+
+msgid "DNS and rule sets"
+msgstr "DNS и Наборы правил"
+
+msgid "NAT and port forwards"
+msgstr "NAT и пробросы"
+
+msgid "Warnings"
+msgstr "Предупреждения"
+
+msgid "loss %d%%"
+msgstr "потери %d%%"
+
+msgid "full-size packets get through"
+msgstr "крупные пакеты проходят"
+
+msgid "full-size packets are lost"
+msgstr "крупные пакеты теряются"
+
+msgid "on"
+msgstr "вкл"
+
+msgid "off"
+msgstr "выкл"
+
+msgid "Everything direct"
+msgstr "Всё напрямую"
+
+msgid "Selective"
+msgstr "Выборочный"
+
+msgid "inbound via the Truba IP keeps working"
+msgstr "входящие через IP Трубы работают"
+
+msgid "%d%% of new connections via tunnel"
+msgstr "%d%% новых соединений через Туннель"
+
+msgid "Zones: %s"
+msgstr "Зоны: %s"
+
+msgid "not used"
+msgstr "не используется"
+
+msgid "mosdns stopped"
+msgstr "mosdns остановлен"
+
+msgid "check the lists"
+msgstr "проверьте списки"
+
+msgid "in order"
+msgstr "в порядке"
+
+msgid "Lists from %s"
+msgstr "Списки от %s"
+
+msgid "No lists yet"
+msgstr "Списков ещё нет"
+
+msgid "%d%% from cache"
+msgstr "%d%% из кэша"
+
+msgid "NAT not checked"
+msgstr "NAT не проверен"
+
+msgid "NAT problem"
+msgstr "проблема с NAT"
+
+msgid "NAT checked %s"
+msgstr "NAT проверен %s"
+
+msgid "UPnP mappings: %d"
+msgstr "пробросов UPnP: %d"
+
+msgid "UPnP off"
+msgstr "UPnP выкл"
+
+msgid "manual forwards: %d"
+msgstr "вручную: %d"
+
+msgid "What happens to traffic that no category with an explicit action matched. «All via tunnel» — everything except categories with action Direct (by default, Russian traffic). «Selective» — only categories with action Tunnel go through the tunnel."
+msgstr "Что делать с трафиком, которому ни одна Категория не задала явное Действие. «Всё в туннель» — всё, кроме Категорий с Действием «Напрямую» (по умолчанию — российский трафик). «Выборочный» — через Туннель идут только Категории с Действием «Туннель»."
+
+msgid "In the sets now"
+msgstr "В наборах сейчас"
+
+msgid "nothing: routing is off"
+msgstr "пусто: Маршрутизация выключена"
+
+msgid "In the network"
+msgstr "В сети"
+
+msgid "not online"
+msgstr "не в сети"
+
+msgid "With an explicit action"
+msgstr "С явным Действием"
+
+msgid "Remove"
+msgstr "Убрать"
+
+msgid "Filter by action"
+msgstr "Фильтр по Действию"
+
+msgid "Full-size packets"
+msgstr "Крупные пакеты"
+
+msgid "Latency over %d min"
+msgstr "Задержка за %d мин"
+
+msgid "Points are the watchdog checks; a gap is a lost ping."
+msgstr "Точки — проверки контроля Туннеля; разрыв — потерянный ping."
+
+msgid "%d–%d ms"
+msgstr "%d–%d мс"
+
+msgid "get through · %d bytes, the whole MTU"
+msgstr "проходят · %d байт, весь MTU"
+
+msgid "lost (%d of %d) · %d bytes: lower the MTU"
+msgstr "теряются (%d из %d) · %d байт: уменьшите MTU"
+
+msgid "install-vps.sh picks it for the VPS network. If full-size packets do not get through (see State above), lower it on both sides."
+msgstr "install-vps.sh подбирает его под сеть VPS. Если крупные пакеты не проходят (см. «Состояние» выше), уменьшите его на обеих сторонах."
+
+msgid "Pings the Truba inside the tunnel and checks the handshake age; restarts the interface after repeated failures. Every tenth check also makes sure that full-size packets get through."
+msgstr "Пингует Трубу внутри Туннеля и следит за возрастом handshake; после нескольких неудач подряд перезапускает интерфейс. Раз в 10 проверок убеждается, что проходят крупные пакеты."
+
+msgid "Connection"
+msgstr "Подключение"
+
+msgid "Keys and parameters come from router.conf made by install-vps.sh on the VPS. To replace them, import a new file."
+msgstr "Ключи и параметры приходят из router.conf, который создаёт install-vps.sh на VPS. Чтобы их сменить, импортируйте новый файл."
+
+msgid "No replies"
+msgstr "Нет ответов"
+
+msgid "The Truba does not answer inside the tunnel: see the State on the Tunnel tab."
+msgstr "Труба не отвечает внутри Туннеля: см. «Состояние» на вкладке «Туннель»."
+
+msgid "via the tunnel"
+msgstr "через Туннель"
+
+msgid "directly"
+msgstr "напрямую"
+
+msgid "from the mirror"
+msgstr "с зеркала"
+
+msgid "download failed"
+msgstr "не скачался"
+
+msgid "checksum mismatch"
+msgstr "не сошлась контрольная сумма"
+
+msgid "The current rule sets could not be read, so the previous ones were restored."
+msgstr "Текущие Наборы правил не читаются — возвращены предыдущие."
+
+msgid "no result in time"
+msgstr "итог не пришёл вовремя"
+
+msgid "the file cannot be read, the current one is kept"
+msgstr "файл не читается, оставлен текущий"
+
+msgid "the rule sets are being unpacked, try again in a minute"
+msgstr "Наборы правил распаковываются, повторите через минуту"
+
+msgid "The rules loaded before the error stay in effect."
+msgstr "Действуют правила, загруженные до ошибки."
+
+msgid "The last working rules from %s are in effect."
+msgstr "Действуют последние удачные правила от %s."
+
+msgid "No Truba rules are in effect: traffic and DNS go direct."
+msgstr "Правила Трубы не действуют: трафик и DNS идут напрямую."
+
+msgid "Invalid settings were skipped, defaults are used instead: %s"
+msgstr "Неверные настройки пропущены, вместо них — значения по умолчанию: %s"
+
+msgid "Expected https://…, tls://…, quic://…, h3://…, tcp://… or udp://… (optionally «@IP»)"
+msgstr "Нужен адрес https://…, tls://…, quic://…, h3://…, tcp://… или udp://… (можно с «@IP»)"
+
+msgid "Rule sets are being unpacked — reload the page in a minute."
+msgstr "Наборы правил распаковываются — обновите страницу через минуту."
+
+msgid "10 min"
+msgstr "10 мин"
+
+msgid "1 h"
+msgstr "1 ч"
+
+msgid "24 h"
+msgstr "24 ч"
+
+msgid "1 h ago"
+msgstr "1 ч назад"
+
+msgid "24 h ago"
+msgstr "24 ч назад"
+
+msgid "Period"
+msgstr "Период"
+
+msgid "Speed is not being recorded: the Truba service is not running."
+msgstr "Скорость не записывается: служба Трубы не запущена."
+
+msgid "no room for temporary files on the router"
+msgstr "на Роутере нет места для временных файлов"

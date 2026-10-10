@@ -1,0 +1,51 @@
+table inet truba
+delete table inet truba
+table inet truba {
+	set lan_if {
+		type ifname;
+		elements = { "br-lan" }
+	}
+	counter c_inbound { }
+	counter c_tunnel_down { }
+	counter c_tunnel_up { packets 3 bytes 900 }
+	counter c_direct_down { }
+	counter c_direct_up { }
+	counter c_inbound_down { }
+	counter c_inbound_up { }
+
+	chain prerouting {
+		type filter hook prerouting priority mangle; policy accept;
+		meta nfproto != ipv4 return
+		iifname "awg0" ct state new counter name c_inbound
+		iifname "awg0" meta mark set meta mark and 0xff00ffff or 0x00040000 return
+		iifname @lan_if ct mark and 0x00ff0000 == 0x00040000 meta mark set meta mark and 0xff00ffff or 0x00010000 return
+		iifname @lan_if ct mark and 0x00ff0000 == 0x00010000 meta mark set meta mark and 0xff00ffff or 0x00010000 return
+	}
+
+	chain persist {
+		type filter hook postrouting priority 300; policy accept;
+		meta nfproto != ipv4 return
+		meta mark and 0x00ff0000 == 0x00040000 ct mark set ct mark and 0xff00ffff or 0x00040000 return
+		meta mark and 0x00ff0000 == 0x00010000 ct mark set ct mark and 0xff00ffff or 0x00010000 return
+		meta mark and 0x00ff0000 == 0x00020000 ct mark set ct mark and 0xff00ffff or 0x00020000 return
+	}
+
+	chain stats {
+		type filter hook forward priority filter + 10; policy accept;
+		meta nfproto != ipv4 return
+		iifname @lan_if oifname @lan_if return
+		iifname @lan_if oifname "awg0" ct direction original counter name c_tunnel_up return
+		iifname "awg0" oifname @lan_if ct direction reply counter name c_tunnel_down return
+		iifname "awg0" oifname @lan_if counter name c_inbound_down return
+		iifname @lan_if oifname "awg0" counter name c_inbound_up return
+		iifname @lan_if ct direction original counter name c_direct_up return
+		oifname @lan_if ct direction reply counter name c_direct_down return
+	}
+
+	chain output {
+		type route hook output priority mangle + 10; policy accept;
+		meta nfproto != ipv4 return
+		ip daddr 203.0.113.10 meta mark set meta mark and 0xff00ffff or 0x00020000 return
+		socket mark and 0x00ff0000 == 0x00010000 meta mark set meta mark and 0xff00ffff or 0x00010000
+	}
+}

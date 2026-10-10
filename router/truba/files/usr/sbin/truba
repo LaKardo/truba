@@ -1,0 +1,111 @@
+#!/usr/bin/ucode -S
+// Труба: командная строка. Вызывается init-скриптом, hotplug, cron и rpcd.
+'use strict';
+
+// Модули загружаются по требованию: status опрашивается раз в 5 с, и разбирать ради него
+// распаковщик, генератор правил и watchdog незачем. require() модули с export не загружает,
+// а импорт внутри loadstring — загружает.
+function load(name) {
+	return loadstring(sprintf("import * as M from 'truba.%s'; return M;", name))();
+}
+
+const cmd = ARGV[0];
+const args = slice(ARGV, 1);
+
+function out(obj) {
+	print(sprintf('%.J\n', obj));
+}
+
+function usage() {
+	warn('Использование: truba <команда>\n' +
+		'  apply              применить настройки из /etc/config/truba\n' +
+		'  teardown           снять все правила Трубы\n' +
+		'  routes             пересчитать таблицу Туннеля по его состоянию\n' +
+		'  refresh-bypass     обновить набор локальных подсетей\n' +
+		'  update-lists [-f]  скачать Наборы правил (-f — применить даже без изменений)\n' +
+		'  rollback-lists [--bg]  вернуть предыдущие Наборы правил (--bg — применить в фоне)\n' +
+		'  check <домен|IP> [MAC]  какая Категория и Действие сработают\n' +
+		'  status             состояние для «Обзора» в JSON\n' +
+		'  lists              версии Наборов правил в JSON\n' +
+		'  categories         Категории и Действия в JSON\n' +
+		'  sets               размеры наборов в JSON\n' +
+		'  reset-rules <all|selective>  Стартовые настройки Режима\n' +
+		'  nat-test [auto]    проверка внешнего IP и сохранения порта через Трубу\n' +
+		'                     (auto — запуск от watchdog после подъёма Туннеля)\n' +
+		'  tunnel-test        ping Трубы пакетами трёх размеров, до полного MTU Туннеля\n' +
+		'  watchdog           цикл контроля Туннеля (запускает procd)\n' +
+		'  stats              цикл записи истории скорости для «Обзора» (запускает procd)\n');
+	exit(2);
+}
+
+switch (cmd) {
+case 'apply':
+	let r = load('core').apply();
+	out(r);
+	exit(r.error ? 1 : 0);
+
+case 'teardown':
+	load('core').teardown();
+	break;
+
+case 'routes':
+	print(load('net').routes(), '\n');
+	break;
+
+case 'refresh-bypass':
+	load('core').refresh_bypass();
+	break;
+
+case 'update-lists':
+	out(load('core').update_lists(args[0] == '-f'));
+	break;
+
+case 'rollback-lists':
+	out(load('core').rollback_lists(args[0] == '--bg'));
+	break;
+
+case 'check':
+	if (!args[0])
+		usage();
+	out(load('check').check(args[0], args[1]));
+	break;
+
+case 'status':
+	out(load('state').status());
+	break;
+
+case 'lists':
+	out(load('state').lists());
+	break;
+
+case 'categories':
+	out(load('core').categories());
+	break;
+
+case 'sets':
+	out(load('state').sets());
+	break;
+
+case 'reset-rules':
+	out(load('core').reset_rules(args[0]));
+	break;
+
+case 'nat-test':
+	out(load('nattest').run(args[0] == 'auto'));
+	break;
+
+case 'tunnel-test':
+	out(load('watchdog').tunnel_test());
+	break;
+
+case 'watchdog':
+	load('watchdog').run();
+	break;
+
+case 'stats':
+	load('stats').run();
+	break;
+
+default:
+	usage();
+}

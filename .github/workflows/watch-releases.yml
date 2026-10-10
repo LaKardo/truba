@@ -1,0 +1,44 @@
+name: watch-releases
+
+# Раз в сутки: появилась ли новая ImmortalWrt 25.12.x, под которую в фиде ещё нет сборки?
+# Если да — запускает build. Обновлять Роутер стоит только после этого (ADR 0004).
+
+on:
+  schedule:
+    - cron: '30 5 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    outputs:
+      missing: ${{ steps.c.outputs.missing }}
+    steps:
+      - id: c
+        run: |
+          set -euo pipefail
+          releases=$(curl -fsSL https://downloads.immortalwrt.org/releases/ \
+            | grep -oE 'href="25\.12\.[0-9]+/"' | grep -oE '25\.12\.[0-9]+' | sort -uV)
+          site="https://${GITHUB_REPOSITORY_OWNER}.github.io/${GITHUB_REPOSITORY#*/}"
+          missing=""
+          for v in $releases; do
+            if ! curl -fsI "$site/$v/mediatek/filogic/packages.adb" >/dev/null 2>&1; then
+              missing="${missing:+$missing,}$v"
+            fi
+          done
+          echo "Нет сборки для: ${missing:-—}"
+          echo "missing=$missing" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: check
+    if: needs.check.outputs.missing != ''
+    # Права вызванного build.yml не выше этих: deploy публикует фид в gh-pages.
+    permissions:
+      contents: write
+    uses: ./.github/workflows/build.yml
+    with:
+      versions: ${{ needs.check.outputs.missing }}
+    secrets: inherit

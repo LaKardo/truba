@@ -1,0 +1,7 @@
+# Источники пакетов AmneziaWG для фида Трубы (ADR 0004).
+# Makefile'ы kmod-amneziawg, amneziawg-tools и luci-proto-amneziawg берутся из awg-openwrt
+# на зафиксированном коммите. Модуль ядра там собирается из amneziawg-linux-kernel-module
+# v3.1.20260906, утилиты — из amneziawg-tools v3.1.20260812 (протокол AWG 3.1, совместим с 2.0).
+# Версия должна совпадать с той, что ставит PPA amnezia/ppa на VPS (install-vps.sh status).
+AWG_OPENWRT_REPO=https://github.com/Slava-Shchipunov/awg-openwrt.git
+AWG_OPENWRT_COMMIT=03b62269e2edc168504f057cffaafda11b25ed92

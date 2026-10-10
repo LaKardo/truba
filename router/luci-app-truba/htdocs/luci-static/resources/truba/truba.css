@@ -1,0 +1,269 @@
+/* Труба: общие стили интерфейса. Своей палитры фона и текста нет: приглушённый текст и
+   рамки считаются от цвета текста темы (color-mix с currentColor), поэтому читаются и в
+   светлой, и в тёмной теме — и в Bootstrap, и в темах без её переменных (Argon и др.).
+   Цвета состояний и Действий — средней яркости: контраст не ниже 3:1 и на белом, и на
+   тёмном фоне; Туннель темнее Напрямую, чтобы их различали не только по оттенку.
+   Строка перед color-mix — запасная для браузеров без него. */
+
+:root {
+	--truba-ok: #31a866;
+	--truba-warn: #d99a00;
+	--truba-err: #e0473b;
+	--truba-tunnel: #2f6fcb;
+	--truba-direct: #31a866;
+	--truba-inbound: #8a6fb8;
+}
+
+.truba-num { font-variant-numeric: tabular-nums; }
+.truba-muted {
+	color: #888;
+	color: color-mix(in srgb, currentColor 78%, transparent);
+	font-size: .9em;
+}
+
+/* Значок состояния: ok / warn / err / info, без класса — нейтральный. Бледная подложка
+   цвета состояния и текст того же цвета, смешанный с цветом текста темы. */
+.truba-badge {
+	--c: currentColor;
+	display: inline-block;
+	padding: 0 .55em;
+	border-radius: 3px;
+	font-size: .9em;
+	line-height: 1.6;
+	white-space: nowrap;
+	background: rgba(128, 128, 128, .18);
+	background: color-mix(in srgb, var(--c) 18%, transparent);
+	color: inherit;
+	color: color-mix(in srgb, var(--c) 40%, currentColor);
+}
+.truba-badge.ok   { --c: var(--truba-ok); }
+.truba-badge.warn { --c: var(--truba-warn); }
+.truba-badge.err  { --c: var(--truba-err); }
+.truba-badge.info { --c: var(--truba-tunnel); }
+
+/* Цветная точка перед значением: текст остаётся читаемым и при жёлтом. */
+.truba-dot::before { content: '●'; margin-right: .4em; color: #999; color: color-mix(in srgb, currentColor 45%, transparent); }
+.truba-dot.ok::before   { color: var(--truba-ok); }
+.truba-dot.warn::before { color: var(--truba-warn); }
+.truba-dot.err::before  { color: var(--truba-err); }
+.truba-dot.info::before { color: var(--truba-tunnel); }
+.truba-dot.inbound::before { color: var(--truba-inbound); }
+
+/* ---- Обзор: плитки состояния ---- */
+.truba-head { margin: 0 0 1em; }
+.truba-tiles {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(min(100%, 15em), 1fr));
+	gap: 1em;
+	margin: 0 0 1.5em;
+}
+.truba-tile {
+	display: flex;
+	flex-direction: column;
+	gap: .3em;
+	min-width: 0;
+	padding: .9em 1em;
+	border: 1px solid #ddd;
+	border: 1px solid color-mix(in srgb, currentColor 18%, transparent);
+	border-radius: 6px;
+}
+.truba-tile-h { display: flex; justify-content: space-between; align-items: center; gap: .5em; }
+.truba-tile-h h3 { margin: 0; padding: 0; border: 0; background: none; font-size: 1.1em; }
+.truba-big { font-size: 1.45em; font-weight: 600; line-height: 1.3; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.truba-switch { display: inline-flex; align-items: center; gap: .5em; min-height: 2.2em; cursor: pointer; }
+.truba-switch input { margin: 0; }
+.truba-go { margin-top: auto; padding-top: .3em; }
+
+/* Предупреждения: каждое со ссылкой туда, где его исправляют. */
+.truba-warns { list-style: none; margin: 0; padding: 0; }
+.truba-warns li {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: baseline;
+	gap: .25em 1em;
+	padding: .5em 0;
+	border-bottom: 1px solid #ddd;
+	border-bottom: 1px solid color-mix(in srgb, currentColor 14%, transparent);
+}
+.truba-warns li:last-child { border-bottom: 0; }
+.truba-warns li > span { flex: 1 1 24em; min-width: 0; }
+.truba-warns a { white-space: nowrap; }
+
+/* Карточки: две колонки на широком экране, одна — на телефоне. */
+.truba-cards {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(min(100%, 24em), 1fr));
+	gap: 0 1.5em;
+}
+.truba-cards > .cbi-section { min-width: 0; margin-top: 0; }
+
+/* Таблица «название — значение» с постоянной шириной колонок. */
+.truba-kv { width: 100%; table-layout: fixed; border-collapse: collapse; }
+.truba-kv th, .truba-kv td {
+	padding: .4em .6em .4em 0;
+	vertical-align: top;
+	text-align: left;
+	font-weight: normal;
+	border-bottom: 1px solid #e5e5e5;
+	border-bottom: 1px solid color-mix(in srgb, currentColor 16%, transparent);
+	overflow-wrap: anywhere;
+}
+.truba-kv th { width: 38%; color: #777; color: color-mix(in srgb, currentColor 78%, transparent); }
+.truba-kv tr:last-child > * { border-bottom: 0; }
+
+/* Числовая таблица: трафик по Действиям, версии списков, проверка Туннеля. Значение и
+   пояснение под ним — две строки в ячейке. */
+.truba-grid { width: 100%; table-layout: fixed; border-collapse: collapse; }
+.truba-grid th, .truba-grid td {
+	padding: .4em .5em;
+	text-align: right;
+	vertical-align: top;
+	border-bottom: 1px solid #e5e5e5;
+	border-bottom: 1px solid color-mix(in srgb, currentColor 16%, transparent);
+}
+.truba-grid th { font-weight: normal; color: #777; color: color-mix(in srgb, currentColor 78%, transparent); }
+.truba-grid th:first-child, .truba-grid td:first-child { width: 34%; text-align: left; padding-left: 0; }
+.truba-grid td span { display: block; white-space: nowrap; }
+/* На телефоне колонки узкие: пояснение под числом («пакетов отброшено») переносится. */
+@media (max-width: 600px) { .truba-grid td span { white-space: normal; } }
+
+/* Версии Наборов правил: всё по левому краю, контрольная сумма переносится в узкой колонке. */
+.truba-versions th, .truba-versions td { text-align: left; }
+.truba-versions th:first-child, .truba-versions td:first-child { width: 22%; }
+.truba-versions code { overflow-wrap: anywhere; }
+
+/* График скорости и мини-график задержки. */
+.truba-chart { position: relative; margin: .25em 0 .75em; }
+.truba-chart svg {
+	display: block;
+	width: 100%;
+	height: 9em;
+	box-sizing: border-box;
+	border-bottom: 1px solid #ccc;
+	border-bottom: 1px solid color-mix(in srgb, currentColor 24%, transparent);
+}
+.truba-chart.small svg { height: 4.5em; }
+.truba-chart .grid { stroke: #e5e5e5; stroke: color-mix(in srgb, currentColor 16%, transparent); stroke-dasharray: 2 4; vector-effect: non-scaling-stroke; }
+.truba-chart path.line { fill: none; stroke-width: 1.75; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
+.truba-chart path.area { stroke: none; fill-opacity: .14; }
+.truba-chart .tunnel { stroke: var(--truba-tunnel); fill: var(--truba-tunnel); }
+.truba-chart .direct { stroke: var(--truba-direct); fill: var(--truba-direct); }
+.truba-chart .up { stroke-dasharray: 5 3; }
+.truba-chart-max { position: absolute; top: 0; left: 0; font-size: .8em; color: #777; color: color-mix(in srgb, currentColor 78%, transparent); }
+.truba-chart-axis { display: flex; justify-content: space-between; font-size: .8em; color: #777; color: color-mix(in srgb, currentColor 78%, transparent); }
+.truba-legend { display: flex; flex-wrap: wrap; gap: .25em 1.25em; margin-bottom: .25em; font-size: .85em; color: #777; color: color-mix(in srgb, currentColor 78%, transparent); }
+.truba-legend i { display: inline-block; width: 1.5em; margin-right: .4em; vertical-align: middle; border-top: 2px solid; }
+.truba-legend i.tunnel { border-top-color: var(--truba-tunnel); }
+.truba-legend i.direct { border-top-color: var(--truba-direct); }
+.truba-legend i.up { border-top-style: dashed; }
+/* Над графиком: легенда слева, срок справа; на узком экране срок уходит на свою строку. */
+.truba-chart-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: .25em 1em; margin-bottom: .25em; }
+.truba-chart-head .truba-legend { margin-bottom: 0; }
+/* Срок графика: кнопки одной группой, выбранная — с подложкой цвета Туннеля. Стили кнопок
+   темы сброшены: у Bootstrap и Argon они крупные и с собственным фоном. */
+.truba-seg {
+	display: inline-flex;
+	border: 1px solid #ccc;
+	border: 1px solid color-mix(in srgb, currentColor 24%, transparent);
+	border-radius: 3px;
+	overflow: hidden;
+	font-size: .85em;
+}
+.truba-seg button {
+	min-height: 0;
+	margin: 0;
+	padding: .1em .75em;
+	border: 0;
+	border-radius: 0;
+	background: transparent;
+	box-shadow: none;
+	color: inherit;
+	font: inherit;
+	line-height: 1.6;
+	cursor: pointer;
+}
+.truba-seg button + button { border-left: 1px solid #ccc; border-left: 1px solid color-mix(in srgb, currentColor 24%, transparent); }
+.truba-seg button:hover { background: rgba(128, 128, 128, .1); background: color-mix(in srgb, currentColor 8%, transparent); }
+.truba-seg button.active { background: rgba(47, 111, 203, .18); background: color-mix(in srgb, var(--truba-tunnel) 18%, transparent); }
+/* Истории нет (служба остановлена): пояснение поверх пустого графика. */
+.truba-chart-note {
+	position: absolute;
+	inset: 0;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	padding: 0 1em;
+	text-align: center;
+	font-size: .9em;
+	color: #777;
+	color: color-mix(in srgb, currentColor 78%, transparent);
+}
+.truba-chart-note:empty { display: none; }
+.truba-chart.stale svg { opacity: .3; }
+
+/* Доля новых соединений: Туннель — Напрямую, цвета как на графике. */
+.truba-share {
+	display: flex;
+	height: .5em;
+	margin: .25em 0 .5em;
+	border-radius: 3px;
+	overflow: hidden;
+	background: #e5e5e5;
+	background: color-mix(in srgb, currentColor 14%, transparent);
+}
+.truba-share .tunnel { background: var(--truba-tunnel); }
+.truba-share .direct { background: var(--truba-direct); }
+
+/* Заполнение кэша DNS. */
+.truba-meter {
+	display: inline-block;
+	width: 12em;
+	max-width: 100%;
+	height: .5em;
+	margin-right: .6em;
+	vertical-align: middle;
+	border-radius: 3px;
+	overflow: hidden;
+	background: #e5e5e5;
+	background: color-mix(in srgb, currentColor 14%, transparent);
+}
+.truba-meter span { display: block; height: 100%; background: var(--truba-tunnel); }
+
+/* Строка, которая меняет текст, но не высоту (например, «идёт обновление»). */
+.truba-line { min-height: 1.6em; }
+
+/* Строка полей и кнопок; на телефоне переносится. */
+.truba-toolbar { display: flex; flex-wrap: wrap; gap: .5em 1em; align-items: center; margin: .5em 0; }
+.truba-toolbar .truba-grow { flex: 1 1 18em; min-width: 0; }
+
+/* Фильтры-переключатели: Действия Категорий, журнал. */
+.truba-chips { display: flex; flex-wrap: wrap; gap: .4em; }
+.truba-chip {
+	padding: .25em .9em;
+	border: 1px solid #ccc;
+	border: 1px solid color-mix(in srgb, currentColor 30%, transparent);
+	border-radius: 999px;
+	background: none;
+	color: inherit;
+	font: inherit;
+	cursor: pointer;
+}
+.truba-chip[aria-pressed="true"] {
+	font-weight: 600;
+	background: rgba(128, 128, 128, .2);
+	background: color-mix(in srgb, currentColor 14%, transparent);
+}
+
+/* Журнал и текст конфигурации — моноширинным шрифтом. */
+.truba-log { max-height: 30em; overflow: auto; white-space: pre-wrap; }
+.truba-log .warn { color: var(--truba-warn); color: color-mix(in srgb, var(--truba-warn) 60%, currentColor); }
+.truba-log .err { color: var(--truba-err); color: color-mix(in srgb, var(--truba-err) 60%, currentColor); }
+.truba-conf { width: 100%; font-family: monospace; }
+
+/* Заголовок результата проверки домена: «цель → Действие». */
+.truba-target { font-size: 1.2em; }
+
+/* Подробности «Проверки NAT» по серверам. */
+.truba-details { margin-top: .5em; }
+.truba-details summary { cursor: pointer; color: #777; color: color-mix(in srgb, currentColor 78%, transparent); }
+.truba-details ul { margin: .25em 0 0; }

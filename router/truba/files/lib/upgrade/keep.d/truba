@@ -1,0 +1,4 @@
+/etc/config/truba
+/etc/truba/
+/etc/apk/keys/truba.pem
+/etc/apk/repositories.d/truba.list

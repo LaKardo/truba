@@ -1,0 +1,339 @@
+{
+	"log": {
+		"level": "warn"
+	},
+	"plugins": [
+		{
+			"tag": "c_router",
+			"type": "domain_set",
+			"args": {
+				"exps": [
+					"full:ntp.example"
+				]
+			}
+		},
+		{
+			"tag": "c_0",
+			"type": "domain_set",
+			"args": {
+				"files": [
+					"/var/lib/truba/geosite/ads.txt"
+				]
+			}
+		},
+		{
+			"tag": "c_1",
+			"type": "domain_set",
+			"args": {
+				"files": [
+					"/var/lib/truba/geosite/tunnel.txt"
+				]
+			}
+		},
+		{
+			"tag": "c_2",
+			"type": "domain_set",
+			"args": {
+				"files": [
+					"/var/lib/truba/geosite/adirect.txt"
+				]
+			}
+		},
+		{
+			"tag": "c_3",
+			"type": "domain_set",
+			"args": {
+				"files": [
+					"/var/lib/truba/geosite/zdirect.txt"
+				]
+			}
+		},
+		{
+			"tag": "c_4",
+			"type": "domain_set",
+			"args": {
+				"files": [
+					"/var/lib/truba/geosite/wide.txt"
+				]
+			}
+		},
+		{
+			"tag": "up_tunnel_0",
+			"type": "forward",
+			"args": {
+				"upstreams": [
+					{
+						"addr": "https://1.1.1.1/dns-query",
+						"idle_timeout": 180,
+						"so_mark": 65536
+					}
+				]
+			}
+		},
+		{
+			"tag": "up_tunnel_0_ok",
+			"type": "sequence",
+			"args": [
+				{
+					"exec": "$up_tunnel_0"
+				},
+				{
+					"matches": [
+						"!rcode 0 3"
+					],
+					"exec": "drop_resp"
+				}
+			]
+		},
+		{
+			"tag": "up_tunnel_1",
+			"type": "forward",
+			"args": {
+				"upstreams": [
+					{
+						"addr": "https://8.8.8.8/dns-query",
+						"idle_timeout": 180,
+						"so_mark": 65536
+					}
+				]
+			}
+		},
+		{
+			"tag": "up_tunnel_1_ok",
+			"type": "sequence",
+			"args": [
+				{
+					"exec": "$up_tunnel_1"
+				},
+				{
+					"matches": [
+						"!rcode 0 3"
+					],
+					"exec": "drop_resp"
+				}
+			]
+		},
+		{
+			"tag": "up_tunnel",
+			"type": "fallback",
+			"args": {
+				"primary": "up_tunnel_0_ok",
+				"secondary": "up_tunnel_1_ok",
+				"threshold": 1,
+				"always_standby": true
+			}
+		},
+		{
+			"tag": "up_direct",
+			"type": "forward",
+			"args": {
+				"upstreams": [
+					{
+						"addr": "tls+pipeline://common.dot.dns.yandex.net",
+						"dial_addr": "77.88.8.8",
+						"idle_timeout": 180
+					}
+				]
+			}
+		},
+		{
+			"tag": "cache",
+			"type": "cache",
+			"args": {
+				"size": 65536,
+				"dump_file": "/var/lib/truba/mosdns-cache-a985c2b3.dump",
+				"lazy_cache_ttl": 86400
+			}
+		},
+		{
+			"tag": "fetch_tunnel",
+			"type": "sequence",
+			"args": [
+				{
+					"exec": "$cache"
+				},
+				{
+					"matches": [
+						"!has_resp"
+					],
+					"exec": "$up_tunnel"
+				},
+				{
+					"exec": "ttl 0-3600"
+				}
+			]
+		},
+		{
+			"tag": "flow_tunnel",
+			"type": "sequence",
+			"args": [
+				{
+					"exec": "$fetch_tunnel"
+				},
+				{
+					"exec": "ttl 0-300"
+				},
+				{
+					"exec": "nftset inet,truba,gs_tunnel4,ipv4_addr,32"
+				}
+			]
+		},
+		{
+			"tag": "fetch_direct",
+			"type": "sequence",
+			"args": [
+				{
+					"exec": "$cache"
+				},
+				{
+					"matches": [
+						"!has_resp"
+					],
+					"exec": "$up_direct"
+				},
+				{
+					"exec": "ttl 0-3600"
+				}
+			]
+		},
+		{
+			"tag": "flow_direct",
+			"type": "sequence",
+			"args": [
+				{
+					"exec": "$fetch_direct"
+				},
+				{
+					"exec": "ttl 0-300"
+				},
+				{
+					"exec": "nftset inet,truba,gs_direct4,ipv4_addr,32"
+				}
+			]
+		},
+		{
+			"tag": "fetch_router",
+			"type": "sequence",
+			"args": [
+				{
+					"exec": "$cache"
+				},
+				{
+					"matches": [
+						"!has_resp"
+					],
+					"exec": "$up_direct"
+				},
+				{
+					"exec": "ttl 0-3600"
+				}
+			]
+		},
+		{
+			"tag": "flow_router",
+			"type": "sequence",
+			"args": [
+				{
+					"exec": "$fetch_router"
+				}
+			]
+		},
+		{
+			"tag": "fetch_default",
+			"type": "sequence",
+			"args": [
+				{
+					"exec": "$cache"
+				},
+				{
+					"matches": [
+						"!has_resp"
+					],
+					"exec": "$up_tunnel"
+				},
+				{
+					"exec": "ttl 0-3600"
+				}
+			]
+		},
+		{
+			"tag": "flow_default",
+			"type": "sequence",
+			"args": [
+				{
+					"exec": "$fetch_default"
+				}
+			]
+		},
+		{
+			"tag": "main",
+			"type": "sequence",
+			"args": [
+				{
+					"matches": [
+						"qtype 28"
+					],
+					"exec": "reject 0"
+				},
+				{
+					"matches": [
+						"qname $c_router"
+					],
+					"exec": "goto flow_router"
+				},
+				{
+					"matches": [
+						"qname $c_0"
+					],
+					"exec": "reject 3"
+				},
+				{
+					"matches": [
+						"qname $c_1"
+					],
+					"exec": "goto flow_tunnel"
+				},
+				{
+					"matches": [
+						"qname $c_2"
+					],
+					"exec": "goto flow_direct"
+				},
+				{
+					"matches": [
+						"qname $c_3"
+					],
+					"exec": "goto flow_direct"
+				},
+				{
+					"matches": [
+						"qname $c_4"
+					],
+					"exec": "goto flow_direct"
+				},
+				{
+					"exec": "goto flow_default"
+				}
+			]
+		},
+		{
+			"tag": "udp_in",
+			"type": "udp_server",
+			"args": {
+				"entry": "main",
+				"listen": "127.0.0.1:5335"
+			}
+		},
+		{
+			"tag": "tcp_in",
+			"type": "tcp_server",
+			"args": {
+				"entry": "main",
+				"listen": "127.0.0.1:5335"
+			}
+		}
+	],
+	"api": {
+		"http": "127.0.0.1:5336"
+	}
+}
