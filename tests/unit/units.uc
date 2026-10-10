@@ -101,7 +101,7 @@ check('Приоритет: первым — Блок geoip', P.PRIORITY[0].actio
 function mk(dns) {
 	return {
 		iface: 'awg0', dns_hijack: true, mode: 'all',
-		dns: { tunnel: [ 'https://1.1.1.1/dns-query' ], direct: [ 'tls://common.dot.dns.yandex.net@77.88.8.8' ],
+		dns: { tunnel: [ 'https://1.1.1.1/dns-query', 'https://8.8.8.8/dns-query' ], direct: [ 'tls+pipeline://common.dot.dns.yandex.net@77.88.8.8' ],
 		       port: 5335, ttl_max: 300, cache_size: 65536, lazy_cache_ttl: 86400, set_timeout: 86400,
 		       api: '127.0.0.1:5336', ...(dns ?? {}) },
 	};
@@ -144,10 +144,29 @@ check('mosdns: без адреса API — без API, без своих хос�
 	noapi.api == null && !length(filter(noapi.plugins, p => p.tag == 'c_router')));
 check('mosdns: lazy_cache_ttl 0 — ленивый кэш выключен',
 	!length(filter(noapi.plugins, p => p.tag == 'cache' && p.args?.lazy_cache_ttl)));
+// Три сервера: все сразу через вложенные fallback; каждый тег объявлен раньше, чем на него ссылаются.
+let three = R.mosdns(mk({ tunnel: [ 'udp://192.0.2.1', 'udp://192.0.2.2', 'udp://192.0.2.3' ] }), sel, []);
+let seen = {}, refs_ok = true, servers = [];
+for (let p in three.plugins) {
+	for (let r in [ p.args?.primary, p.args?.secondary ])
+		if (r != null && !seen[r]) refs_ok = false;
+	for (let st in (p.type == 'sequence') ? p.args : [])
+		if (match(st.exec ?? '', /^\$up_/) && !seen[substr(st.exec, 1)]) refs_ok = false;
+	if (p.type == 'forward')
+		push(servers, ...map(p.args.upstreams, u => u.addr));
+	seen[p.tag] = true;
+}
+let top = filter(three.plugins, p => p.tag == 'up_tunnel')[0];
+check('mosdns: три сервера — каждый в своём forward, все под up_tunnel, ссылки только назад',
+	refs_ok && top?.type == 'fallback' && top.args.always_standby && length(filter(servers, a => index(a, 'udp://192.0.2.') == 0)) == 3);
+check('mosdns: у каждого сервера idle_timeout, один сервер — просто forward',
+	length(filter(three.plugins, p => p.type == 'forward' && p.args.upstreams[0].idle_timeout != 180)) == 0 &&
+	filter(three.plugins, p => p.tag == 'up_direct')[0]?.type == 'forward');
 
 // ---- Чтение настроек: неверные значения пропускаются ----
 
 check('адрес DNS: схемы mosdns и «@IP»', F.upstream_ok('https://1.1.1.1/dns-query') && F.upstream_ok('tls://dns.example@1.2.3.4') &&
+	F.upstream_ok('tls+pipeline://dns.example@1.2.3.4') &&
 	F.upstream_ok('1.1.1.1') && F.upstream_ok('udp://[2001:db8::1]:53'));
 check('адрес DNS: опечатка в схеме и путь без схемы — нет', !F.upstream_ok('htps://1.1.1.1/dns-query') && !F.upstream_ok('1.1.1.1/dns-query'));
 

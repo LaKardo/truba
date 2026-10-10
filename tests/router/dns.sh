@@ -1,6 +1,6 @@
 #!/bin/sh
 # DNS: классификация mosdns по Категориям (на синтетических Категориях и подставных DNS-серверах),
-# Блок, AAAA, «Проверить домен/IP» с наборами из ядра, ленивый кэш и его дамп, занятый порт API,
+# Блок, AAAA, «Проверить домен/IP» с наборами из ядра, запасной сервер DNS, ленивый кэш и его дамп, занятый порт API,
 # срок IP из DNS в наборах (ADR 0007), неверные настройки.
 . /repo/tests/router/stand.sh
 
@@ -52,6 +52,38 @@ check "Проверить домен: IP из DNS «Напрямую» — че�
 check "Проверить IP: geoip:ru — через набор в ядре" eval 'truba check 77.88.8.8 > /tmp/c2 && grep -q "\"reason\": \"geoip\"" /tmp/c2 && [ "$(jsonfilter -i /tmp/c2 -e "@.ips[0].sets.gi_direct")" = true ]'
 check "status и sets: счётчики кэша и IP из DNS" eval '[ "$(truba status | jsonfilter -e "@.dns_cache.query")" -gt 0 ] && [ "$(truba status | jsonfilter -e "@.dns_cache.max")" -eq 65536 ] && [ "$(truba sets | jsonfilter -e "@.dns.direct")" -ge 1 ] && [ "$(truba sets | jsonfilter -e "@.dns.tunnel")" -ge 1 ]'
 
+section "второй сервер DNS страхует каждый запрос"
+# Первый сервер «Туннеля» завис: принимает запросы и молчит. Запрос идёт сразу к обоим серверам,
+# поэтому ответ второго не ждёт тайм-аута первого (5 с).
+ucode -e "import * as socket from 'socket'; let s = socket.create(socket.AF_INET, socket.SOCK_DGRAM); s.bind({ address: '127.0.0.1', port: 5409 }); sleep(300000);" & MUTE=$!
+PID="$(pidof mosdns)"
+uci -q batch <<-'EOF'
+	delete truba.dns.tunnel_upstream
+	add_list truba.dns.tunnel_upstream='udp://127.0.0.1:5409'
+	add_list truba.dns.tunnel_upstream='udp://127.0.0.1:5401'
+	commit truba
+EOF
+reload "первый сервер «Туннеля» молчит"
+restarted() { P="$(pidof mosdns)" && [ "$P" != "$PID" ] && mosdns_up; }
+wait_for 10 restarted
+# 20 новых имён: при случайном выборе сервера хотя бы одно ушло бы только к молчащему.
+fast_answers() {
+	t=$(date +%s)
+	for i in $(seq 1 20); do [ "$(ask "mute-$i.zz-tun.trubatest")" = 44.0.0.1 ] || return 1; done
+	[ $(( $(date +%s) - t )) -le 3 ]
+}
+check "20 новых имён — все ответы от второго сервера, без тайм-аута" bounded 60 fast_answers
+check "у серверов DNS — idle_timeout" eval 'grep -q "\"idle_timeout\": 180" /var/etc/truba/mosdns.json'
+kill "$MUTE"
+PID="$(pidof mosdns)"
+uci -q batch <<-'EOF'
+	delete truba.dns.tunnel_upstream
+	add_list truba.dns.tunnel_upstream='udp://127.0.0.1:5401'
+	commit truba
+EOF
+reload "один сервер «Туннеля»"
+wait_for 10 restarted
+
 section "ленивый кэш"
 check "ответ от сервера «Напрямую»" eval '[ "$(ask lazy.zz-dom.trubatest)" = 44.0.0.2 ]'
 sleep 3   # запись истекла (TTL 2 с)
@@ -66,7 +98,6 @@ check "status: истёкшие ответы в счётчиках кэша" eva
 PID="$(pidof mosdns)"
 uci set truba.dns.ttl_max=299; uci commit truba
 reload "ttl_max"
-restarted() { P="$(pidof mosdns)" && [ "$P" != "$PID" ] && mosdns_up; }
 check "смена настройки DNS перезапустила mosdns" wait_for 10 restarted
 check "дамп кэша — в /var/lib/truba (tmpfs)" test -s /var/lib/truba/mosdns-cache.dump
 check "после перезапуска запись взята из дампа" eval '[ "$(ask lazy.zz-dom.trubatest)" = 44.0.0.2 ]'

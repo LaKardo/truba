@@ -434,19 +434,15 @@ plugins:
   - { tag: c_category_cdn_ru,    type: domain_set, args: { files: [/var/lib/truba/geosite/category-cdn-ru.txt] } }
   - { tag: c_private,            type: domain_set, args: { files: [/var/lib/truba/geosite/private.txt] } }
 
-  - tag: up_tunnel
-    type: forward
-    args:
-      concurrent: 2
-      upstreams:
-        - { addr: "https://1.1.1.1/dns-query", so_mark: 0x00010000 }
-        - { addr: "https://8.8.8.8/dns-query", so_mark: 0x00010000 }
-  - tag: up_direct
-    type: forward
-    args:
-      upstreams:
-        - { addr: "tls://common.dot.dns.yandex.net", dial_addr: "77.88.8.8" }
-        - { addr: "tls://common.dot.dns.yandex.net", dial_addr: "77.88.8.1" }   # второй: обрыв одного соединения не оставляет запросы без ответа
+  # Серверы одного пути: свой forward на каждый, запрос сразу ко всем, ответ — первый годный.
+  # idle_timeout 180: соединение живёт в паузах до 3 мин (сам mosdns закрыл бы DoH через 30 с).
+  - { tag: up_tunnel_0, type: forward, args: { upstreams: [ { addr: "https://1.1.1.1/dns-query", idle_timeout: 180, so_mark: 0x00010000 } ] } }
+  - { tag: up_tunnel_0_ok, type: sequence, args: [ { exec: $up_tunnel_0 }, { matches: [ "!rcode 0 3" ], exec: drop_resp } ] }   # SERVFAIL, REFUSED… — ждать другой сервер
+  - { tag: up_tunnel_1, type: forward, args: { upstreams: [ { addr: "https://8.8.8.8/dns-query", idle_timeout: 180, so_mark: 0x00010000 } ] } }
+  - { tag: up_tunnel_1_ok, type: sequence, args: [ { exec: $up_tunnel_1 }, { matches: [ "!rcode 0 3" ], exec: drop_resp } ] }
+  - { tag: up_tunnel, type: fallback, args: { primary: up_tunnel_0_ok, secondary: up_tunnel_1_ok, threshold: 1, always_standby: true } }
+  # up_direct — так же из tls+pipeline://common.dot.dns.yandex.net с dial_addr 77.88.8.8 и 77.88.8.1;
+  # один сервер — просто forward.
 
   # Ленивый кэш: истёкшая запись отдаётся сразу с TTL 5 с и проходит дальше по цепочке (nftset тоже),
   # а свежий ответ запрашивается в фоне по тем же правилам. Повторные запросы не ждут DNS.
@@ -493,6 +489,8 @@ plugins:
 ```
 
 Настоящий конфиг генерирует [render.uc](../router/truba/files/usr/share/ucode/truba/render.uc) в виде JSON (подмножество YAML). Эталон — `tests/golden/mosdns.json`, запуск проверяется на mosdns 5.3.3 из фида в тестах Роутера.
+
+**Серверы DNS.** Каждый запрос, которого нет в кэше, уходит сразу ко всем серверам своего пути, и в ответ идёт первый годный: NOERROR или NXDOMAIN. Поэтому зависший или оборвавший соединение сервер не задерживает ответ. Штатный `concurrent` плагина forward для этого не годится: он выбирает сервер для каждого параллельного запроса случайно и с повторами, и при двух серверах половина запросов ушла бы дважды к одному. Простаивающее соединение mosdns держит 3 минуты (`idle_timeout`). Его собственный срок для DoH — 30 с, хотя серверы держат соединение дольше: Google — 4 мин, Cloudflare — 6,5 мин. Без этого первый промах кэша после паузы ждал бы новых TCP и TLS: через Туннель это 100–170 мс. Если сервер закрывает соединение раньше (Яндекс — через 30 с), mosdns просто открывает новое. DoT «Напрямую» идёт с pipelining (`tls+pipeline://`): несколько запросов, пришедших разом, идут по одному соединению, а не открывают TLS на каждый. Яндекс, Cloudflare и Google отвечают на такие запросы в любом порядке, как требует RFC 7766. Без pipelining mosdns не применяет к DoT и `idle_timeout`.
 
 **Порядок проверки Категорий («узость»).** Категории сортируются по числу записей: вложенная всегда меньше объемлющей, поэтому вложенность соблюдается сама. При равенстве — Блок → Туннель → Напрямую. Вложенность (A ⊂ B, если все записи A есть в B) распаковщик вычисляет для колонки «Вложена в» в интерфейсе.
 
@@ -592,8 +590,8 @@ config device                      # Политика устройства
 config dns 'dns'
 	list   tunnel_upstream 'https://1.1.1.1/dns-query'
 	list   tunnel_upstream 'https://8.8.8.8/dns-query'
-	list   direct_upstream 'tls://common.dot.dns.yandex.net@77.88.8.8'
-	list   direct_upstream 'tls://common.dot.dns.yandex.net@77.88.8.1'
+	list   direct_upstream 'tls+pipeline://common.dot.dns.yandex.net@77.88.8.8'
+	list   direct_upstream 'tls+pipeline://common.dot.dns.yandex.net@77.88.8.1'
 	option port            '5335'
 	option ttl_max         '300'
 	option cache_size      '65536'

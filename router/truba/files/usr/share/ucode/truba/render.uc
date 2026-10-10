@@ -249,13 +249,51 @@ export function nft_minimal(cfg, ctx) {
 	return s;
 };
 
+// Сколько держать простаивающее соединение с сервером DNS, с. mosdns по умолчанию закрывает DoH
+// через 30 с, хотя серверы держат его дольше (Google — 4 мин, Cloudflare — 6,5 мин), и первый промах
+// кэша после паузы ждёт новые TCP и TLS: через Туннель это +100…170 мс. Если сервер закроет
+// соединение раньше (Яндекс — через 30 с), mosdns откроет новое. У DoT срок действует только
+// с pipelining (tls+pipeline://), у UDP соединений нет.
+const UPSTREAM_IDLE = 180;
+
 // «url@dial_ip» → { addr, dial_addr }.
 function upstream(u, mark) {
 	let m = match(u, /^(.*)@([0-9.]+)$/);
 	let o = m ? { addr: m[1], dial_addr: m[2] } : { addr: u };
+	o.idle_timeout = UPSTREAM_IDLE;
 	if (mark)
 		o.so_mark = mark;
 	return o;
+}
+
+// Серверы DNS одного пути (tag — up_tunnel или up_direct): запрос идёт сразу ко всем, ответ — первый годный.
+// forward с concurrent выбирает сервер для каждого потока случайно и с повторами: при двух серверах
+// половина запросов уходила бы дважды к одному, и зависший сервер держал бы их до тайм-аута (5 с).
+// Поэтому у каждого сервера свой forward, а вместе их собирает fallback: always_standby — запрос сразу
+// к обоим, threshold 1 мс — ответ запасного не ждёт основной. Ответ, кроме NOERROR и NXDOMAIN
+// (SERVFAIL, REFUSED…), отбрасывается, как это делает forward: тогда ждём остальных.
+function upstream_group(plugins, tag, list, mark) {
+	if (length(list) == 1) {
+		push(plugins, { tag, type: 'forward', args: { upstreams: [ upstream(list[0], mark) ] } });
+		return;
+	}
+	let ok = [];
+	for (let i, u in list) {
+		let t = sprintf('%s_%d', tag, i);
+		push(plugins, { tag: t, type: 'forward', args: { upstreams: [ upstream(u, mark) ] } });
+		push(plugins, { tag: t + '_ok', type: 'sequence', args: [
+			{ exec: '$' + t },
+			{ matches: [ '!rcode 0 3' ], exec: 'drop_resp' },
+		] });
+		push(ok, t + '_ok');
+	}
+	// Пары с конца: mosdns ссылается только на уже объявленные теги.
+	let rest = ok[length(ok) - 1];
+	for (let i = length(ok) - 2; i >= 0; i--) {
+		let t = i ? sprintf('%s_%d_any', tag, i) : tag;
+		push(plugins, { tag: t, type: 'fallback', args: { primary: ok[i], secondary: rest, threshold: 1, always_standby: true } });
+		rest = t;
+	}
 }
 
 // JSON — подмножество YAML, mosdns читает его как обычный конфиг.
@@ -281,10 +319,8 @@ export function mosdns(cfg, plan, router_hosts, gsdir) {
 	}
 	push(main, { exec: 'goto flow_default' });
 
-	push(plugins, { tag: 'up_tunnel', type: 'forward',
-	          args: { concurrent: 2, upstreams: map(cfg.dns.tunnel, u => upstream(u, C.MARK_TUNNEL)) } });
-	push(plugins, { tag: 'up_direct', type: 'forward',
-	          args: { concurrent: 2, upstreams: map(cfg.dns.direct, u => upstream(u, null)) } });
+	upstream_group(plugins, 'up_tunnel', cfg.dns.tunnel, C.MARK_TUNNEL);
+	upstream_group(plugins, 'up_direct', cfg.dns.direct, null);
 	// Ленивый кэш: истёкшая запись отдаётся сразу (TTL 5 с) и проходит дальше по цепочке, в том числе
 	// через nftset, а свежий ответ запрашивается в фоне по тем же правилам. 0 — выключен.
 	// Дамп в /var (tmpfs): кэш переживает перезапуск mosdns при смене настроек DNS или списков,

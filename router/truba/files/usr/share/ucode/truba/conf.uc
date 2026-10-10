@@ -9,7 +9,8 @@ import * as C from 'truba.const';
 const DEFAULT_TUNNEL_DNS = [ 'https://1.1.1.1/dns-query', 'https://8.8.8.8/dns-query' ];
 // Два сервера: mosdns спрашивает оба разом и берёт первый ответ, поэтому обрыв одного
 // соединения не оставляет запросы без ответа (на живом роутере DoH 77.88.8.8 изредка рвался).
-const DEFAULT_DIRECT_DNS = [ 'tls://common.dot.dns.yandex.net@77.88.8.8', 'tls://common.dot.dns.yandex.net@77.88.8.1' ];
+// pipelining: запросы, пришедшие разом, идут по одному соединению, а не открывают по TLS на каждый.
+const DEFAULT_DIRECT_DNS = [ 'tls+pipeline://common.dot.dns.yandex.net@77.88.8.8', 'tls+pipeline://common.dot.dns.yandex.net@77.88.8.1' ];
 
 const MAC_RE = /^([0-9a-f]{2}:){5}[0-9a-f]{2}$/;
 

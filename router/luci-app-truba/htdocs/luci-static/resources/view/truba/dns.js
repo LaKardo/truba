@@ -149,13 +149,13 @@ return view.extend({
 		s.tab('advanced', _('Advanced'));
 
 		let o = s.taboption('general', form.DynamicList, 'tunnel_upstream', _('For «Tunnel»'),
-			_('Used for categories with action Tunnel and, in mode «All via tunnel», for everything else. Requests go through the tunnel. Formats: https://…, tls://…, udp://…; «address@IP» sets the IP to connect to.'));
+			_('Used for categories with action Tunnel and, in mode «All via tunnel», for everything else. Requests go through the tunnel. Formats: https://…, tls://…, tls+pipeline://… (several requests in one connection), udp://…; «address@IP» sets the IP to connect to.'));
 		o.default = [ 'https://1.1.1.1/dns-query', 'https://8.8.8.8/dns-query' ];
 		o.validate = validateUpstream;
 
 		o = s.taboption('general', form.DynamicList, 'direct_upstream', _('For «Direct»'),
 			_('Used for categories with action Direct, for the router\'s own hosts (NTP, list mirrors) and, in mode «Selective», for everything else.'));
-		o.default = [ 'tls://common.dot.dns.yandex.net@77.88.8.8', 'tls://common.dot.dns.yandex.net@77.88.8.1' ];
+		o.default = [ 'tls+pipeline://common.dot.dns.yandex.net@77.88.8.8', 'tls+pipeline://common.dot.dns.yandex.net@77.88.8.1' ];
 		o.validate = validateUpstream;
 
 		// Перехват хранится в секции main, но по смыслу — здесь.

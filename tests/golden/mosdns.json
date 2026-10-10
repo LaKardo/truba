@@ -58,27 +58,80 @@
 			}
 		},
 		{
-			"tag": "up_tunnel",
+			"tag": "up_tunnel_0",
 			"type": "forward",
 			"args": {
-				"concurrent": 2,
 				"upstreams": [
 					{
 						"addr": "https://1.1.1.1/dns-query",
+						"idle_timeout": 180,
 						"so_mark": 65536
 					}
 				]
 			}
 		},
 		{
+			"tag": "up_tunnel_0_ok",
+			"type": "sequence",
+			"args": [
+				{
+					"exec": "$up_tunnel_0"
+				},
+				{
+					"matches": [
+						"!rcode 0 3"
+					],
+					"exec": "drop_resp"
+				}
+			]
+		},
+		{
+			"tag": "up_tunnel_1",
+			"type": "forward",
+			"args": {
+				"upstreams": [
+					{
+						"addr": "https://8.8.8.8/dns-query",
+						"idle_timeout": 180,
+						"so_mark": 65536
+					}
+				]
+			}
+		},
+		{
+			"tag": "up_tunnel_1_ok",
+			"type": "sequence",
+			"args": [
+				{
+					"exec": "$up_tunnel_1"
+				},
+				{
+					"matches": [
+						"!rcode 0 3"
+					],
+					"exec": "drop_resp"
+				}
+			]
+		},
+		{
+			"tag": "up_tunnel",
+			"type": "fallback",
+			"args": {
+				"primary": "up_tunnel_0_ok",
+				"secondary": "up_tunnel_1_ok",
+				"threshold": 1,
+				"always_standby": true
+			}
+		},
+		{
 			"tag": "up_direct",
 			"type": "forward",
 			"args": {
-				"concurrent": 2,
 				"upstreams": [
 					{
-						"addr": "tls://common.dot.dns.yandex.net",
-						"dial_addr": "77.88.8.8"
+						"addr": "tls+pipeline://common.dot.dns.yandex.net",
+						"dial_addr": "77.88.8.8",
+						"idle_timeout": 180
 					}
 				]
 			}
