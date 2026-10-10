@@ -356,9 +356,17 @@ jobs:
           fi
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          path: site
+          path: feeds
           pattern: feed-*
           merge-multiple: true
+      # Каталог собранной версии заменяется целиком: в нём остаются только пакеты из её индекса,
+      # прежние ревизии не копятся. Каталоги других версий не трогаем.
+      - name: Новые фиды вместо прежних
+        run: |
+          set -euo pipefail
+          cd feeds
+          for d in */mediatek/filogic; do rm -rf "../site/$d"; done
+          cp -a . ../site/
       - name: Индекс версий
         run: |
           cd site
