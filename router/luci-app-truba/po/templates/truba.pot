@@ -1310,6 +1310,10 @@ msgid "fallback to direct (no tunnel route)"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/tunnel.js
+msgid "A number or a range «from-to» within 0–65535"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/tunnel.js
 msgid "No PrivateKey in the [Interface] section"
 msgstr ""
 
@@ -1398,7 +1402,19 @@ msgid "Random trailers"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/tunnel.js
-msgid "AmneziaWG 3.1, in reserve against DPI by packet sizes: pads packets to a random length, costly in traffic for small packets. Must match the Truba: on the VPS run «install-vps.sh random-trailers on» or «off» at the same time."
+msgid "AmneziaWG 3.1, in reserve against DPI by packet sizes: pads packets to a random length, costly in traffic for small packets. Must match the Truba: after «install-vps.sh random-trailers on» or «off» on the VPS import router.conf again — it switches the content padding too."
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/tunnel.js
+msgid "Content padding"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/tunnel.js
+msgid "AmneziaWG 3.1: random bytes added to data packets instead of padding to a multiple of 16, so packet lengths do not share one remainder; a range «from-to». May differ from the Truba; comes with router.conf."
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/tunnel.js
+msgid "Leave empty with random trailers: the module would use the padding instead of them"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/tunnel.js
@@ -1426,7 +1442,7 @@ msgid "Keepalive, s"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/tunnel.js
-msgid "Keeps the provider NAT mapping open so inbound connections via the Truba IP reach the router."
+msgid "Keeps the provider NAT mapping open so inbound connections via the Truba IP reach the router. A range «from-to» (AmneziaWG 3.1) gives a random period, so an idle tunnel has no steady rhythm."
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/tunnel.js

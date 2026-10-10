@@ -535,8 +535,8 @@ msgstr "Порт Трубы"
 msgid "Keepalive, s"
 msgstr "Keepalive, с"
 
-msgid "Keeps the provider NAT mapping open so inbound connections via the Truba IP reach the router."
-msgstr "Держит открытым отображение в NAT провайдера, чтобы входящие через IP Трубы доходили до Роутера."
+msgid "Keeps the provider NAT mapping open so inbound connections via the Truba IP reach the router. A range «from-to» (AmneziaWG 3.1) gives a random period, so an idle tunnel has no steady rhythm."
+msgstr "Держит открытым отображение в NAT провайдера, чтобы входящие через IP Трубы доходили до Роутера. Диапазон «от-до» (AmneziaWG 3.1) даёт случайный период: у простаивающего Туннеля нет ровного ритма."
 
 msgid "Check interval, s"
 msgstr "Интервал проверки, с"
@@ -637,8 +637,20 @@ msgstr "AmneziaWG 3.1: не отвечать cookie под нагрузкой. �
 msgid "Random trailers"
 msgstr "Случайные хвосты (RandomTrailers)"
 
-msgid "AmneziaWG 3.1, in reserve against DPI by packet sizes: pads packets to a random length, costly in traffic for small packets. Must match the Truba: on the VPS run «install-vps.sh random-trailers on» or «off» at the same time."
-msgstr "AmneziaWG 3.1, запас против DPI по размерам пакетов: добивает пакеты до случайной длины, дорого по трафику на мелких пакетах. Должен совпадать с Трубой: одновременно на VPS выполните «install-vps.sh random-trailers on» или «off»."
+msgid "AmneziaWG 3.1, in reserve against DPI by packet sizes: pads packets to a random length, costly in traffic for small packets. Must match the Truba: after «install-vps.sh random-trailers on» or «off» on the VPS import router.conf again — it switches the content padding too."
+msgstr "AmneziaWG 3.1, запас против DPI по размерам пакетов: добивает пакеты до случайной длины, дорого по трафику на мелких пакетах. Должен совпадать с Трубой: после «install-vps.sh random-trailers on» или «off» на VPS импортируйте router.conf заново — он переключает и добавку к пакетам."
+
+msgid "Content padding"
+msgstr "Добавка к пакетам"
+
+msgid "AmneziaWG 3.1: random bytes added to data packets instead of padding to a multiple of 16, so packet lengths do not share one remainder; a range «from-to». May differ from the Truba; comes with router.conf."
+msgstr "AmneziaWG 3.1: случайные байты к пакетам данных вместо дополнения до кратного 16, чтобы длины пакетов не давали один остаток; диапазон «от-до». Может отличаться от Трубы; приходит с router.conf."
+
+msgid "Leave empty with random trailers: the module would use the padding instead of them"
+msgstr "Со случайными хвостами оставьте пустым: модуль взял бы добавку вместо них"
+
+msgid "A number or a range «from-to» within 0–65535"
+msgstr "Число или диапазон «от-до» в пределах 0–65535"
 
 msgid "geoip.dat is published every three days around 10–11 UTC, geosite.dat irregularly, usually by 09 UTC; at 12:00 a new release is picked up the same day. Converted to the router time zone for cron."
 msgstr "geoip.dat выходит раз в три дня около 10–11 UTC, geosite.dat — нерегулярно, обычно до 09 UTC; в 12:00 новый выпуск подхватывается в тот же день. Для cron время переводится в часовой пояс Роутера."

@@ -136,6 +136,13 @@ function updateState(r, st) {
 	common.setText(r.iface, awg.rx != null ? '↓ %s · ↑ %s'.format(common.fmtBytes(awg.rx), common.fmtBytes(awg.tx)) : '—');
 }
 
+// Число или диапазон «от-до» (AmneziaWG 3.1: случайное значение из него) в пределах 0–65535.
+function validateRange(sid, v) {
+	const m = String(v).match(/^(\d+)(?:-(\d+))?$/);
+	const lo = m ? +m[1] : NaN, hi = m ? +(m[2] ?? m[1]) : NaN;
+	return (v === '' || (lo <= hi && hi <= 65535)) ? true : _('A number or a range «from-to» within 0–65535');
+}
+
 // Ключи .conf (без регистра) → опции UCI протокола amneziawg.
 const IFACE_KEYS = {
 	privatekey: 'private_key', mtu: 'mtu', listenport: 'listen_port',
@@ -327,7 +334,16 @@ return view.extend({
 			o = s.taboption('obfs', form.Flag, 'awg_disable_cookies', _('Disable cookies'),
 				_('AmneziaWG 3.1: no cookie replies under load. Not needed with a single peer, and their size is recognisable.'));
 			o = s.taboption('obfs', form.Flag, 'awg_random_trailers', _('Random trailers'),
-				_('AmneziaWG 3.1, in reserve against DPI by packet sizes: pads packets to a random length, costly in traffic for small packets. Must match the Truba: on the VPS run «install-vps.sh random-trailers on» or «off» at the same time.'));
+				_('AmneziaWG 3.1, in reserve against DPI by packet sizes: pads packets to a random length, costly in traffic for small packets. Must match the Truba: after «install-vps.sh random-trailers on» or «off» on the VPS import router.conf again — it switches the content padding too.'));
+			o = s.taboption('obfs', form.Value, 'awg_content_padding_addition', _('Content padding'),
+				_('AmneziaWG 3.1: random bytes added to data packets instead of padding to a multiple of 16, so packet lengths do not share one remainder; a range «from-to». May differ from the Truba; comes with router.conf.'));
+			o.optional = true;
+			o.validate = function(sid, v) {
+				// Добавку модуль берёт вместо RandomTrailers: с ними она их бы отменила.
+				if (v !== '' && this.section.formvalue(sid, 'awg_random_trailers') == '1')
+					return _('Leave empty with random trailers: the module would use the padding instead of them');
+				return validateRange(sid, v);
+			};
 
 			s = mn.section(form.TypedSection, 'amneziawg_' + iface, _('Truba (peer)'));
 			s.anonymous = true;
@@ -342,9 +358,9 @@ return view.extend({
 			o = s.option(form.Value, 'endpoint_port', _('Truba port'));
 			o.datatype = 'port';
 			o = s.option(form.Value, 'persistent_keepalive', _('Keepalive, s'),
-				_('Keeps the provider NAT mapping open so inbound connections via the Truba IP reach the router.'));
-			o.datatype = 'range(0,65535)';
-			o.placeholder = '25';
+				_('Keeps the provider NAT mapping open so inbound connections via the Truba IP reach the router. A range «from-to» (AmneziaWG 3.1) gives a random period, so an idle tunnel has no steady rhythm.'));
+			o.validate = validateRange;
+			o.placeholder = '15-25';
 		}
 
 		const mt = new form.Map('truba');

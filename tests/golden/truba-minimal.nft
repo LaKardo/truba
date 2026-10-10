@@ -45,6 +45,7 @@ table inet truba {
 	chain output {
 		type route hook output priority mangle + 10; policy accept;
 		meta nfproto != ipv4 return
+		ip daddr 203.0.113.10 ip dscp != cs0 ip dscp set cs0
 		ip daddr 203.0.113.10 meta mark set meta mark and 0xff00ffff or 0x00020000 return
 		socket mark and 0x00ff0000 == 0x00010000 meta mark set meta mark and 0xff00ffff or 0x00010000
 	}
