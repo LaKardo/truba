@@ -141,19 +141,34 @@
 			"type": "cache",
 			"args": {
 				"size": 65536,
-				"dump_file": "/var/lib/truba/mosdns-cache.dump",
+				"dump_file": "/var/lib/truba/mosdns-cache-a985c2b3.dump",
 				"lazy_cache_ttl": 86400
 			}
+		},
+		{
+			"tag": "fetch_tunnel",
+			"type": "sequence",
+			"args": [
+				{
+					"exec": "$cache"
+				},
+				{
+					"matches": [
+						"!has_resp"
+					],
+					"exec": "$up_tunnel"
+				},
+				{
+					"exec": "ttl 0-3600"
+				}
+			]
 		},
 		{
 			"tag": "flow_tunnel",
 			"type": "sequence",
 			"args": [
 				{
-					"matches": [
-						"!has_resp"
-					],
-					"exec": "$up_tunnel"
+					"exec": "$fetch_tunnel"
 				},
 				{
 					"exec": "ttl 0-300"
@@ -164,14 +179,29 @@
 			]
 		},
 		{
-			"tag": "flow_direct",
+			"tag": "fetch_direct",
 			"type": "sequence",
 			"args": [
+				{
+					"exec": "$cache"
+				},
 				{
 					"matches": [
 						"!has_resp"
 					],
 					"exec": "$up_direct"
+				},
+				{
+					"exec": "ttl 0-3600"
+				}
+			]
+		},
+		{
+			"tag": "flow_direct",
+			"type": "sequence",
+			"args": [
+				{
+					"exec": "$fetch_direct"
 				},
 				{
 					"exec": "ttl 0-300"
@@ -182,14 +212,47 @@
 			]
 		},
 		{
-			"tag": "flow_router",
+			"tag": "fetch_router",
 			"type": "sequence",
 			"args": [
+				{
+					"exec": "$cache"
+				},
 				{
 					"matches": [
 						"!has_resp"
 					],
 					"exec": "$up_direct"
+				},
+				{
+					"exec": "ttl 0-3600"
+				}
+			]
+		},
+		{
+			"tag": "flow_router",
+			"type": "sequence",
+			"args": [
+				{
+					"exec": "$fetch_router"
+				}
+			]
+		},
+		{
+			"tag": "fetch_default",
+			"type": "sequence",
+			"args": [
+				{
+					"exec": "$cache"
+				},
+				{
+					"matches": [
+						"!has_resp"
+					],
+					"exec": "$up_tunnel"
+				},
+				{
+					"exec": "ttl 0-3600"
 				}
 			]
 		},
@@ -198,10 +261,7 @@
 			"type": "sequence",
 			"args": [
 				{
-					"matches": [
-						"!has_resp"
-					],
-					"exec": "$up_tunnel"
+					"exec": "$fetch_default"
 				}
 			]
 		},
@@ -214,9 +274,6 @@
 						"qtype 28"
 					],
 					"exec": "reject 0"
-				},
-				{
-					"exec": "$cache"
 				},
 				{
 					"matches": [

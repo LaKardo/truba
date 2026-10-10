@@ -249,6 +249,11 @@ function apply_config(res, prev) {
 	// конфиг mosdns должен по-прежнему соответствовать действующей (прежней) таблице.
 	if (cfg.routing) {
 		U.write_atomic(C.MOSDNS_CONF, mconf);
+		// Дампы прежних поколений кэша (R.cache_dump) mosdns больше не прочитает.
+		let dump = R.cache_dump(cfg, plan);
+		for (let f in lsdir(C.DATA_DIR) ?? [])
+			if (match(f, /^mosdns-cache-[0-9a-f]+.dump$/) && C.DATA_DIR + '/' + f != dump)
+				unlink(C.DATA_DIR + '/' + f);
 		// Метка поколения меняется вместе с данными (списки, Режим, Действия Категорий):
 		// procd сравнивает содержимое файла и перезапускает mosdns; mosdns.json он отслеживает сам.
 		if (readfile(C.STAMP_FILE) != res.gkey)

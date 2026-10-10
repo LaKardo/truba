@@ -1,6 +1,6 @@
 #!/bin/sh
 # DNS: классификация mosdns по Категориям (на синтетических Категориях и подставных DNS-серверах),
-# Блок, AAAA, «Проверить домен/IP» с наборами из ядра, запасной сервер DNS, ленивый кэш и его дамп, занятый порт API,
+# Блок, AAAA, «Проверить домен/IP» с наборами из ядра, запасной сервер DNS, TTL в кэше и для устройств, сброс кэша при смене серверов, ленивый кэш и его дамп, занятый порт API,
 # срок IP из DNS в наборах (ADR 0007), неверные настройки.
 . /repo/tests/router/stand.sh
 
@@ -84,6 +84,43 @@ EOF
 reload "один сервер «Туннеля»"
 wait_for 10 restarted
 
+section "кэш хранит ответ с TTL сервера (не больше часа), устройствам — не больше ttl_max"
+# Сервер «Напрямую» отвечает с TTL 7200. Устройства получают не больше ttl_max (300) и часто перепроверяют
+# адрес, а кэш mosdns держит ответ свежим TTL сервера, но не дольше часа, и не обновляет его в фоне каждые 5 минут.
+dnsmasq --conf-file=/dev/null --port=5403 --listen-address=127.0.0.1 --bind-interfaces --no-resolv --no-hosts \
+	--address=/#/44.0.0.3 --local-ttl=7200 --pid-file=/tmp/up-5403.pid
+PID="$(pidof mosdns)"
+uci -q batch <<-'EOF'
+	delete truba.dns.direct_upstream
+	add_list truba.dns.direct_upstream='udp://127.0.0.1:5403'
+	commit truba
+EOF
+reload "сервер «Напрямую» с TTL 7200"
+wait_for 10 restarted
+# ttl_of ИМЯ IP — TTL A-записи IP в ответе mosdns.
+ttl_of() { ucode /repo/tests/lib/dns_ttl.uc "$(dns_port)" "$1" | awk -v ip="$2" '$1 == ip {print $2}'; }
+ttl_le() { T="$(ttl_of "$1" "$2")"; [ -n "$T" ] && [ "$T" -le "$3" ]; }
+check "клиенту — не больше ttl_max: из сервера и из кэша" eval 'ttl_le keep.zz-dom.trubatest 44.0.0.3 300 && ttl_le keep.zz-dom.trubatest 44.0.0.3 300'
+# В дампе кэша — A-запись 44.0.0.3 с TTL не больше часа: тип 1, класс 1, TTL 3600 (0x00000e10), длина 4, адрес.
+cached_ttl_3600() { curl -s http://127.0.0.1:5336/plugins/cache/dump | gunzip | hexdump -v -e '/1 "%02x"' | grep -q 0001000100000e1000042c000003; }
+check "в кэше — TTL сервера, но не больше часа (7200 → 3600)" cached_ttl_3600
+check "IP — в gs_direct4 до ответа, и из кэша тоже" eval 'nft flush set inet truba gs_direct4 && [ -n "$(ttl_of keep.zz-dom.trubatest 44.0.0.3)" ] && in_set gs_direct4 44.0.0.3'
+
+section "смена серверов DNS — кэш с нуля"
+# Ответ с TTL сервера пережил бы смену настроек на час и больше. Поэтому при смене серверов, Действий
+# Категорий или Режима mosdns начинает с пустым кэшем, а при остальных (ttl_max) кэш сохраняется.
+PID="$(pidof mosdns)"
+uci -q batch <<-'EOF'
+	delete truba.dns.direct_upstream
+	add_list truba.dns.direct_upstream='udp://127.0.0.1:5402'
+	commit truba
+EOF
+reload "сервер «Напрямую» сменился"
+wait_for 10 restarted
+# Тот же запрос, что выше (флаги AD/CD/DO входят в ключ кэша, поэтому не nslookup).
+check "ответ — от нового сервера, а не из кэша" eval '[ "$(ucode /repo/tests/lib/dns_ttl.uc "$(dns_port)" keep.zz-dom.trubatest | cut -d" " -f1 | xargs)" = 44.0.0.2 ]'
+kill "$(cat /tmp/up-5403.pid)"
+
 section "ленивый кэш"
 check "ответ от сервера «Напрямую»" eval '[ "$(ask lazy.zz-dom.trubatest)" = 44.0.0.2 ]'
 sleep 3   # запись истекла (TTL 2 с)
@@ -99,7 +136,7 @@ PID="$(pidof mosdns)"
 uci set truba.dns.ttl_max=299; uci commit truba
 reload "ttl_max"
 check "смена настройки DNS перезапустила mosdns" wait_for 10 restarted
-check "дамп кэша — в /var/lib/truba (tmpfs)" test -s /var/lib/truba/mosdns-cache.dump
+check "дамп кэша — в /var/lib/truba (tmpfs)" eval '[ -s "$(jsonfilter -i /var/etc/truba/mosdns.json -e "@.plugins[@.tag=\"cache\"].args.dump_file")" ] && ls /var/lib/truba/mosdns-cache-*.dump'
 check "после перезапуска запись взята из дампа" eval '[ "$(ask lazy.zz-dom.trubatest)" = 44.0.0.2 ]'
 
 section "API mosdns: порт занят другой программой"

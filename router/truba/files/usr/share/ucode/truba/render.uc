@@ -256,6 +256,26 @@ export function nft_minimal(cfg, ctx) {
 // с pipelining (tls+pipeline://), у UDP соединений нет.
 const UPSTREAM_IDLE = 180;
 
+// Сколько кэш держит ответ свежим, с. Дольше — устаревший ответ живёт заметно дольше ttl_max:
+// - после обновления списков домен, перешедший в другую Категорию, ещё получает ответ прежнего сервера
+//   (маршрут при этом сразу по новой Категории);
+// - mosdns 5.3.3 не пишет в дамп время сохранения, и после перезапуска ответы из дампа уходят
+//   с TTL 1, пока запись не устареет: устройства переспрашивают раз в секунду.
+// Час покрывает TTL большинства ответов, которые ttl_max обрезал бы (у 90 % — меньше 45 минут).
+const CACHE_TTL_MAX = 3600;
+
+// Дамп кэша — по поколению настроек, от которых зависит, у каких серверов спрошен ответ: серверы путей,
+// Режим и Действия Категорий. Кэш хранит ответы с TTL сервера (до часа): после смены этих настроек
+// mosdns начинает с пустым кэшем, а не отдаёт ответы прежних серверов. Остальные настройки
+// (ttl_max, размер кэша) и обновление списков кэш сохраняют. Поколение — FNV-1a 32 бита.
+export function cache_dump(cfg, plan) {
+	let s = sprintf('%J', [ cfg.dns.tunnel, cfg.dns.direct, plan.mode_default, map(plan.geosite, g => g.tag + '=' + g.action) ]);
+	let h = 0x811c9dc5;
+	for (let i = 0; i < length(s); i++)
+		h = ((h ^ ord(s, i)) * 0x01000193) & 0xffffffff;
+	return sprintf('%s/mosdns-cache-%08x.dump', C.DATA_DIR, h);
+};
+
 // «url@dial_ip» → { addr, dial_addr }.
 function upstream(u, mark) {
 	let m = match(u, /^(.*)@([0-9.]+)$/);
@@ -302,7 +322,6 @@ export function mosdns(cfg, plan, router_hosts, gsdir) {
 	let plugins = [];
 	let main = [
 		{ matches: [ 'qtype 28' ], exec: 'reject 0' },   // AAAA → пусто: Маршрутизация только IPv4 (ADR 0005)
-		{ exec: '$cache' },
 	];
 
 	if (length(router_hosts)) {
@@ -321,11 +340,11 @@ export function mosdns(cfg, plan, router_hosts, gsdir) {
 
 	upstream_group(plugins, 'up_tunnel', cfg.dns.tunnel, C.MARK_TUNNEL);
 	upstream_group(plugins, 'up_direct', cfg.dns.direct, null);
-	// Ленивый кэш: истёкшая запись отдаётся сразу (TTL 5 с) и проходит дальше по цепочке, в том числе
-	// через nftset, а свежий ответ запрашивается в фоне по тем же правилам. 0 — выключен.
-	// Дамп в /var (tmpfs): кэш переживает перезапуск mosdns при смене настроек DNS или списков,
-	// но не перезагрузку, и флеш не изнашивается. Пишется при остановке и раз в 10 минут.
-	let cache = { size: cfg.dns.cache_size, dump_file: C.MOSDNS_DUMP };
+	// Ленивый кэш: истёкшая запись отдаётся сразу (TTL 5 с) и проходит дальше по пути, в том числе
+	// через nftset, а свежий ответ запрашивается в фоне у тех же серверов. 0 — выключен.
+	// Дамп в /var (tmpfs): кэш переживает перезапуск mosdns, но не перезагрузку, и флеш не изнашивается.
+	// Пишется при остановке и раз в 10 минут. Имя дампа — по поколению настроек DNS (cache_dump).
+	let cache = { size: cfg.dns.cache_size, dump_file: cache_dump(cfg, plan) };
 	if (cfg.dns.lazy_cache_ttl > 0)
 		cache.lazy_cache_ttl = cfg.dns.lazy_cache_ttl;
 	push(plugins, { tag: 'cache', type: 'cache', args: cache });
@@ -333,23 +352,25 @@ export function mosdns(cfg, plan, router_hosts, gsdir) {
 	let ttl = sprintf('ttl 0-%d', cfg.dns.ttl_max);
 	// nftset в mosdns 5 — только встроенное действие: «семейство,таблица,набор,тип,маска».
 	let nftset = (set) => sprintf('nftset inet,%s,%s,ipv4_addr,32', C.NFT_TABLE, set);
-	// Ответ из кэша тоже проходит через nftset: после пересборки наборов IP возвращаются сами.
-	push(plugins, { tag: 'flow_tunnel', type: 'sequence', args: [
-		{ matches: [ '!has_resp' ], exec: '$up_tunnel' },
-		{ exec: ttl },
-		{ exec: nftset('gs_tunnel4') },
-	] });
-	push(plugins, { tag: 'flow_direct', type: 'sequence', args: [
-		{ matches: [ '!has_resp' ], exec: '$up_direct' },
-		{ exec: ttl },
-		{ exec: nftset('gs_direct4') },
-	] });
-	push(plugins, { tag: 'flow_router', type: 'sequence', args: [
-		{ matches: [ '!has_resp' ], exec: '$up_direct' },
-	] });
-	push(plugins, { tag: 'flow_default', type: 'sequence', args: [
-		{ matches: [ '!has_resp' ], exec: (plan.mode_default == 'tunnel') ? '$up_tunnel' : '$up_direct' },
-	] });
+	// Путь ответа: fetch_* — кэш и серверы, затем, для Категорий, TTL и nftset. Кэш сохраняет ответ,
+	// когда fetch_* завершилась, — с TTL сервера, но не дольше CACHE_TTL_MAX; устройства получают не
+	// больше ttl_max и часто перепроверяют адрес, а запись в кэше не устаревает раньше срока и не
+	// обновляется в фоне каждые ttl_max. Ответ из кэша тоже проходит через nftset — до ответа
+	// устройству: после пересборки наборов IP возвращаются сами. Фоновое обновление ленивого кэша
+	// идёт только в fetch_*: новые IP попадут в набор со следующим ответом устройству, тоже до него.
+	let up_default = (plan.mode_default == 'tunnel') ? '$up_tunnel' : '$up_direct';
+	for (let f in [ [ 'tunnel', '$up_tunnel', 'gs_tunnel4' ], [ 'direct', '$up_direct', 'gs_direct4' ],
+	                [ 'router', '$up_direct' ], [ 'default', up_default ] ]) {
+		push(plugins, { tag: 'fetch_' + f[0], type: 'sequence', args: [
+			{ exec: '$cache' },
+			{ matches: [ '!has_resp' ], exec: f[1] },
+			{ exec: sprintf('ttl 0-%d', CACHE_TTL_MAX) },
+		] });
+		let flow = [ { exec: '$fetch_' + f[0] } ];
+		if (f[2])
+			push(flow, { exec: ttl }, { exec: nftset(f[2]) });
+		push(plugins, { tag: 'flow_' + f[0], type: 'sequence', args: flow });
+	}
 
 	push(plugins, { tag: 'main', type: 'sequence', args: main });
 

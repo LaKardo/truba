@@ -159,6 +159,17 @@ for (let p in three.plugins) {
 let top = filter(three.plugins, p => p.tag == 'up_tunnel')[0];
 check('mosdns: три сервера — каждый в своём forward, все под up_tunnel, ссылки только назад',
 	refs_ok && top?.type == 'fallback' && top.args.always_standby && length(filter(servers, a => index(a, 'udp://192.0.2.') == 0)) == 3);
+// Поколение кэша: меняется вместе с серверами, Режимом и Действиями, но не с ttl_max.
+let gen = (dns, p) => R.cache_dump(mk(dns), p ?? plan);
+check('кэш: дамп по поколению — новый при смене серверов, Режима и Действия, прежний при смене ttl_max',
+	match(gen(), /^\/var\/lib\/truba\/mosdns-cache-[0-9a-f]{8}\.dump$/) && gen({ ttl_max: 60 }) == gen() &&
+	gen({ direct: [ 'udp://192.0.2.9' ] }) != gen() && gen(null, sel) != gen() &&
+	gen(null, { ...plan, geosite: map(plan.geosite, (g, i) => i ? g : { ...g, action: (g.action == 'tunnel') ? 'direct' : 'tunnel' }) }) != gen());
+check('mosdns: кэш — в цепочке каждого пути, ответ в нём свежий не дольше часа; TTL и nftset — после неё, только у Категорий',
+	!length(filter(filter(three.plugins, p => p.tag == 'main')[0].args, x => x.exec == '$cache')) &&
+	length(filter(three.plugins, p => match(p.tag, /^fetch_/) && p.args[0].exec == '$cache' && p.args[2].exec == 'ttl 0-3600')) == 4 &&
+	filter(three.plugins, p => p.tag == 'flow_direct')[0].args[1].exec == 'ttl 0-300' &&
+	length(filter(three.plugins, p => p.tag == 'flow_default')[0].args) == 1);
 check('mosdns: у каждого сервера idle_timeout, один сервер — просто forward',
 	length(filter(three.plugins, p => p.type == 'forward' && p.args.upstreams[0].idle_timeout != 180)) == 0 &&
 	filter(three.plugins, p => p.tag == 'up_direct')[0]?.type == 'forward');
