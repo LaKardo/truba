@@ -286,6 +286,23 @@ export function connected_subnets() {
 	return uniq(out);
 };
 
+// Подсети всех IPv4-адресов Роутера — их dnsmasq с --local-service считает локальными и отвечает
+// только им. У адреса /32 (mesh-VPN) подсеть — он сам: узлы такой сети для dnsmasq чужие.
+export function local_subnets() {
+	let r = U.run('ip -4 -j addr show');
+	let out = [];
+	try {
+		for (let l in json(r.out) ?? [])
+			for (let a in l.addr_info ?? []) {
+				let rg = U.cidr_range(a.local + '/' + a.prefixlen);
+				if (rg)
+					push(out, U.int2ip(rg[0]) + '/' + a.prefixlen);
+			}
+	}
+	catch (e) { }
+	return uniq(out);
+};
+
 // Хосты, которые сам Роутер должен резолвить напрямую: NTP, зеркала списков, endpoint.
 export function router_hosts(cfg, tinfo) {
 	let c = cursor();

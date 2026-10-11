@@ -126,7 +126,7 @@ return view.extend({
 		o.default = 'all';
 
 		o = s.option(widgets.ZoneSelect, 'zone', _('Zones'),
-			_('Firewall zones whose devices are routed. Other zones go direct.'));
+			_('Firewall zones whose devices are routed. Forwarding from them to zone «truba» is added automatically. Other zones go direct.'));
 		o.multiple = true;
 		o.nocreate = true;
 		o.default = 'lan';

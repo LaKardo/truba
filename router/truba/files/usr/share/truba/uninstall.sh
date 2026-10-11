@@ -21,7 +21,11 @@ if [ -f "$ORIG" ]; then
 fi
 
 uci -q delete firewall.truba
-uci -q delete firewall.lan_truba
+# Перенаправления в зону truba — и свои (<зона>_truba), и заведённые владельцем: зоны больше нет.
+# -X — настоящие имена секций: номера @forwarding[N] сдвигаются после каждого удаления.
+for s in $(uci -q -X show firewall | sed -n "s/^firewall\.\([^.]*\)\.dest='truba'$/\1/p"); do
+	[ "$(uci -q get "firewall.$s")" = forwarding ] && uci -q delete "firewall.$s"
+done
 uci -q delete firewall.truba_no_ipv6_inet
 uci -q commit firewall
 /etc/init.d/firewall reload >/dev/null 2>&1

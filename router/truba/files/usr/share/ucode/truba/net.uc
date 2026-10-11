@@ -155,6 +155,66 @@ export function dnsmasq_restore() {
 	return true;
 };
 
+// ---- Межсетевой экран: перенаправления зон Маршрутизации в зону Туннеля ----
+
+// Своя секция перенаправления зоны: <зона>_truba (имя секции UCI — только буквы, цифры и «_»).
+function fwd_name(zone) {
+	return replace(zone, /[^A-Za-z0-9_]/g, '_') + '_' + C.FW_ZONE;
+}
+
+// Без перенаправления зоны в truba fw4 отбрасывает трафик её устройств, которому Труба выбрала Туннель
+// (ADR 0014). У каждой выбранной зоны оно должно быть: нет никакого — Труба заводит своё, секцию
+// fwd_name(). Перенаправления владельца (любое другое имя) засчитываются и не трогаются, а свои
+// секции зон, которые больше не выбраны или удалены, убираются. Межсетевой экран перезагружается,
+// только если что-то изменилось.
+export function forwardings_set(zones) {
+	let c = cursor();
+	c.load('firewall');
+	let exist = {};
+	c.foreach('firewall', 'zone', (z) => {
+		if (z.name)
+			exist[z.name] = true;
+	});
+	let want = {};
+	if (exist[C.FW_ZONE])
+		for (let z in zones)
+			if (exist[z] && z != C.FW_ZONE)
+				want[z] = true;
+
+	let changed = false, drop = [], have = {};
+	c.foreach('firewall', 'forwarding', (f) => {
+		if (f.dest != C.FW_ZONE || !f.src)
+			return;
+		if (f['.name'] == fwd_name(f.src) && !want[f.src])
+			push(drop, f['.name']);
+		else
+			have[f.src] = true;
+	});
+	for (let sid in drop) {
+		c.delete('firewall', sid);
+		changed = true;
+	}
+	for (let z in want) {
+		if (have[z])
+			continue;
+		let sid = fwd_name(z);
+		// Имя занято чужой секцией — её не трогаем.
+		if (c.get('firewall', sid) != null) {
+			U.err(sprintf('межсетевой экран: секция %s уже есть — перенаправление %s → %s не заведено', sid, z, C.FW_ZONE));
+			continue;
+		}
+		c.set('firewall', sid, 'forwarding');
+		c.set('firewall', sid, 'src', z);
+		c.set('firewall', sid, 'dest', C.FW_ZONE);
+		changed = true;
+	}
+	if (!changed)
+		return false;
+	c.commit('firewall');
+	system('/etc/init.d/firewall reload >/dev/null 2>&1');
+	return true;
+};
+
 // ---- cron: блок между маркерами ----
 
 const CRONTAB = '/etc/crontabs/root';

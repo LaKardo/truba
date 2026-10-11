@@ -26,7 +26,8 @@ uci -q set firewall.@defaults[0].flow_offloading_hw='0'
 IFACE="$(uci -q get truba.main.iface)"
 IFACE="${IFACE:-awg0}"
 
-# Зона Туннеля: masq + fullcone, вход на сам Роутер закрыт.
+# Зона Туннеля: masq + fullcone, вход на сам Роутер закрыт. Перенаправления в неё из зон
+# Маршрутизации (lan_truba и другие) заводит служба при каждом применении (ADR 0014).
 if [ -z "$(uci -q get firewall.truba)" ]; then
 	uci -q batch <<-EOF
 		set firewall.truba=zone
@@ -37,14 +38,6 @@ if [ -z "$(uci -q get firewall.truba)" ]; then
 		set firewall.truba.forward='REJECT'
 		set firewall.truba.masq='1'
 		set firewall.truba.mtu_fix='1'
-	EOF
-fi
-
-if [ -z "$(uci -q get firewall.lan_truba)" ]; then
-	uci -q batch <<-EOF
-		set firewall.lan_truba=forwarding
-		set firewall.lan_truba.src='lan'
-		set firewall.lan_truba.dest='truba'
 	EOF
 fi
 

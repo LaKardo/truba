@@ -1,11 +1,12 @@
 #!/bin/sh
 # Путь пакетов: что ставит установка, правила и маршруты после применения, входящие через
-# Туннель, свои сокеты Роутера, чужие цепочки nftables и mesh-VPN (ADR 0011), DSCP Туннеля, учёт трафика, Политика
+# Туннель, свои сокеты Роутера, чужие цепочки nftables и mesh-VPN (ADR 0011), mesh-VPN как зона Маршрутизации:
+# перенаправление в truba и DNS (ADR 0014), DSCP Туннеля, учёт трафика, Политика
 # устройства, Аварийная блокировка, Маршрутизация выкл, Режим «Выборочный», teardown, uninstall.
 . /repo/tests/router/stand.sh
 
 section "установка (uci-defaults)"
-check "зона truba и форвардинг lan → truba" eval '[ "$(uci -q get firewall.truba.name)" = truba ] && [ "$(uci -q get firewall.lan_truba.dest)" = truba ]'
+check "зона truba (установка) и перенаправление lan → truba (применение)" eval '[ "$(uci -q get firewall.truba.name)" = truba ] && [ "$(uci -q get firewall.lan_truba.dest)" = truba ]'
 check "fullcone включён, аппаратное ускорение выключено" eval '[ "$(uci -q get firewall.@defaults[0].fullcone)" = 1 ] && [ "$(uci -q get firewall.@defaults[0].flow_offloading_hw)" = 0 ]'
 check "программное ускорение не тронуто" cmp -s /tmp/offload.before /tmp/offload.after
 check "IPv6 из lan в интернет — REJECT, IPv6 сети не тронут" eval '[ "$(uci -q get firewall.truba_no_ipv6_inet.family)" = ipv6 ] && [ "$(uci -q get dhcp.lan.ra)" != disabled ]'
@@ -179,6 +180,51 @@ for v in fixed buggy; do
 	nft delete table ip t_mesh
 done
 check "свои сокеты службы (0x80000) — мимо Туннеля" eval 'ip route get 203.0.113.77 mark 0x80000 | grep -q "dev inet0"'
+
+section "mesh-VPN — зона Маршрутизации (ADR 0014)"
+# Зона mesh выбрана в «Маршрутизация → Зоны»: перенаправление mesh → truba заводит сама Труба, узлы
+# сети идут по Категориям, как домашняя сеть. Адрес ms0 — /32: для dnsmasq с --local-service узлы
+# чужие, и он им не отвечает; перехват Трубы подменяет им источник на адрес Роутера.
+mesh_tunnel() { ip netns exec meshhost ucode /repo/tests/lib/tcp_probe.uc client 100.64.0.2 1.2.3.5 48081; }
+# DNS-ответ на localhost — из /etc/hosts Роутера: ответил dnsmasq, куда бы ни был адресован запрос.
+dns_from() { ip netns exec "$1" ucode /repo/tests/lib/dns_ttl.uc 53 localhost "$2" | grep -q '^127\.0\.0\.1 '; }
+# Запрос устройства, которое dnsmasq видит под его собственным адресом: ответ conntrack — ему, а не Роутеру.
+conn_real() { grep -q "src=$1 dst=8.8.8.8 .*dport=53 .*src=$2 dst=$1 " /proc/net/nf_conntrack; }
+check "до: dnsmasq узлу сети не отвечает" eval '! dns_from meshhost 100.64.0.1'
+uci add_list truba.main.zone='mesh'; uci commit truba
+reload "зона mesh выбрана"
+check "перенаправление mesh → truba заведено, ms0 — в lan_if" eval '[ "$(uci -q get firewall.mesh_truba.src)" = mesh ] && [ "$(uci -q get firewall.mesh_truba.dest)" = truba ] && in_set lan_if ms0'
+check "узел сети → Туннель (по Режиму)" mesh_tunnel
+uci delete firewall.mesh_truba; uci commit firewall; /etc/init.d/firewall reload >/dev/null 2>&1
+check "без перенаправления fw4 отбрасывает трафик узла в Туннель" eval '! mesh_tunnel'
+reload "перенаправление удалено вручную"
+check "применение заводит перенаправление снова" eval '[ "$(uci -q get firewall.mesh_truba.dest)" = truba ] && mesh_tunnel'
+check "узел сети: DNS к чужому серверу перехвачен, dnsmasq ответил" dns_from meshhost 8.8.8.8
+check "узел сети: DNS к адресу Роутера — тоже" dns_from meshhost 100.64.0.1
+check "устройство домашней сети: DNS перехвачен, источник не подменён" eval 'in_set local4 192.168.1.0/24 && dns_from lanhost 8.8.8.8 && conn_real 192.168.1.50 192.168.1.1'
+ip addr add 10.99.0.1/24 dev ms0
+truba refresh-bypass
+check "новая подсеть Роутера — в local4 после refresh-bypass" in_set local4 10.99.0.0/24
+ip addr del 10.99.0.1/24 dev ms0
+uci del_list truba.main.zone='mesh'; uci commit truba
+reload "зона mesh убрана"
+check "своё перенаправление mesh → truba убрано, lan → truba на месте" eval '[ -z "$(uci -q get firewall.mesh_truba)" ] && [ "$(uci -q get firewall.lan_truba.dest)" = truba ]'
+# Перенаправление, которое владелец завёл сам: засчитывается, второе не заводится, без зоны остаётся.
+uci -q batch <<-'EOF'
+	set firewall.my_mesh=forwarding
+	set firewall.my_mesh.src='mesh'
+	set firewall.my_mesh.dest='truba'
+	commit firewall
+	add_list truba.main.zone='mesh'
+	commit truba
+EOF
+/etc/init.d/firewall reload >/dev/null 2>&1
+reload "зона mesh и перенаправление владельца"
+check "перенаправление владельца засчитано — своего Труба не заводит" eval '[ -z "$(uci -q get firewall.mesh_truba)" ] && mesh_tunnel'
+uci del_list truba.main.zone='mesh'; uci commit truba
+reload "зона mesh убрана снова"
+check "перенаправление владельца не тронуто" test "$(uci -q get firewall.my_mesh.dest)" = truba
+uci delete firewall.my_mesh; uci commit firewall; /etc/init.d/firewall reload >/dev/null 2>&1
 ip -n vps addr del 1.2.3.5/32 dev lo
 for p in $(ip netns pids meshhost); do kill "$p"; done
 ip netns del meshhost
@@ -297,8 +343,15 @@ check "таблица, ip rule и table 77 сняты" eval '! nft list table in
 check "без Трубы ответ на входящее уходит мимо Туннеля" eval '! probe'
 
 section "uninstall"
+# Перенаправление в truba, которое владелец завёл сам (секция без имени), удаляется вместе с зоной.
+uci -q batch >/dev/null <<-'EOF'
+	add firewall forwarding
+	set firewall.@forwarding[-1].src='wan'
+	set firewall.@forwarding[-1].dest='truba'
+	commit firewall
+EOF
 sh /usr/share/truba/uninstall.sh
-check "зона truba удалена, аппаратное ускорение возвращено" eval '[ -z "$(uci -q get firewall.truba)" ] && [ "$(uci -q get firewall.@defaults[0].flow_offloading_hw)" = 1 ]'
+check "зона truba и перенаправления в неё удалены, аппаратное ускорение возвращено" eval '[ -z "$(uci -q get firewall.truba)" ] && ! uci -q show firewall | grep -q "dest=.truba.$" && [ "$(uci -q get firewall.@defaults[0].flow_offloading_hw)" = 1 ]'
 check "данные службы удалены: Наборы правил, копия правил, распакованные списки" eval '[ ! -e /etc/truba/lists ] && [ ! -e /etc/truba/state ] && [ ! -e /etc/truba/good ] && [ ! -e /var/lib/truba ]'
 
 finish

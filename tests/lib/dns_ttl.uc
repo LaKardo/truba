@@ -1,17 +1,18 @@
-// Запрос A к DNS-серверу на 127.0.0.1: печатает «IP TTL» на каждую A-запись ответа (tests/router).
-//   ucode dns_ttl.uc PORT NAME
+// Запрос A к DNS-серверу (по умолчанию 127.0.0.1): печатает «IP TTL» на каждую A-запись ответа (tests/router).
+// Нет ответа за 3 с — код 1.
+//   ucode dns_ttl.uc PORT NAME [SERVER]
 'use strict';
 
 import * as socket from 'socket';
 
-const port = +ARGV[0], name = ARGV[1];
+const port = +ARGV[0], name = ARGV[1], server = ARGV[2] ?? '127.0.0.1';
 let q = chr(0x12, 0x34, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0);
 for (let l in split(name, '.'))
 	q += chr(length(l)) + l;
 q += chr(0, 0, 1, 0, 1);
 
 const s = socket.create(socket.AF_INET, socket.SOCK_DGRAM);
-s.connect({ address: '127.0.0.1', port });
+s.connect({ address: server, port });
 s.send(q);
 const pr = socket.poll(3000, [ s, socket.POLLIN ]);
 if (!length(pr) || !pr[0][1])
