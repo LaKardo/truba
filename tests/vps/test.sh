@@ -469,8 +469,9 @@ if apt-get install -y -qq unbound bind9-dnsutils ca-certificates >/dev/null 2>&1
 	/usr/libexec/unbound-helper root_trust_anchor_update >/dev/null 2>&1
 	if out=$(unbound-checkconf 2>&1); then ok "unbound: конфиг вместе с файлами пакета проходит проверку"; else fail "unbound-checkconf: $out"; fi
 	[ "$(stat -c %a "$UNBOUND_CONF")" = 644 ] && ok "unbound: конфиг читаем службой" || fail "unbound: права конфига"
-	grep -qx '    forward-tls-upstream: yes' "$UNBOUND_CONF" && [ "$(grep -cE '^    forward-addr: [0-9.]+@853#(cloudflare-dns\.com|dns\.google)$' "$UNBOUND_CONF")" -eq 4 ] \
-		&& ok "unbound: к Cloudflare и Google — только по TLS, с проверкой имени сервера" || fail "unbound: пересылка по TLS"
+	grep -qx '    forward-tls-upstream: yes' "$UNBOUND_CONF" \
+		&& [ "$(grep -E '^    forward-addr:' "$UNBOUND_CONF" | xargs)" = "forward-addr: 1.1.1.1@853#cloudflare-dns.com forward-addr: 8.8.8.8@853#dns.google" ] \
+		&& ok "unbound: к Cloudflare и Google — только по TLS, с проверкой имени сервера, по одному адресу" || fail "unbound: пересылка по TLS: $(grep forward-addr "$UNBOUND_CONF" | xargs)"
 	# Выбор самого быстрого адреса залипает на Google (ADR 0013): промахи делятся между всеми адресами.
 	[ "$(unbound-checkconf -o fast-server-permil)" = 0 ] \
 		&& ok "unbound: промахи — всем адресам, без выбора самого быстрого" || fail "unbound: fast-server-permil $(unbound-checkconf -o fast-server-permil)"

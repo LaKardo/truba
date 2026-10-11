@@ -682,6 +682,9 @@ setup_awg_service() {
 # времени ответа с поправкой на разброс и залипает на Google. У Cloudflare ответ то 5 мс по открытому
 # соединению, то 19 мс и больше с новым (простаивающий DoT он закрывает через 10 с): разброс большой,
 # он проигрывает и дальше получает только редкие запросы на остывшее соединение (ADR 0013).
+# Адресов пересылки два, по одному у Cloudflare и Google: промахи делятся на меньшее число
+# соединений, и каждое реже простаивает дольше 10 с. С четырьмя адресами медленных (дольше 65 мс)
+# ответов было вдвое больше. Если один адрес недоступен, unbound уходит на другого поставщика.
 write_unbound_conf() {
 	put_file 644 "$UNBOUND_CONF" <<-EOF
 		# Труба: DNS для Роутера. Сгенерировано install-vps.sh
@@ -702,10 +705,9 @@ write_unbound_conf() {
 		forward-zone:
 		    name: "."
 		    forward-tls-upstream: yes
+		    # По одному адресу у каждого: соединение с ним реже остывает (ADR 0013).
 		    forward-addr: 1.1.1.1@853#cloudflare-dns.com
-		    forward-addr: 1.0.0.1@853#cloudflare-dns.com
 		    forward-addr: 8.8.8.8@853#dns.google
-		    forward-addr: 8.8.4.4@853#dns.google
 	EOF
 	UNBOUND_CONF_CHANGED=$FILE_CHANGED
 }
