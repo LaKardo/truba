@@ -138,9 +138,9 @@ export function load() {
 		push(bad, { key: 'dns.set_timeout', value: '' + d.set_timeout });
 		cfg.dns.set_timeout = 86400;
 	}
-	// HTTP API mosdns (счётчики кэша для «Обзора») — на соседнем с DNS порту, только 127.0.0.1.
+	// HTTP API mosdns (счётчики кэша для «Обзора») — на соседнем с DNS порту, на адресе mosdns.
 	let p = cfg.dns.port;
-	cfg.dns.api = sprintf('127.0.0.1:%d', (p < 65535) ? p + 1 : p - 1);
+	cfg.dns.api = sprintf('%s:%d', C.MOSDNS_ADDR, (p < 65535) ? p + 1 : p - 1);
 
 	c.foreach('truba', 'rule', (s) => {
 		if (!s.set || !s.tag || !(s.action in C.ACTIONS))

@@ -10,10 +10,11 @@ import * as C from 'truba.const';
 import * as U from 'truba.util';
 import * as S from 'truba.state';
 
-const STEP = 5;           // точки — раз в 5 с
-const FINE_SPAN = 3600;   // за последний час
-const MIN_STEP = 60;      // поминутные средние
-const MIN_SPAN = 86400;   // за сутки
+// Шаг и сроки — C.HISTORY: те же у графика «Обзора» и у rpcd (rates).
+const STEP = C.HISTORY.fine.step;       // точки — раз в 5 с
+const FINE_SPAN = C.HISTORY.fine.span;  // за последний час
+const MIN_STEP = C.HISTORY.min.step;    // поминутные средние
+const MIN_SPAN = C.HISTORY.min.span;    // за сутки
 
 // Значения точки после времени: байт/с к устройствам и от них по Действиям, затем новых
 // соединений в минуту. В поминутных средних — только первые MIN_VALUES: их рисует график.

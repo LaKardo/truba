@@ -403,11 +403,11 @@ export function mosdns(cfg, plan, router_hosts, gsdir) {
 
 	push(plugins, { tag: 'main', type: 'sequence', args: main });
 
-	let listen = sprintf('127.0.0.1:%d', cfg.dns.port);
+	let listen = sprintf('%s:%d', C.MOSDNS_ADDR, cfg.dns.port);
 	push(plugins, { tag: 'udp_in', type: 'udp_server', args: { entry: 'main', listen } });
 	push(plugins, { tag: 'tcp_in', type: 'tcp_server', args: { entry: 'main', listen } });
 
-	// API — ради счётчиков кэша (/metrics) на «Обзоре». Только 127.0.0.1: там же mosdns отдаёт
+	// API — ради счётчиков кэша (/metrics) на «Обзоре». Только MOSDNS_ADDR: там же mosdns отдаёт
 	// и /debug/pprof, снаружи Роутера их не видно. Нет адреса — порт занят, без API.
 	let conf = { log: { level: 'warn' }, plugins };
 	if (cfg.dns.api)

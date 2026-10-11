@@ -29,9 +29,6 @@ export function ping_rtt(dev, target) {
 	return m ? +m[1] : null;
 };
 
-// Окно последних проверок для «Обзора»: задержка и потери за ~10 минут при интервале 30 с.
-const PROBE_WINDOW = 20;
-
 function iface_mtu(dev) {
 	return int(trim(readfile('/sys/class/net/' + dev + '/mtu') ?? '0'));
 }
@@ -77,8 +74,8 @@ function run_tunnel_test() {
 		push(sizes, 1028);
 	if (mtu > 84)
 		push(sizes, mtu);
-	let dir = trim(U.run('mktemp -d /tmp/truba-tt.XXXXXX').out);
-	if (!match(dir, /^\/tmp\/truba-tt\./))
+	let dir = trim(U.run('mktemp -d ' + C.TT_TMP + '.XXXXXX').out);
+	if (substr(dir, 0, length(C.TT_TMP) + 1) != C.TT_TMP + '.')
 		return { error: 'tmp' };
 	let cmd = '';
 	for (let s in sizes)
@@ -132,13 +129,13 @@ export function run() {
 	let fresh = prev && time() - (prev.last_check ?? 0) <= 3 * cfg.watchdog.interval && prev.interval == cfg.watchdog.interval;
 	let state = prev?.state ?? 'healthy';
 	let since = (fresh && prev.since) ? prev.since : time(), fails = 0;
-	let probes = (fresh && type(prev.probes) == 'array') ? slice(prev.probes, -PROBE_WINDOW) : [];   // задержки, мс; null — потеря
+	let probes = (fresh && type(prev.probes) == 'array') ? slice(prev.probes, -C.PROBE_WINDOW) : [];   // задержки, мс; null — потеря
 	let big = fresh ? prev.big : null, big_n = 0;   // итог big_probe
 	let timer;
 
 	let probed = (rtt) => {
 		push(probes, rtt);
-		if (length(probes) > PROBE_WINDOW)
+		if (length(probes) > C.PROBE_WINDOW)
 			shift(probes);
 	};
 
@@ -196,7 +193,7 @@ export function run() {
 				// В фоне: проверка ждёт ответов до 4,5 с, а цикл не должен.
 				if (nat_due(since)) {
 					nat_started = time();
-					system('( /usr/sbin/truba nat-test auto >/dev/null 2>&1 & )');
+					system('( ' + C.CLI + ' nat-test auto >/dev/null 2>&1 & )');
 				}
 				// Итога нет или он старше подъёма Туннеля — проверить сейчас, иначе раз в BIG_EVERY.
 				if (probe && (big == null || big.time < since || ++big_n >= BIG_EVERY)) {

@@ -397,10 +397,11 @@ check('часы назад: точки по возрастанию, минуты
 
 let api = loadfile(PLUGIN)()?.truba;
 check('API: плагин регистрирует объект truba', api?.status != null);
+check('API: плагин без своих путей и своей shq', !match(readfile(PLUGIN), /'\/(var|usr|tmp|etc)\/|function shq/));
 let now = time();
-system([ 'mkdir', '-p', '/var/run/truba' ]);
-writefile('/var/run/truba/rates.json', sprintf('%J', { step: 5, points: [ [ now - 700, 1, 1, 1, 1 ], [ now - 300, 2, 2, 2, 2 ], [ now - 10 ], [ now - 5, 3, 3, 3, 3 ] ] }));
-writefile('/var/run/truba/rates-min.json', sprintf('%J', { step: 60, points: [ [ now - 90000, 1, 1, 1, 1 ], [ now - 120, 2, 2, 2, 2 ] ] }));
+system([ 'mkdir', '-p', C.RUN_DIR ]);
+writefile(C.RATES_FILE, sprintf('%J', { step: 5, points: [ [ now - 700, 1, 1, 1, 1 ], [ now - 300, 2, 2, 2, 2 ], [ now - 10 ], [ now - 5, 3, 3, 3, 3 ] ] }));
+writefile(C.RATES_MIN_FILE, sprintf('%J', { step: 60, points: [ [ now - 90000, 1, 1, 1, 1 ], [ now - 120, 2, 2, 2, 2 ] ] }));
 let rates = (args) => api.rates.call({ args });
 let rr = rates({ span: 600 });
 check('API rates: только точки за срок, разрыв тоже точка', rr.step == 5 && same(map(rr.points, p => p[0]), [ now - 300, now - 10, now - 5 ]),
