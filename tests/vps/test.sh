@@ -471,9 +471,9 @@ if apt-get install -y -qq unbound bind9-dnsutils ca-certificates >/dev/null 2>&1
 	[ "$(stat -c %a "$UNBOUND_CONF")" = 644 ] && ok "unbound: конфиг читаем службой" || fail "unbound: права конфига"
 	grep -qx '    forward-tls-upstream: yes' "$UNBOUND_CONF" && [ "$(grep -cE '^    forward-addr: [0-9.]+@853#(cloudflare-dns\.com|dns\.google)$' "$UNBOUND_CONF")" -eq 4 ] \
 		&& ok "unbound: к Cloudflare и Google — только по TLS, с проверкой имени сервера" || fail "unbound: пересылка по TLS"
-	# Выбор быстрого сервера по умолчанию выключен (0): проверяем, что unbound берёт его из нашего файла.
-	[ "$(unbound-checkconf -o fast-server-permil)" = 900 ] && [ "$(unbound-checkconf -o fast-server-num)" = 1 ] \
-		&& ok "unbound: промахи — самому быстрому адресу" || fail "unbound: fast-server $(unbound-checkconf -o fast-server-permil)/$(unbound-checkconf -o fast-server-num)"
+	# Выбор самого быстрого адреса залипает на Google (ADR 0013): промахи делятся между всеми адресами.
+	[ "$(unbound-checkconf -o fast-server-permil)" = 0 ] \
+		&& ok "unbound: промахи — всем адресам, без выбора самого быстрого" || fail "unbound: fast-server-permil $(unbound-checkconf -o fast-server-permil)"
 	# Адреса Туннеля ещё нет: awg0 поднимается позже, а unbound всё равно стартует.
 	unbound -d >"$STATE_DIR/unbound.log" 2>&1 & UB=$!
 	listening() { ss -Hlnu '( sport = :53 )' | grep -q '10.77.77.1:53'; }
