@@ -25,11 +25,17 @@ const KIND_LEVELS = { tunnel: common.ACTION_LEVELS.tunnel, direct: common.ACTION
 // начаты заново). fine — точки по 5 с за час, min — поминутные средние за сутки (в них
 // только значения графика), загружаются, когда выбраны 24 ч. now — время Роутера на
 // последнем ответе: ось строится по нему, а не по часам компьютера — они могут расходиться.
+// Шаг и срок (span, step) — у службы (truba.schema, consts.history): их задаёт load().
 const hist = {
-	fine: { span: 3600, step: POLL, points: [], loaded: false },
-	min: { span: 86400, step: 60, points: [], loaded: false },
+	fine: { span: null, step: null, points: [], loaded: false },
+	min: { span: null, step: null, points: [], loaded: false },
 	now: null
 };
+
+function setHistory(h) {
+	for (const k of [ 'fine', 'min' ])
+		Object.assign(hist[k], { span: h[k].span, step: h[k].step });
+}
 
 // Места значений в точке: к устройствам, от устройств, новых соединений в минуту.
 const COLS = { tunnel: { down: 1, up: 2, conn: 7 }, direct: { down: 3, up: 4, conn: 8 }, inbound: { down: 5, up: 6, conn: 9 } };
@@ -198,7 +204,7 @@ function failedSets(last) {
 // Автообновление идёт раз в сутки; проверка старше 36 ч — cron не запускал его или он падал.
 function listsStale(st) {
 	const last = st.lists?.last;
-	return st.routing && uci.get('truba', 'lists', 'auto_update') != '0' && !st.lists?.updating
+	return st.routing && common.get('lists', 'auto_update') && !st.lists?.updating
 		&& (!last || Date.now() / 1000 - last.time > 36 * 3600);
 }
 
@@ -275,7 +281,7 @@ function buildPage(iface) {
 			? uci.unset('network', iface, 'disabled')
 			: uci.set('network', iface, 'disabled', '1')));
 	r.tRouting = tile(_('Routing'), 'routing', _('Mode and categories'),
-		toggle(_('Routing enabled'), uci.get('truba', 'main', 'routing') != '0', false, (on) =>
+		toggle(_('Routing enabled'), common.get('main', 'routing'), false, (on) =>
 			uci.set('truba', 'main', 'routing', on ? '1' : '0')));
 	r.tDns = tile(_('DNS & lists'), 'dns', _('DNS and rule sets'));
 	r.tInbound = tile(_('Inbound'), 'inbound', _('NAT and port forwards'));
@@ -352,8 +358,8 @@ function paintWarnings(r, list) {
 function update(r, st) {
 	const t = st.tunnel || {}, awg = t.awg || {}, h = st.health || {}, c = st.counters || {};
 	const a = st.applied || {}, l = st.lists || {}, n = st.nat, up = st.upnp || {};
-	const wdOn = uci.get('truba', 'watchdog', 'enabled') != '0';
-	const auto = uci.get('truba', 'lists', 'auto_update') != '0';
+	const wdOn = common.get('watchdog', 'enabled');
+	const auto = common.get('lists', 'auto_update');
 
 	// Туннель: задержка, handshake, потери и крупные пакеты — подробности на его вкладке.
 	const [ tLevel, tText ] = common.tunnelState(st);
@@ -375,7 +381,7 @@ function update(r, st) {
 	const pct = (nt + nd) ? Math.round(nt * 100 / (nt + nd)) : null;
 	common.setText(r.tRouting.l1, !st.routing ? _('inbound via the Truba IP keeps working')
 		: pct == null ? _('No outgoing connections yet.') : _('%d%% of new connections via tunnel').format(pct));
-	common.setText(r.tRouting.l2, _('Zones: %s').format(L.toArray(uci.get('truba', 'main', 'zone')).join(', ') || 'lan'));
+	common.setText(r.tRouting.l2, _('Zones: %s').format(common.get('main', 'zone').join(', ')));
 
 	// DNS и списки.
 	const failed = failedSets(l.last).length > 0;
@@ -409,7 +415,8 @@ function update(r, st) {
 	common.setText(r.tInbound.l1, !n ? (wdOn ? _('runs by itself after the tunnel comes up') : _('never'))
 		: n.error ? (common.NAT_ERRORS[n.error] || n.error)
 		: _('NAT checked %s').format(common.fmtTime(n.time)));
-	const forwards = uci.sections('firewall', 'redirect').filter((x) => x.src == 'truba' && x.enabled != '0').length;
+	const zone = common.schema().consts.fw_zone;
+	const forwards = uci.sections('firewall', 'redirect').filter((x) => x.src == zone && x.enabled != '0').length;
 	common.setText(r.tInbound.l2, '%s · %s'.format(up.enabled ? _('UPnP mappings: %d').format((up.leases || []).length) : _('UPnP off'),
 		_('manual forwards: %d').format(forwards)));
 
@@ -445,7 +452,11 @@ function update(r, st) {
 
 return view.extend({
 	load: function() {
-		return Promise.all([ common.callStatus(), uci.load('network'), uci.load('truba'), uci.load('firewall'), fetchHistory() ]);
+		// Сроки истории — из схемы службы: без них fetchHistory не знает, сколько точек просить.
+		return common.loadSchema().then((s) => {
+			setHistory(s.consts.history);
+			return Promise.all([ common.callStatus(), uci.load('network'), uci.load('truba'), uci.load('firewall'), fetchHistory() ]);
+		});
 	},
 
 	render: function(data) {

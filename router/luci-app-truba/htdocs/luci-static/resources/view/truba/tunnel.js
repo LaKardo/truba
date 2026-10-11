@@ -9,9 +9,6 @@
 // ---- Состояние Туннеля: строки постоянны, опрос раз в 5 с меняет только значения ----
 
 const SW = 200, SH = 50;
-// Окно последних проверок watchdog (PROBE_WINDOW в truba.watchdog): его длина во времени
-// зависит от интервала проверки.
-const PROBE_WINDOW = 20;
 const span = common.span, setState = common.setState;
 
 function buildState() {
@@ -84,18 +81,19 @@ function drawSpark(r, probes) {
 
 function updateState(r, st) {
 	const t = st.tunnel || {}, awg = t.awg || {}, h = st.health || {};
-	const wdOn = uci.get('truba', 'watchdog', 'enabled') != '0';
+	const wdOn = common.get('watchdog', 'enabled');
 	const [ level, text ] = common.tunnelState(st);
 	setState(r.state, level, text);
 
 	const age = awg.handshake ? awg.handshake_age : null;
-	setState(r.hs, age == null ? 'err' : age > 300 ? 'err' : age > 180 ? 'warn' : 'ok', common.fmtAge(age));
+	setState(r.hs, common.handshakeLevel(age, h, common.get('watchdog', 'handshake_max')), common.fmtAge(age));
 
 	// Окно пустое — проверок ещё не было (или не с чем: нет адреса для ping): не «нет ответа».
+	// Длина окна во времени (окно — в truba.const) зависит от интервала проверки.
 	const probes = Array.isArray(h.probes) ? h.probes : [];
-	const interval = h.interval || +uci.get('truba', 'watchdog', 'interval') || 30;
+	const interval = h.interval || common.get('watchdog', 'interval');
 	const mins = (n) => Math.max(1, Math.round(n * interval / 60));
-	const win = mins(probes.length || PROBE_WINDOW);
+	const win = mins(probes.length || common.schema().consts.probe_window);
 	common.setText(r.window, _('Latency over %d min').format(win));
 	common.setText(r.from, _('%d min ago').format(win));
 	if (!wdOn || !probes.length || !t.up) {
@@ -228,8 +226,8 @@ function applyConf(iface, conf) {
 		uci.set('network', sid, 'description', 'Truba');
 	}
 
-	// Интерфейс должен входить в зону truba.
-	const zone = uci.sections('firewall', 'zone').find((z) => z.name == 'truba');
+	// Интерфейс должен входить в зону Туннеля.
+	const zone = uci.sections('firewall', 'zone').find((z) => z.name == common.schema().consts.fw_zone);
 	if (zone) {
 		const nets = L.toArray(zone.network);
 		if (!nets.includes(iface))
@@ -239,7 +237,7 @@ function applyConf(iface, conf) {
 
 return view.extend({
 	load: function() {
-		return Promise.all([ uci.load('truba'), uci.load('network'), uci.load('firewall'), common.callStatus() ]);
+		return Promise.all([ uci.load('truba'), uci.load('network'), uci.load('firewall'), common.callStatus(), common.loadSchema() ]);
 	},
 
 	handleImport: function(iface) {
@@ -301,8 +299,9 @@ return view.extend({
 			o = s.taboption('general', form.Value, 'mtu', _('MTU'),
 				_('install-vps.sh picks it for the VPS network. If full-size packets do not get through (see State above), lower it on both sides.'));
 			// install-vps.sh подбирает MTU под сеть VPS: при сети уже 1367 он ниже 1280.
-			o.datatype = 'range(576,1500)';
-			o.placeholder = '1380';
+			// Это опция интерфейса network, а не Трубы: в схеме службы её нет.
+			o.datatype = 'range(576,1500)';   // опция network
+			o.placeholder = '1380';           // опция network
 			o = s.taboption('general', form.Value, 'listen_port', _('Listen port'), _('Not needed: the router connects to the Truba itself.'));
 			o.datatype = 'port';
 			o.optional = true;
@@ -360,7 +359,7 @@ return view.extend({
 			o = s.option(form.Value, 'persistent_keepalive', _('Keepalive, s'),
 				_('Keeps the provider NAT mapping open so inbound connections via the Truba IP reach the router. A range «from-to» (AmneziaWG 3.1) gives a random period, so an idle tunnel has no steady rhythm.'));
 			o.validate = validateRange;
-			o.placeholder = '15-25';
+			o.placeholder = '15-25';   // опция network
 		}
 
 		const mt = new form.Map('truba');
@@ -368,27 +367,24 @@ return view.extend({
 			_('Pings the Truba inside the tunnel and checks the handshake age; restarts the interface after repeated failures. Every tenth check also makes sure that full-size packets get through.'));
 		s.addremove = false;
 		o = s.option(form.Flag, 'enabled', _('Enabled'));
-		o.default = '1';
+		common.field(o, 'watchdog', 'enabled');
 		o.rmempty = false;
 		o = s.option(form.Value, 'interval', _('Check interval, s'));
-		o.datatype = 'range(10,600)';
-		o.placeholder = '30';
+		common.field(o, 'watchdog', 'interval');
 		o = s.option(form.Value, 'handshake_max', _('Max handshake age, s'));
-		o.datatype = 'range(60,3600)';
-		o.placeholder = '180';
+		common.field(o, 'watchdog', 'handshake_max');
 		o = s.option(form.Value, 'fails', _('Failures before restart'));
-		o.datatype = 'range(1,20)';
-		o.placeholder = '3';
+		common.field(o, 'watchdog', 'fails');
 		o = s.option(form.Value, 'probe', _('Ping target'),
 			_('Empty — the Truba address inside the tunnel. An internet address would not answer while the emergency block is active.'));
-		o.datatype = 'ip4addr';
+		common.field(o, 'watchdog', 'probe');
 		o.optional = true;
 		// Что делать, пока Туннель не отвечает, — рядом с тем, как это определяется;
 		// хранится в секции main.
 		o = s.option(form.Flag, 'killswitch', _('Emergency block'),
 			_('While the tunnel is down, traffic with action Tunnel is dropped instead of going direct.'));
 		o.ucisection = 'main';
-		o.default = '1';
+		common.field(o, 'main', 'killswitch');
 		o.rmempty = false;
 
 		const importBlock = E('div', { 'class': 'cbi-section' }, [

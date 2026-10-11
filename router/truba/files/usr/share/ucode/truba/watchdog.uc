@@ -162,7 +162,9 @@ export function run() {
 		let w = cfg.watchdog;
 		let tinfo = F.tunnel_info(cfg.iface);
 		let st = N.iface_up(cfg.iface);
-		let rec = { state, since, fails, last_check: time(), interval: w.interval, handshake_age: null, ping: null, rtt: null, big };
+		// interval и handshake_max — для «Туннеля»: окно проверок во времени и порог возраста рукопожатия.
+		let rec = { state, since, fails, last_check: time(), interval: w.interval, handshake_max: w.handshake_max,
+		            handshake_age: null, ping: null, rtt: null, big };
 
 		if (tinfo.disabled) {
 			fails = 0;

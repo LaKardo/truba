@@ -64,14 +64,62 @@ for (const f of files) {
 	}
 }
 
-// Схемы адресов DNS-серверов: поле в интерфейсе (dns.js) и служба (conf.uc) проверяют одно и то же.
-// Разойдутся — интерфейс пропустит адрес, который служба отбросит, или наоборот.
-const schemes = (src) => (src.match(/UPSTREAM_SCHEMES = \[([^\]]*)\]/)?.[1].match(/'[^']+'/g) ?? []).sort().join(' ');
-const uiSchemes = schemes(readFileSync(join(root, 'htdocs/luci-static/resources/view/truba/dns.js'), 'utf8'));
-const svcSchemes = schemes(readFileSync(join(root, '../truba/files/usr/share/ucode/truba/conf.uc'), 'utf8'));
-if (!uiSchemes || uiSchemes !== svcSchemes) {
-	console.log(`FAIL  схемы DNS в dns.js (${uiSchemes || '—'}) и conf.uc (${svcSchemes || '—'}) разошлись`);
+// Умолчания, пределы, имена и схемы адресов DNS интерфейс берёт у службы (truba.schema, ADR 0015):
+// своих копий в представлениях нет — разошлись бы с conf.uc, как прежде порог рукопожатия.
+const COPIES = [
+	[ /placeholder = '\d/, 'числовая подсказка' ],
+	[ /datatype = '(range|or\(range)\(/, 'пределы range(…)' ],
+	[ /\|\| '(awg0|lan)'/, 'умолчание awg0/lan' ],
+	[ /default = 'lan'/, 'умолчание lan' ],
+	[ /== 'truba'/, 'имя зоны truba' ],
+	[ /UPSTREAM_SCHEMES = \[/, 'схемы адресов DNS' ],
+];
+// Строки с пометкой «// опция network» — поля интерфейса AmneziaWG: это не настройки Трубы.
+for (const f of files.filter((f) => rel(f).includes('/view/truba/'))) {
+	readFileSync(f, 'utf8').split('\n').forEach((line, i) => {
+		if (line.includes('// опция network'))
+			return;
+		for (const [ re, what ] of COPIES)
+			if (re.test(line)) { console.log(`FAIL  ${rel(f)}:${i + 1}: копия значения службы — ${what}`); fails++; }
+	});
+}
+
+// Интерфейс вызывает truba.schema, которой нет в службе до 1.1.0-r7: с более старой truba страницы не строятся.
+// Нижняя граница зависимости — не ниже неё и не выше версии truba из этого же репозитория.
+const SCHEMA_SINCE = '1.1.0-r7';
+const ver = (v) => v.split(/[.-]r?/).map(Number);
+const cmpVer = (a, b) => { const x = ver(a), y = ver(b); for (let i = 0; i < 4; i++) if (x[i] !== y[i]) return x[i] - y[i]; return 0; };
+const luciMk = readFileSync(join(root, 'Makefile'), 'utf8');
+const trubaMk = readFileSync(join(root, '../truba/Makefile'), 'utf8');
+const floor = luciMk.match(/LUCI_EXTRA_DEPENDS:=.*truba \(>=([0-9.]+-r\d+)\)/)?.[1];
+const trubaVer = `${trubaMk.match(/PKG_VERSION:=(\S+)/)[1]}-r${trubaMk.match(/PKG_RELEASE:=(\S+)/)[1]}`;
+if (!floor || cmpVer(floor, SCHEMA_SINCE) < 0 || cmpVer(floor, trubaVer) > 0) {
+	console.log(`FAIL  luci-app-truba зависит от truba (>=${floor || '?'}), нужно от ${SCHEMA_SINCE} до ${trubaVer}`);
 	fails++;
+}
+
+// Цвет возраста рукопожатия на «Туннеле» — по handshake_max и вердикту watchdog, а не по своим порогам.
+// common.js выполняется с заглушками LuCI: нужна только чистая функция.
+const commonSrc = readFileSync(join(root, 'htdocs/luci-static/resources/truba/common.js'), 'utf8');
+const stub = new Proxy(() => stub, { get: (t, k) => (k === 'extend' ? (x) => x : stub) });
+let common = {};
+try {
+	common = new Function('baseclass', 'rpc', 'uci', '_', 'L', 'E', 'document', commonSrc)(
+		stub, stub, stub, (s) => s, stub, stub, { querySelector: () => true });
+} catch (e) {
+	console.log(`FAIL  common.js не выполнился с заглушками: ${e.message}`);
+	fails++;
+}
+for (const [ args, want ] of [
+	[ [ null, {}, 180 ], 'err' ],
+	[ [ 100, { handshake_max: 600 }, 180 ], 'ok' ],
+	[ [ 300, { handshake_max: 600 }, 180 ], 'ok' ],
+	[ [ 700, { handshake_max: 600, state: 'healthy' }, 180 ], 'warn' ],
+	[ [ 700, { handshake_max: 600, state: 'down' }, 180 ], 'err' ],
+	[ [ 200, {}, 180 ], 'warn' ],
+]) {
+	const got = common.handshakeLevel?.(...args);
+	if (got !== want) { console.log(`FAIL  handshakeLevel(${JSON.stringify(args)}) = ${got}, ждали ${want}`); fails++; }
 }
 
 const po = readFileSync(join(root, 'po/ru/truba.po'), 'utf8');

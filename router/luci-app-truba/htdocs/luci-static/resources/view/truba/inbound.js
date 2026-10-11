@@ -89,16 +89,17 @@ function runNat(x) {
 
 return view.extend({
 	load: function() {
-		return Promise.all([ uci.load('firewall'), L.resolveDefault(uci.load('upnpd'), null), common.callStatus(), uci.load('truba') ]);
+		return Promise.all([ uci.load('firewall'), L.resolveDefault(uci.load('upnpd'), null), common.callStatus(), uci.load('truba'),
+			common.loadSchema() ]);
 	},
 
 	render: function(data) {
 		const st = data[2] || {};
 		const up = st.upnp || {};
-		const wdOn = uci.get('truba', 'watchdog', 'enabled') != '0';
+		const wdOn = common.get('watchdog', 'enabled');
 		// Конфиг upnpd может остаться и без самого miniupnpd — смотрим на установленную службу.
 		const haveUpnp = data[1] != null && up.installed !== false;
-		const forwards = uci.sections('firewall', 'redirect').filter((r) => r.src == 'truba');
+		const forwards = uci.sections('firewall', 'redirect').filter((r) => r.src == common.schema().consts.fw_zone);
 
 		const nat = buildNat(this);
 		paintNat(nat, st.nat, wdOn);
@@ -115,7 +116,7 @@ return view.extend({
 			haveUpnp
 				? _('Devices open ports themselves; miniupnpd reports the Truba IP as the external address.')
 				: _('Package luci-app-upnp is not installed.'));
-		o.default = '0';
+		common.field(o, 'main', 'upnp');
 		o.rmempty = false;
 		o.readonly = !haveUpnp;
 
