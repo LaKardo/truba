@@ -15,8 +15,8 @@ function q(s) {
 	return '"' + replace(s, /"/g, '') + '"';
 }
 
-// Метки Трубы занимают только байт MARK_MASK: остальные биты meta mark и ct mark
-// принадлежат другим службам Роутера (QoS, балансировка каналов и т.п.).
+// Метки Трубы занимают только биты MARK_MASK: остальные биты meta mark и ct mark
+// принадлежат другим службам Роутера (QoS, балансировка каналов, mesh-VPN и т.п.).
 const KEEP = hex(~C.MARK_MASK & 0xffffffff);
 
 function set_meta(mark) {

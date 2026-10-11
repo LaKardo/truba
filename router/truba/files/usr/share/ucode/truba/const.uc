@@ -1,10 +1,12 @@
 // Константы Трубы: метки, таблица маршрутов, пути.
 'use strict';
 
-export const MARK_TUNNEL  = 0x00010000;
-export const MARK_DIRECT  = 0x00020000;
-export const MARK_INBOUND = 0x00040000;
-export const MARK_MASK    = 0x00ff0000;
+// Биты 24–27 (ADR 0011): байт 0x00ff0000 целиком занимают mesh-VPN и маршрутизация по политикам,
+// старшие биты 29–30 — обход DPI.
+export const MARK_TUNNEL  = 0x01000000;
+export const MARK_DIRECT  = 0x02000000;
+export const MARK_INBOUND = 0x04000000;
+export const MARK_MASK    = 0x0f000000;
 
 export const RT_TABLE       = 77;
 export const PRIO_RULE_MARK = 1000;
