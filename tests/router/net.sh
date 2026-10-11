@@ -11,6 +11,11 @@ check "fullcone включён, аппаратное ускорение выкл
 check "программное ускорение не тронуто" cmp -s /tmp/offload.before /tmp/offload.after
 check "IPv6 из lan в интернет — REJECT, IPv6 сети не тронут" eval '[ "$(uci -q get firewall.truba_no_ipv6_inet.family)" = ipv6 ] && [ "$(uci -q get dhcp.lan.ra)" != disabled ]'
 check "Стартовые настройки: 8 правил" test "$(uci -q show truba | grep -c '=rule$')" -eq 8
+# rc.local стенда — маркер готовности (tests/run.sh): здесь — как на Роутере, с «exit 0», и uci-defaults дважды.
+printf '# Put your custom commands here\n\nexit 0\n' > /etc/rc.local
+sh /etc/uci-defaults/90-truba; sh /etc/uci-defaults/90-truba
+check "rc.local: переустановка после sysupgrade — одной строкой перед exit 0" eval \
+	'[ "$(grep -cF /etc/truba/reinstall.sh /etc/rc.local)" = 1 ] && grep -B1 "^exit 0" /etc/rc.local | grep -qxF "[ -x /etc/truba/reinstall.sh ] && /etc/truba/reinstall.sh &"'
 
 section "применение (Маршрутизация вкл)"
 check "без ошибки" no_error
@@ -223,8 +228,8 @@ check "узел сети: DNS к адресу Роутера — тоже" dns_f
 check "устройство домашней сети: DNS перехвачен, источник не подменён" eval 'in_set local4 192.168.1.0/24 && dns_from lanhost 8.8.8.8 && dns_seen lan && ! dns_snat lan'
 nft delete table inet t_snat
 ip addr add 10.99.0.1/24 dev ms0
-truba refresh-bypass
-check "новая подсеть Роутера — в local4 после refresh-bypass" in_set local4 10.99.0.0/24
+ACTION=ifupdate INTERFACE=lan sh /etc/hotplug.d/iface/50-truba
+check "новая подсеть Роутера — в local4 после события интерфейса (hotplug)" in_set local4 10.99.0.0/24
 ip addr del 10.99.0.1/24 dev ms0
 uci del_list truba.main.zone='mesh'; uci commit truba
 reload "зона mesh убрана"
@@ -257,6 +262,23 @@ uci -q batch <<-'EOF'
 	commit firewall
 EOF
 /etc/init.d/firewall reload >/dev/null 2>&1
+
+section "события интерфейсов (hotplug)"
+hotplug() { ACTION="$1" INTERFACE="$2" DEVICE="${3:-}" sh /etc/hotplug.d/iface/50-truba; }
+rp() { sysctl -n net.ipv4.conf.awg0.rp_filter; }
+sysctl -qw net.ipv4.conf.awg0.rp_filter=1
+hotplug ifup awg0 awg0
+check "подъём Туннеля: rp_filter его устройства — 0" test "$(rp)" = 0
+sysctl -qw net.ipv4.conf.awg0.rp_filter=1
+T77="$(ip route show table 77)"
+check "падение Туннеля: код 0, rp_filter не тронут, таблица Туннеля пересчитана как была" \
+	eval 'hotplug ifdown awg0 && [ "$(rp)" = 1 ] && [ "$(ip route show table 77)" = "$T77" ]'
+sysctl -qw net.ipv4.conf.awg0.rp_filter=0
+ip link add hp0 type dummy; ip link set hp0 up; ip addr add 10.98.0.1/24 dev hp0
+mv /var/run/truba/applied.json /tmp/applied.json
+check "служба остановлена (нет applied.json): событие — код 0, наборы не тронуты" eval 'hotplug ifupdate lan && ! in_set local4 10.98.0.0/24'
+mv /tmp/applied.json /var/run/truba/applied.json
+ip link del hp0
 
 section "DSCP пакетов Туннеля"
 # Ядро ставит рукопожатию AF41 — по нему WireGuard и AmneziaWG узнают. Труба обнуляет DSCP всего,
@@ -373,5 +395,6 @@ EOF
 sh /usr/share/truba/uninstall.sh
 check "зона truba и перенаправления в неё удалены, аппаратное ускорение возвращено" eval '[ -z "$(uci -q get firewall.truba)" ] && ! uci -q show firewall | grep -q "dest=.truba.$" && [ "$(uci -q get firewall.@defaults[0].flow_offloading_hw)" = 1 ]'
 check "данные службы удалены: Наборы правил, копия правил, распакованные списки" eval '[ ! -e /etc/truba/lists ] && [ ! -e /etc/truba/state ] && [ ! -e /etc/truba/good ] && [ ! -e /var/lib/truba ]'
+check "rc.local: строки переустановки нет, exit 0 на месте" eval '! grep -qF /etc/truba/reinstall.sh /etc/rc.local && grep -qx "exit 0" /etc/rc.local'
 
 finish

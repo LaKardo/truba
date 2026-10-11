@@ -265,6 +265,27 @@ check('config/truba: каждая опция — из схемы и равна �
 	sprintf('нет в схеме: %J, не равны умолчанию: %J', extra, differ));
 check('config/truba: каждая опция схемы есть в файле', length(keys(F.SCHEMA ?? {})) && !length(absent), join(' ', absent));
 
+// ---- truba env: значения для shell-скриптов пакета (ADR 0015) ----
+
+function sh_env(script) {
+	writefile('/tmp/env.sh', F.env_lines?.() ?? '');
+	let p = popen("sh -n /tmp/env.sh && sh -c '. /tmp/env.sh; " + script + "' 2>&1", 'r');
+	let out = p.read('all');
+	p.close();
+	return out;
+}
+config("config main 'main'\n\nconfig watchdog 'watchdog'\n\toption enabled '0'\n");
+let eo = sh_env('printf \"%s|%s|%s|%s\" \"$TRUBA_APPLIED\" \"$TRUBA_FW_ZONE\" \"$TRUBA_IFACE\" \"$TRUBA_WATCHDOG\"');
+check('env: shell принимает вывод, значения — из службы', eo == C.APPLIED_FILE + '|' + C.FW_ZONE + '|awg0|0', eo);
+config("config main 'main'\n\toption iface \"x'; touch /tmp/pwned; '\"\n");
+system('rm -f /tmp/pwned');
+eo = sh_env('printf %s \"$TRUBA_IFACE\"');
+check('env: неверное имя интерфейса — умолчание, в shell не исполняется', eo == 'awg0' && system('test -e /tmp/pwned') != 0, eo);
+// reinstall.sh работает без пакета (после sysupgrade его ещё нет) — свои литералы, сверка здесь.
+let ri = readfile('/repo/router/truba/files/etc/truba/reinstall.sh');
+check('reinstall.sh: путь бэкапа dnsmasq и адрес mosdns — как у службы',
+	index(ri, C.DNSMASQ_BACKUP) >= 0 && index(ri, C.MOSDNS_ADDR + '#${port:-' + F.SCHEMA.dns.port.def + '}') >= 0);
+
 // Адрес Трубы внутри Туннеля — из адреса Роутера (ubus нет — из настроек).
 function peer_of(addr) {
 	writefile('/etc/config/network', sprintf("config interface 'awg0'\n\toption proto 'amneziawg'\n\tlist addresses '%s'\n\n" +

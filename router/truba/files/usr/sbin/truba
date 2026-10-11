@@ -22,6 +22,8 @@ function usage() {
 		'  teardown           снять все правила Трубы\n' +
 		'  routes             пересчитать таблицу Туннеля по его состоянию\n' +
 		'  refresh-bypass     обновить наборы локальных подсетей\n' +
+		'  hotplug            событие интерфейса из окружения (ACTION, INTERFACE, DEVICE)\n' +
+		'  env                пути и действующие настройки для shell: eval "$(truba env)"\n' +
 		'  update-lists [-f]  скачать Наборы правил (-f — применить даже без изменений)\n' +
 		'  rollback-lists [--bg]  вернуть предыдущие Наборы правил (--bg — применить в фоне)\n' +
 		'  check <домен|IP> [MAC]  какая Категория и Действие сработают\n' +
@@ -55,6 +57,14 @@ case 'routes':
 
 case 'refresh-bypass':
 	load('core').refresh_bypass();
+	break;
+
+case 'hotplug':
+	load('core').hotplug({ action: getenv('ACTION'), iface: getenv('INTERFACE'), device: getenv('DEVICE') });
+	break;
+
+case 'env':
+	print(load('conf').env_lines());
 	break;
 
 case 'update-lists':

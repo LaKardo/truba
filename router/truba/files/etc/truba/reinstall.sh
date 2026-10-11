@@ -9,6 +9,8 @@ log() { logger -t truba-reinstall "$*"; }
 # вся сеть и сам Роутер (dnsmasq — его системный резолвер, localuse), поэтому ни nslookup ниже,
 # ни apk не прошли бы никогда. Исходные значения — из бэкапа Трубы (/etc/truba в keep.d),
 # как при truba teardown; после установки служба снова направит dnsmasq в mosdns.
+# Путь бэкапа и адрес mosdns здесь — литералами: пакета ещё нет, спросить у службы (truba env)
+# нельзя. Совпадение со службой держит юнит-тест (ADR 0015).
 restore_dnsmasq() {
 	local b=/etc/truba/state/dnsmasq.json sid k v port
 	if [ -f "$b" ]; then

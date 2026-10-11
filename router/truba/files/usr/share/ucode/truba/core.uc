@@ -416,6 +416,21 @@ export function refresh_bypass() {
 	unlink(tmp);
 };
 
+// Событие интерфейса (hotplug iface: ACTION, INTERFACE, DEVICE). Туннель: при подъёме — rp_filter 0 на его
+// устройстве (обратный маршрут к источнику входящих — не через Туннель), затем таблица Туннеля.
+// Любой интерфейс: наборы локальных подсетей — адреса могли смениться. Служба остановлена — ничего.
+export function hotplug(ev) {
+	if (!(ev.action in [ 'ifup', 'ifdown', 'ifupdate' ]) || !stat(C.APPLIED_FILE))
+		return;
+	let cfg = F.load();
+	if (ev.iface == cfg.iface) {
+		if (ev.action == 'ifup' && ev.device)
+			N.set_rp_filter(ev.device);
+		N.routes(cfg);
+	}
+	refresh_bypass();
+};
+
 // ---- Наборы правил ----
 
 // Применить настройки заново через init-скрипт: procd перезапустит то, что зависит от новых файлов.
