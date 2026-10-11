@@ -171,7 +171,7 @@ check('mosdns: кэш — в цепочке каждого пути, ответ 
 	filter(three.plugins, p => p.tag == 'flow_direct')[0].args[1].exec == 'ttl 0-300' &&
 	length(filter(three.plugins, p => p.tag == 'flow_default')[0].args) == 1);
 check('mosdns: у каждого сервера idle_timeout, один сервер — просто forward',
-	length(filter(three.plugins, p => p.type == 'forward' && p.args.upstreams[0].idle_timeout != 180)) == 0 &&
+	length(filter(three.plugins, p => p.type == 'forward' && p.args.upstreams[0].idle_timeout != 360)) == 0 &&
 	filter(three.plugins, p => p.tag == 'up_direct')[0]?.type == 'forward');
 
 // ---- Чтение настроек: неверные значения пропускаются ----

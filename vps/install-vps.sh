@@ -676,8 +676,13 @@ setup_awg_service() {
 # ---------- DNS для Роутера ----------
 
 # unbound на адресе Трубы в Туннеле (ADR 0013). Роутер шлёт ему обычные запросы внутри Туннеля
-# (Туннель и так шифрован), а TLS до Cloudflare и Google держит VPS — в миллисекундах от них.
-# Новое соединение стоит тогда миллисекунды, а не две поездки через Туннель, как у DoH с Роутера.
+# (Туннель и так шифрован), а TLS до Cloudflare и Google держит VPS — в 3–4 мс от них. Новое
+# соединение стоит тогда 13–30 мс, а не две поездки через Туннель, как у DoH с Роутера.
+# Промахи кэша unbound шлёт одному адресу — самому быстрому по своим замерам, куда входит и время
+# нового соединения; каждый десятый — как обычно, любому, чтобы замеры остальных не устаревали.
+# Если делить промахи поровну, соединение с каждым адресом чаще простаивает: Cloudflare закрывает
+# простаивающий DoT через 10 с, и его приходится открывать заново, а Google и по открытому
+# соединению отвечает вдвое дольше.
 write_unbound_conf() {
 	put_file 644 "$UNBOUND_CONF" <<-EOF
 		# Труба: DNS для Роутера. Сгенерировано install-vps.sh
@@ -694,6 +699,9 @@ write_unbound_conf() {
 		    hide-version: yes
 		    # Счётчики ответов по кодам (SERVFAIL) — для install-vps.sh status.
 		    extended-statistics: yes
+		    # 9 промахов из 10 — самому быстрому адресу пересылки, остальные — как обычно, всем.
+		    fast-server-permil: 900
+		    fast-server-num: 1
 
 		forward-zone:
 		    name: "."
@@ -717,6 +725,28 @@ setup_unbound() {
 		systemctl restart unbound
 	fi
 	systemctl is-active -q unbound || die "unbound не запустился: journalctl -u unbound"
+}
+
+# Строки status про unbound. Если он не отвечает, Роутер молча уходит на запасной DoH, поэтому видно
+# это только здесь: запросы, SERVFAIL, доля ответов из кэша unbound (обычно единицы процентов —
+# повторы отвечает кэш Роутера), медиана ответа серверов на промахи и среднее время ответа каждого
+# адреса по замерам unbound — к самому быстрому уходят 9 промахов из 10.
+unbound_status() {
+	local stats servers
+	stats=$(unbound-control stats_noreset 2>/dev/null) || return 0
+	awk -F= '
+		$1 == "total.num.queries" { q = $2 } $1 == "total.num.cachehits" { h = $2 }
+		$1 == "total.recursion.time.median" { m = $2 } $1 == "num.answer.rcode.SERVFAIL" { s = $2 }
+		END {
+			if (q == "") exit
+			printf "DNS для Роутера (unbound на %s): запросов %d, из кэша %d %%, ответ серверов — медиана %.0f мс, SERVFAIL %d\n",
+				ip, q, (q ? 100 * h / q : 0), 1000 * m, s
+		}' ip="$VPS_TUN" <<< "$stats"
+	# Строка dump_infra: «1.1.1.1@853 . ttl 786 ping 14 var 38 rtt 178 …», ping — сглаженное время, мс.
+	servers=$({ unbound-control dump_infra 2>/dev/null || true; } | awk '
+		$1 ~ /@853$/ && $2 == "." { for (i = 3; i < NF; i++) if ($i == "ping") { sub(/@853$/, "", $1); print $(i + 1), $1 } }' \
+		| sort -n | awk '{ printf "%s%s — %d мс", sep, $2, $1; sep = ", " }')
+	[ -z "$servers" ] || echo "Серверы пересылки (замер unbound): $servers"
 }
 
 # ---------- SSH ----------
@@ -988,10 +1018,7 @@ cmd_status() {
 	echo
 	printf 'conntrack: %s из %s\n' "$(cat /proc/sys/net/netfilter/nf_conntrack_count 2>/dev/null || echo ?)" \
 		"$(cat /proc/sys/net/netfilter/nf_conntrack_max 2>/dev/null || echo ?)"
-	# Запросы Роутера и ошибки пересылки: если unbound не отвечает, Роутер молча уходит на запасной DoH.
-	unbound-control stats_noreset 2>/dev/null | awk -F= '
-		$1 == "total.num.queries" { q = $2 } $1 == "num.answer.rcode.SERVFAIL" { s = $2 }
-		END { if (q != "") printf "DNS для Роутера (unbound на %s): запросов %d, SERVFAIL %d\n", ip, q, s }' ip="$VPS_TUN" || true
+	unbound_status
 	systemctl --no-pager --lines=0 status truba-pipe.service "awg-quick@$AWG_IF" unbound 2>/dev/null | grep -E '●|Active:' || true
 }
 
