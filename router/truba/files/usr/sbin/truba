@@ -29,6 +29,7 @@ function usage() {
 		'  lists              версии Наборов правил в JSON\n' +
 		'  categories         Категории и Действия в JSON\n' +
 		'  sets               размеры наборов в JSON\n' +
+		'  schema             схема настроек и константы для интерфейса в JSON\n' +
 		'  reset-rules <all|selective>  Стартовые настройки Режима\n' +
 		'  nat-test [auto]    проверка внешнего IP и сохранения порта через Трубу\n' +
 		'                     (auto — запуск от watchdog после подъёма Туннеля)\n' +
@@ -80,6 +81,10 @@ case 'lists':
 
 case 'categories':
 	out(load('core').categories());
+	break;
+
+case 'schema':
+	out(load('conf').schema());
 	break;
 
 case 'sets':

@@ -14,6 +14,7 @@ check "Стартовые настройки: 8 правил" test "$(uci -q sho
 
 section "применение (Маршрутизация вкл)"
 check "без ошибки" no_error
+check "ubus truba.schema через rpcd: умолчание iface" eval '[ "$(ubus call truba schema | jsonfilter -e @.sections.main.iface.def)" = awg0 ]'
 check "подсети geoip:ru — в gi_direct4, их число — для «DNS и списки»" eval 'in_set gi_direct4 "[[:space:]{,]5\.[0-9]" && [ "$(truba sets | jsonfilter -e "@.geoip.direct")" -gt 0 ]'
 check "bypass4: IP Трубы и подсеть Туннеля" eval 'nft get element inet truba bypass4 "{ 198.51.100.2 }" && in_set bypass4 10.77.77.0/30'
 check "lan_if = br-lan" in_set lan_if br-lan

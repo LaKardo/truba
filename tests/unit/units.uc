@@ -223,6 +223,48 @@ check('настройки: API mosdns — на соседнем порту', cfg
 config("config dns 'dns'\n\toption set_timeout '0'\n");
 check('настройки: срок 0 — без срока', F.load().dns.set_timeout == 0);
 
+// ---- Схема настроек (ADR 0015): умолчания и пределы — только в ней ----
+
+let sbad = [], sdefs = true;
+for (let sec, opts in F.SCHEMA ?? {})
+	for (let key, o in opts)
+		sdefs = same(F.check_value(sec, key, o.def, sbad), o.def) && sdefs;
+check('схема: каждое умолчание проходит свою проверку', length(keys(F.SCHEMA ?? {})) == 5 && sdefs && !length(sbad), sprintf('%J', sbad));
+config('');
+let dcfg = F.load();
+check('схема: пустой конфиг — умолчания схемы', dcfg.dns.port == F.SCHEMA?.dns?.port?.def && same(dcfg.zones, F.SCHEMA?.main?.zone?.def) &&
+	same(dcfg.dns.tunnel, F.SCHEMA?.dns?.tunnel_upstream?.def) && dcfg.watchdog.handshake_max == 180);
+config("config dns 'dns'\n\toption port ''\n\nconfig watchdog 'watchdog'\n\toption probe ''\n");
+dcfg = F.load();
+check('схема: пустая опция — умолчание, а не неверное значение', dcfg.dns.port == 5335 && dcfg.watchdog.probe == '' && !length(dcfg.invalid),
+	sprintf('%J', dcfg.invalid));
+
+// /etc/config/truba из пакета — полный образец настроек: совпадает со схемой в обе стороны.
+mkdir('/tmp/pkgconf');
+writefile('/tmp/pkgconf/truba', readfile('/repo/router/truba/files/etc/config/truba'));
+let pc = cursor('/tmp/pkgconf');
+pc.load('truba');
+let extra = [], differ = [], absent = [];
+for (let sec in [ 'main', 'dns', 'lists', 'watchdog' ]) {
+	let s = pc.get_all('truba', sec) ?? {};
+	for (let key, raw in s) {
+		if (substr(key, 0, 1) == '.')
+			continue;
+		let o = F.SCHEMA?.[sec]?.[key];
+		if (!o)
+			push(extra, sec + '.' + key);
+		else if (!same(F.check_value(sec, key, raw), o.def))
+			push(differ, sec + '.' + key);
+	}
+	// Пустых значений UCI не хранит: опции с пустым умолчанием (stun, probe) в файле не видно.
+	for (let key, o in F.SCHEMA?.[sec] ?? {})
+		if (s[key] == null && length(o.def))
+			push(absent, sec + '.' + key);
+}
+check('config/truba: каждая опция — из схемы и равна её умолчанию', !length(extra) && !length(differ),
+	sprintf('нет в схеме: %J, не равны умолчанию: %J', extra, differ));
+check('config/truba: каждая опция схемы есть в файле', length(keys(F.SCHEMA ?? {})) && !length(absent), join(' ', absent));
+
 // Адрес Трубы внутри Туннеля — из адреса Роутера (ubus нет — из настроек).
 function peer_of(addr) {
 	writefile('/etc/config/network', sprintf("config interface 'awg0'\n\toption proto 'amneziawg'\n\tlist addresses '%s'\n\n" +

@@ -57,6 +57,13 @@ const methods = {
 		}
 	},
 
+	// Схема настроек и константы службы (ADR 0015): умолчания, пределы и имена интерфейс берёт отсюда.
+	schema: {
+		call: function() {
+			return truba('schema');
+		}
+	},
+
 	sets: {
 		call: function() {
 			return truba('sets');
