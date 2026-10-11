@@ -188,8 +188,26 @@ section "mesh-VPN — зона Маршрутизации (ADR 0014)"
 mesh_tunnel() { ip netns exec meshhost ucode /repo/tests/lib/tcp_probe.uc client 100.64.0.2 1.2.3.5 48081; }
 # DNS-ответ на localhost — из /etc/hosts Роутера: ответил dnsmasq, куда бы ни был адресован запрос.
 dns_from() { ip netns exec "$1" ucode /repo/tests/lib/dns_ttl.uc 53 localhost "$2" | grep -q '^127\.0\.0\.1 '; }
-# Запрос устройства, которое dnsmasq видит под его собственным адресом: ответ conntrack — ему, а не Роутеру.
-conn_real() { grep -q "src=$1 dst=8.8.8.8 .*dport=53 .*src=$2 dst=$1 " /proc/net/nf_conntrack; }
+# Подменённый источник conntrack отмечает флагом snat: его видно на input после nat (srcnat).
+# dns_seen ms0|lan — запросы DNS с ms0 или br-lan, dns_snat ms0|lan — из них с подменённым источником.
+nft -f - <<-'EOF'
+	table inet t_snat {
+		counter dns_ms0 { }
+		counter snat_ms0 { }
+		counter dns_lan { }
+		counter snat_lan { }
+		chain in {
+			type filter hook input priority srcnat + 10; policy accept;
+			udp dport 53 iifname "ms0" counter name dns_ms0
+			udp dport 53 iifname "ms0" ct status snat counter name snat_ms0
+			udp dport 53 iifname "br-lan" counter name dns_lan
+			udp dport 53 iifname "br-lan" ct status snat counter name snat_lan
+		}
+	}
+EOF
+pk() { nft list counter inet t_snat "$1" | awk '/packets/ { print $2 }'; }
+dns_seen() { [ "$(pk "dns_$1")" -gt 0 ]; }
+dns_snat() { [ "$(pk "snat_$1")" -gt 0 ]; }
 check "до: dnsmasq узлу сети не отвечает" eval '! dns_from meshhost 100.64.0.1'
 uci add_list truba.main.zone='mesh'; uci commit truba
 reload "зона mesh выбрана"
@@ -199,9 +217,10 @@ uci delete firewall.mesh_truba; uci commit firewall; /etc/init.d/firewall reload
 check "без перенаправления fw4 отбрасывает трафик узла в Туннель" eval '! mesh_tunnel'
 reload "перенаправление удалено вручную"
 check "применение заводит перенаправление снова" eval '[ "$(uci -q get firewall.mesh_truba.dest)" = truba ] && mesh_tunnel'
-check "узел сети: DNS к чужому серверу перехвачен, dnsmasq ответил" dns_from meshhost 8.8.8.8
+check "узел сети: DNS к чужому серверу перехвачен, источник подменён — dnsmasq ответил" eval 'dns_from meshhost 8.8.8.8 && dns_snat ms0'
 check "узел сети: DNS к адресу Роутера — тоже" dns_from meshhost 100.64.0.1
-check "устройство домашней сети: DNS перехвачен, источник не подменён" eval 'in_set local4 192.168.1.0/24 && dns_from lanhost 8.8.8.8 && conn_real 192.168.1.50 192.168.1.1'
+check "устройство домашней сети: DNS перехвачен, источник не подменён" eval 'in_set local4 192.168.1.0/24 && dns_from lanhost 8.8.8.8 && dns_seen lan && ! dns_snat lan'
+nft delete table inet t_snat
 ip addr add 10.99.0.1/24 dev ms0
 truba refresh-bypass
 check "новая подсеть Роутера — в local4 после refresh-bypass" in_set local4 10.99.0.0/24
