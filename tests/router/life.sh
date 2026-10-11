@@ -46,7 +46,7 @@ touch /tmp/nft-fail
 uci set truba.main.mode='selective'; uci commit truba
 check "reload при ошибке nft завершился" finished /etc/init.d/truba reload
 check "ошибка записана для «Обзора», действуют правила до неё" eval 'applied "@.error" | grep -q "simulated failure" && [ "$(applied "@.fallback")" = kept ]'
-check "в ядре прежняя таблица (Режим «Всё в туннель»), applied.json описывает её" eval '[ "$(mode_mark)" = 0x00010000 ] && [ "$(applied "@.mode")" = all ]'
+check "в ядре прежняя таблица (Режим «Всё в туннель»), applied.json описывает её" eval '[ "$(mode_mark)" = 0x01000000 ] && [ "$(applied "@.mode")" = all ]'
 check "mosdns не остановлен и не перезапущен, dnsmasq → mosdns" eval '[ "$(pidof mosdns)" = "$PID" ] && uci -q get dhcp.@dnsmasq[0].server | grep -q "127.0.0.1#5335"'
 check "DNS сети отвечает" dns_works
 

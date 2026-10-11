@@ -17,17 +17,17 @@ table inet truba {
 		type filter hook prerouting priority mangle; policy accept;
 		meta nfproto != ipv4 return
 		iifname "awg0" ct state new counter name c_inbound
-		iifname "awg0" meta mark set meta mark and 0xff00ffff or 0x00040000 return
-		iifname @lan_if ct mark and 0x00ff0000 == 0x00040000 meta mark set meta mark and 0xff00ffff or 0x00010000 return
-		iifname @lan_if ct mark and 0x00ff0000 == 0x00010000 meta mark set meta mark and 0xff00ffff or 0x00010000 return
+		iifname "awg0" meta mark set meta mark and 0xf0ffffff or 0x04000000 return
+		iifname @lan_if ct mark and 0x0f000000 == 0x04000000 meta mark set meta mark and 0xf0ffffff or 0x01000000 return
+		iifname @lan_if ct mark and 0x0f000000 == 0x01000000 meta mark set meta mark and 0xf0ffffff or 0x01000000 return
 	}
 
 	chain persist {
 		type filter hook postrouting priority 300; policy accept;
 		meta nfproto != ipv4 return
-		meta mark and 0x00ff0000 == 0x00040000 ct mark set ct mark and 0xff00ffff or 0x00040000 return
-		meta mark and 0x00ff0000 == 0x00010000 ct mark set ct mark and 0xff00ffff or 0x00010000 return
-		meta mark and 0x00ff0000 == 0x00020000 ct mark set ct mark and 0xff00ffff or 0x00020000 return
+		meta mark and 0x0f000000 == 0x04000000 ct mark set ct mark and 0xf0ffffff or 0x04000000 return
+		meta mark and 0x0f000000 == 0x01000000 ct mark set ct mark and 0xf0ffffff or 0x01000000 return
+		meta mark and 0x0f000000 == 0x02000000 ct mark set ct mark and 0xf0ffffff or 0x02000000 return
 	}
 
 	chain stats {
@@ -46,7 +46,7 @@ table inet truba {
 		type route hook output priority mangle + 10; policy accept;
 		meta nfproto != ipv4 return
 		ip daddr 203.0.113.10 ip dscp != cs0 ip dscp set cs0
-		ip daddr 203.0.113.10 meta mark set meta mark and 0xff00ffff or 0x00020000 return
-		socket mark and 0x00ff0000 == 0x00010000 meta mark set meta mark and 0xff00ffff or 0x00010000
+		ip daddr 203.0.113.10 meta mark set meta mark and 0xf0ffffff or 0x02000000 return
+		socket mark and 0x0f000000 == 0x01000000 meta mark set meta mark and 0xf0ffffff or 0x01000000
 	}
 }

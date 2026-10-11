@@ -1,6 +1,6 @@
 #!/bin/sh
 # Путь пакетов: что ставит установка, правила и маршруты после применения, входящие через
-# Туннель, свои сокеты Роутера, чужие цепочки nftables (ADR 0011), DSCP Туннеля, учёт трафика, Политика
+# Туннель, свои сокеты Роутера, чужие цепочки nftables и mesh-VPN (ADR 0011), DSCP Туннеля, учёт трафика, Политика
 # устройства, Аварийная блокировка, Маршрутизация выкл, Режим «Выборочный», teardown, uninstall.
 . /repo/tests/router/stand.sh
 
@@ -16,7 +16,7 @@ check "без ошибки" no_error
 check "подсети geoip:ru — в gi_direct4, их число — для «DNS и списки»" eval 'in_set gi_direct4 "[[:space:]{,]5\.[0-9]" && [ "$(truba sets | jsonfilter -e "@.geoip.direct")" -gt 0 ]'
 check "bypass4: IP Трубы и подсеть Туннеля" eval 'nft get element inet truba bypass4 "{ 198.51.100.2 }" && in_set bypass4 10.77.77.0/30'
 check "lan_if = br-lan" in_set lan_if br-lan
-check "ip rule: метка Туннеля и oif awg0 → 77" eval 'ip rule show | grep -q "fwmark 0x10000/0xff0000 lookup 77" && ip rule show | grep -q "oif awg0 lookup 77"'
+check "ip rule: метка Туннеля и oif awg0 → 77" eval 'ip rule show | grep -q "fwmark 0x1000000/0xf000000 lookup 77" && ip rule show | grep -q "oif awg0 lookup 77"'
 check "table 77: default и подсеть Туннеля через awg0" eval 'ip route show table 77 | grep -q "default dev awg0" && ip route show table 77 | grep -q "10.77.77.0/30 dev awg0"'
 check "dnsmasq → mosdns без кэша, исходные значения сохранены" eval 'uci -q get dhcp.@dnsmasq[0].server | grep -q "127.0.0.1#5335" && [ "$(uci -q get dhcp.@dnsmasq[0].cachesize)" = 0 ] && [ -f /etc/truba/state/dnsmasq.json ]'
 check "status: mosdns — инстанс службы truba" test "$(truba status | jsonfilter -e '@.mosdns')" = true
@@ -72,19 +72,112 @@ foreign_on() {
 foreign_off() { nft delete table inet t_foreign 2>/dev/null; ip rule del priority 999 2>/dev/null; ip route flush table 354 2>/dev/null; return 0; }
 SOCKET_MARK="$(applied '@.socket_mark')"
 foreign_checks() {
-	check "свой UDP с меткой Туннеля → через Туннель ($1)" test "$(udp_out 0x10000)" = vps
+	check "свой UDP с меткой Туннеля → через Туннель ($1)" test "$(udp_out 0x1000000)" = vps
 	foreign_on
 	check "чужие цепочки: ответ на входящее всё равно в Туннель ($1)" probe
 	# Внешние пакеты Туннеля к Трубе — только напрямую, иначе Туннель ушёл бы в чужую таблицу.
 	check "чужие цепочки: Туннель жив, ping Трубы ($1)" ping -c 2 -W 2 10.77.77.1
 	if [ "$SOCKET_MARK" = true ]; then
-		check "чужие цепочки: свой UDP с меткой Туннеля всё равно через Туннель ($1)" test "$(udp_out 0x10000)" = vps
+		check "чужие цепочки: свой UDP с меткой Туннеля всё равно через Туннель ($1)" test "$(udp_out 0x1000000)" = vps
 	else
 		echo "skip  в ядре нет nft_socket (kmod-nft-socket): метка своих сокетов при чужой цепочке ($1)"
 	fi
 	foreign_off
 }
 foreign_checks "Маршрутизация вкл"
+
+section "соседняя mesh-VPN на байте 0x00ff0000"
+# Служба mesh-VPN занимает байт 0x00ff0000 целиком. Своим сокетам она ставит 0x80000 (правило 5210 →
+# main), пакетам со своего интерфейса в forward — 0x40000 и маскарадинг по этой метке, а в mangle
+# prerouting и output копирует байт между ct mark и meta mark; restore перезаписывает meta mark
+# целиком. Узлы сети — в её таблице 52 (правило 5270); узел 100.64.0.2 — netns meshhost за ms0.
+ip netns add meshhost
+ip link add ms0 type veth peer name ms1
+ip link set ms1 netns meshhost
+ip addr add 100.64.0.1/32 dev ms0; ip link set ms0 up
+ip -n meshhost link set lo up; ip -n meshhost link set ms1 up
+ip -n meshhost addr add 100.64.0.2/32 dev ms1
+ip -n meshhost route add 100.64.0.1 dev ms1
+ip -n meshhost route add default via 100.64.0.1 dev ms1
+ip route add 100.64.0.2 dev ms0 table 52
+ip rule add fwmark 0x80000/0xff0000 lookup main priority 5210
+ip rule add lookup 52 priority 5270
+ip netns exec meshhost ucode /repo/tests/lib/tcp_probe.uc server 48082 >/dev/null 2>&1 &
+# Зона сети, как её создают сами такие службы; «интернет напрямую» стенда — ul0 в зоне wan.
+uci -q batch <<-'EOF'
+	set firewall.mesh=zone
+	set firewall.mesh.name='mesh'
+	add_list firewall.mesh.device='ms0'
+	set firewall.mesh.input='ACCEPT'
+	set firewall.mesh.output='ACCEPT'
+	set firewall.mesh.forward='ACCEPT'
+	set firewall.mesh_wan=forwarding
+	set firewall.mesh_wan.src='mesh'
+	set firewall.mesh_wan.dest='wan'
+	set firewall.lan_mesh=forwarding
+	set firewall.lan_mesh.src='lan'
+	set firewall.lan_mesh.dest='mesh'
+	add_list firewall.@zone[1].device='ul0'
+	commit firewall
+EOF
+/etc/init.d/firewall reload >/dev/null 2>&1
+mesh_on() {
+	nft -f - <<-'EOF'
+		table ip t_mesh {
+			counter via_tunnel { }
+			chain pre {
+				type filter hook prerouting priority mangle; policy accept;
+				ct state established,related ct mark and 0x00ff0000 != 0 meta mark set ct mark and 0x00ff0000
+			}
+			chain out {
+				type filter hook output priority mangle; policy accept;
+				ct state new meta mark and 0x00ff0000 != 0 ct mark set meta mark and 0x00ff0000
+			}
+			chain mark_fwd {
+				type filter hook forward priority filter; policy accept;
+				iifname "ms0" meta mark set meta mark and 0xff00ffff xor 0x00040000
+			}
+			chain count_fwd {
+				type filter hook forward priority mangle; policy accept;
+				iifname "ms0" oifname "awg0" counter name via_tunnel
+				iifname "awg0" oifname "ms0" counter name via_tunnel
+			}
+			chain post {
+				type nat hook postrouting priority srcnat; policy accept;
+				meta mark and 0x00ff0000 == 0x00040000 masquerade
+			}
+		}
+	EOF
+}
+# Узел сети выходит в интернет через Роутер (выходной узел); устройство домашней сети — к узлу.
+mesh_exit() { ip netns exec meshhost ucode /repo/tests/lib/tcp_probe.uc client 100.64.0.2 198.51.100.2 48081; }
+via_tunnel() { nft list counter ip t_mesh via_tunnel | awk '/packets/ { print $2 }'; }
+# Из цепочек с одним приоритетом первой идёт загруженная позже: Труба пересоздаёт таблицу при
+# каждом применении, служба — при своём запуске. Проверяются оба порядка.
+mesh_checks() {
+	check "узел сети → интернет напрямую ($1)" mesh_exit
+	check "узел сети: ни одного пакета через Туннель ($1)" test "$(via_tunnel)" = 0
+	check "устройство → узел сети ($1)" lan_tcp 100.64.0.2 48082
+	check "ответ на входящее через Туннель — в Туннель ($1)" probe
+}
+mesh_on
+reload "служба mesh-VPN уже работает"
+mesh_checks "Труба загружена позже"
+nft delete table ip t_mesh; mesh_on
+mesh_checks "служба загружена позже"
+check "свои сокеты службы (0x80000) — мимо Туннеля" eval 'ip route get 203.0.113.77 mark 0x80000 | grep -q "dev inet0"'
+nft delete table ip t_mesh
+for p in $(ip netns pids meshhost); do kill "$p"; done
+ip netns del meshhost
+ip rule del priority 5210; ip rule del priority 5270; ip route flush table 52
+uci -q batch <<-'EOF'
+	delete firewall.mesh
+	delete firewall.mesh_wan
+	delete firewall.lan_mesh
+	del_list firewall.@zone[1].device='ul0'
+	commit firewall
+EOF
+/etc/init.d/firewall reload >/dev/null 2>&1
 
 section "DSCP пакетов Туннеля"
 # Ядро ставит рукопожатию AF41 — по нему WireGuard и AmneziaWG узнают. Труба обнуляет DSCP всего,
@@ -171,7 +264,7 @@ check "Туннель в порядке → default dev awg0" eval 'ip route sho
 section "Маршрутизация выкл"
 uci set truba.main.routing='0'; uci commit truba
 reload "Маршрутизация выкл"
-check "минимальная таблица: без classify, INBOUND на месте" eval '! nft list chain inet truba classify && nft list chain inet truba prerouting | grep -q 0x00040000'
+check "минимальная таблица: без classify, INBOUND на месте" eval '! nft list chain inet truba classify && nft list chain inet truba prerouting | grep -q 0x04000000'
 check "dnsmasq восстановлен, бэкап удалён, mosdns остановлен, cron снят" eval '! uci -q get dhcp.@dnsmasq[0].server | grep -q 5335 && [ ! -f /etc/truba/state/dnsmasq.json ] && ! pidof mosdns && ! grep -q "truba update-lists" /etc/crontabs/root'
 check "ip rule остаются (ответы на входящие)" eval 'ip rule show | grep -q "lookup 77"'
 check "ответ на входящее уходит обратно в Туннель (Маршрутизация выкл)" probe
@@ -182,7 +275,7 @@ uci set truba.main.routing='1'; uci commit truba; reload "Маршрутизац
 nft add element inet truba gs_direct4 '{ 198.51.100.7 }'
 uci set truba.main.mode='selective'; uci commit truba; reload "Режим «Выборочный»"
 check "смена Режима сбрасывает IP из DNS" eval '! in_set gs_direct4 198.51.100.7'
-check "«Выборочный»: по умолчанию — Напрямую" test "$(mode_mark)" = 0x00020000
+check "«Выборочный»: по умолчанию — Напрямую" test "$(mode_mark)" = 0x02000000
 check "truba check 8.8.8.8 → Напрямую по Режиму" eval 'truba check 8.8.8.8 | grep -q "\"reason\": \"mode\""'
 
 section "teardown"

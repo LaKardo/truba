@@ -76,7 +76,7 @@ in_set() { nft list set inet truba "$1" 2>/dev/null | grep -qi -- "$2"; }
 bytes() { nft list counter inet truba "$1" 2>/dev/null | sed -n 's/.*bytes \([0-9]*\).*/\1/p'; }
 gt0() { [ "$(bytes "$1")" -gt 0 ] 2>/dev/null; }
 # Решение по умолчанию в classify: последняя строка цепочки ставит метку Режима.
-mode_mark() { nft list chain inet truba classify | grep -E 'meta mark set' | tail -1 | grep -oE '0x000[12]0000$'; }
+mode_mark() { nft list chain inet truba classify | grep -E 'meta mark set' | tail -1 | grep -oE '0x0[12]000000$'; }
 
 # ---- сеть стенда (tests/router/stand.sh) ----
 

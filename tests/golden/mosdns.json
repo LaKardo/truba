@@ -65,7 +65,7 @@
 					{
 						"addr": "https://1.1.1.1/dns-query",
 						"idle_timeout": 360,
-						"so_mark": 65536
+						"so_mark": 16777216
 					}
 				]
 			}
@@ -93,7 +93,7 @@
 					{
 						"addr": "https://8.8.8.8/dns-query",
 						"idle_timeout": 360,
-						"so_mark": 65536
+						"so_mark": 16777216
 					}
 				]
 			}
