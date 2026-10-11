@@ -471,6 +471,9 @@ if apt-get install -y -qq unbound bind9-dnsutils ca-certificates >/dev/null 2>&1
 	[ "$(stat -c %a "$UNBOUND_CONF")" = 644 ] && ok "unbound: конфиг читаем службой" || fail "unbound: права конфига"
 	grep -qx '    forward-tls-upstream: yes' "$UNBOUND_CONF" && [ "$(grep -cE '^    forward-addr: [0-9.]+@853#(cloudflare-dns\.com|dns\.google)$' "$UNBOUND_CONF")" -eq 4 ] \
 		&& ok "unbound: к Cloudflare и Google — только по TLS, с проверкой имени сервера" || fail "unbound: пересылка по TLS"
+	# Выбор быстрого сервера по умолчанию выключен (0): проверяем, что unbound берёт его из нашего файла.
+	[ "$(unbound-checkconf -o fast-server-permil)" = 900 ] && [ "$(unbound-checkconf -o fast-server-num)" = 1 ] \
+		&& ok "unbound: промахи — самому быстрому адресу" || fail "unbound: fast-server $(unbound-checkconf -o fast-server-permil)/$(unbound-checkconf -o fast-server-num)"
 	# Адреса Туннеля ещё нет: awg0 поднимается позже, а unbound всё равно стартует.
 	unbound -d >"$STATE_DIR/unbound.log" 2>&1 & UB=$!
 	listening() { ss -Hlnu '( sport = :53 )' | grep -q '10.77.77.1:53'; }
@@ -487,6 +490,30 @@ if apt-get install -y -qq unbound bind9-dnsutils ca-certificates >/dev/null 2>&1
 else
 	fail "apt-get install unbound"
 fi
+
+# status: строки про unbound — из его счётчиков и замеров (вывод снят с настоящей Трубы). Без unbound
+# или без замеров status не падает и под set -e: он печатает и всё остальное.
+unbound-control() {
+	case $1 in
+		stats_noreset) printf '%s\n' total.num.queries=9316 total.num.cachehits=522 total.recursion.time.avg=0.036148 \
+			total.recursion.time.median=0.0159878 num.answer.rcode.NOERROR=8020 num.answer.rcode.SERVFAIL=3 ;;
+		dump_infra) printf '%s\n' '1.0.0.1@853 . ttl 786 ping 26 var 38 rtt 178 rto 178 tA 0 tAAAA 0 tother 0' \
+			'8.8.8.8@853 . ttl 770 ping 11 var 7 rtt 50 rto 50 tA 0 tAAAA 0 tother 0' \
+			'1.1.1.1@853 . ttl 871 ping 14 var 79 rtt 330 rto 330 tA 0 tAAAA 0 tother 0' ;;
+	esac
+}
+out=$(set -Eeuo pipefail; unbound_status; echo конец)
+[ "$out" = "DNS для Роутера (unbound на 10.77.77.1): запросов 9316, из кэша 5 %, ответ серверов — медиана 16 мс, SERVFAIL 3
+Серверы пересылки (замер unbound): 8.8.8.8 — 11 мс, 1.1.1.1 — 14 мс, 1.0.0.1 — 26 мс
+конец" ] && ok "status: unbound — запросы, кэш, медиана, серверы по замеру" || fail "status unbound: $out"
+unbound-control() { [ "$1" = stats_noreset ] && printf '%s\n' total.num.queries=0; [ "$1" = stats_noreset ]; }
+out=$(set -Eeuo pipefail; unbound_status; echo конец)
+[ "$out" = "DNS для Роутера (unbound на 10.77.77.1): запросов 0, из кэша 0 %, ответ серверов — медиана 0 мс, SERVFAIL 0
+конец" ] && ok "status: unbound без замеров серверов" || fail "status unbound без замеров: $out"
+unbound-control() { return 1; }
+out=$(set -Eeuo pipefail; unbound_status; echo конец)
+[ "$out" = конец ] && ok "status: unbound не отвечает — строк нет, status идёт дальше" || fail "status без unbound: $out"
+unset -f unbound-control
 
 # Параметры: порт без значения или не число — понятная ошибка до любых изменений, а не
 # «unbound variable» и не отказ nftables посреди установки.

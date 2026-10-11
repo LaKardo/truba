@@ -64,7 +64,7 @@
 				"upstreams": [
 					{
 						"addr": "https://1.1.1.1/dns-query",
-						"idle_timeout": 180,
+						"idle_timeout": 360,
 						"so_mark": 65536
 					}
 				]
@@ -92,7 +92,7 @@
 				"upstreams": [
 					{
 						"addr": "https://8.8.8.8/dns-query",
-						"idle_timeout": 180,
+						"idle_timeout": 360,
 						"so_mark": 65536
 					}
 				]
@@ -131,7 +131,7 @@
 					{
 						"addr": "tls+pipeline://common.dot.dns.yandex.net",
 						"dial_addr": "77.88.8.8",
-						"idle_timeout": 180
+						"idle_timeout": 360
 					}
 				]
 			}

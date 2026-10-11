@@ -73,7 +73,7 @@ fast_answers() {
 	[ $(( $(date +%s) - t )) -le 3 ]
 }
 check "20 новых имён — все ответы от второго сервера, без тайм-аута" bounded 60 fast_answers
-check "у серверов DNS — idle_timeout" eval 'grep -q "\"idle_timeout\": 180" /var/etc/truba/mosdns.json'
+check "у серверов DNS — idle_timeout" eval 'grep -q "\"idle_timeout\": 360" /var/etc/truba/mosdns.json'
 kill "$MUTE"
 PID="$(pidof mosdns)"
 uci -q batch <<-'EOF'
