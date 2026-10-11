@@ -86,7 +86,7 @@ foreign_checks() {
 }
 foreign_checks "Маршрутизация вкл"
 
-section "соседняя mesh-VPN на байте 0x00ff0000"
+section "соседняя mesh-VPN"
 # Служба mesh-VPN занимает байт 0x00ff0000 целиком. Своим сокетам она ставит 0x80000 (правило 5210 →
 # main), пакетам со своего интерфейса в forward — 0x40000 и маскарадинг по этой метке, а в mangle
 # prerouting и output копирует байт между ct mark и meta mark; restore перезаписывает meta mark
@@ -121,21 +121,26 @@ uci -q batch <<-'EOF'
 	commit firewall
 EOF
 /etc/init.d/firewall reload >/dev/null 2>&1
+# mesh_on МАСКА МЕТКА [УСЛОВИЕ] — цепочки службы: МЕТКА в байте МАСКИ ставится пакетам со своего
+# интерфейса в forward и по ней маскарадинг; restore копирует байт из ct mark в meta mark, перезаписывая
+# её целиком, — с УСЛОВИЕМ или (сборка с ошибкой порядка байтов: маска 0x0000ff00) без него, то есть
+# у каждого установленного пакета.
 mesh_on() {
-	nft -f - <<-'EOF'
+	keep=$(printf '0x%08x' $(( ~$1 & 0xffffffff )))
+	nft -f - <<-EOF
 		table ip t_mesh {
 			counter via_tunnel { }
 			chain pre {
 				type filter hook prerouting priority mangle; policy accept;
-				ct state established,related ct mark and 0x00ff0000 != 0 meta mark set ct mark and 0x00ff0000
+				ct state established,related ${3:-} meta mark set ct mark and $1
 			}
 			chain out {
 				type filter hook output priority mangle; policy accept;
-				ct state new meta mark and 0x00ff0000 != 0 ct mark set meta mark and 0x00ff0000
+				ct state new meta mark and $1 != 0 ct mark set meta mark and $1
 			}
 			chain mark_fwd {
 				type filter hook forward priority filter; policy accept;
-				iifname "ms0" meta mark set meta mark and 0xff00ffff xor 0x00040000
+				iifname "ms0" meta mark set meta mark and $keep xor $2
 			}
 			chain count_fwd {
 				type filter hook forward priority mangle; policy accept;
@@ -144,29 +149,37 @@ mesh_on() {
 			}
 			chain post {
 				type nat hook postrouting priority srcnat; policy accept;
-				meta mark and 0x00ff0000 == 0x00040000 masquerade
+				meta mark and $1 == $2 masquerade
 			}
 		}
 	EOF
 }
+mesh_fixed() { mesh_on 0x00ff0000 0x00040000 'ct mark and 0x00ff0000 != 0'; }
+mesh_buggy() { mesh_on 0x0000ff00 0x00000400; }
 # Узел сети выходит в интернет через Роутер (выходной узел); устройство домашней сети — к узлу.
 mesh_exit() { ip netns exec meshhost ucode /repo/tests/lib/tcp_probe.uc client 100.64.0.2 198.51.100.2 48081; }
 via_tunnel() { nft list counter ip t_mesh via_tunnel | awk '/packets/ { print $2 }'; }
-# Из цепочек с одним приоритетом первой идёт загруженная позже: Труба пересоздаёт таблицу при
-# каждом применении, служба — при своём запуске. Проверяются оба порядка.
 mesh_checks() {
 	check "узел сети → интернет напрямую ($1)" mesh_exit
 	check "узел сети: ни одного пакета через Туннель ($1)" test "$(via_tunnel)" = 0
 	check "устройство → узел сети ($1)" lan_tcp 100.64.0.2 48082
+	check "устройство → Туннель: соединение живо после первого пакета ($1)" lan_tcp 1.2.3.5 48081
 	check "ответ на входящее через Туннель — в Туннель ($1)" probe
 }
-mesh_on
-reload "служба mesh-VPN уже работает"
-mesh_checks "Труба загружена позже"
-nft delete table ip t_mesh; mesh_on
-mesh_checks "служба загружена позже"
+# Из цепочек с одним приоритетом первой идёт загруженная позже: Труба пересоздаёт таблицу при
+# каждом применении, служба — при своём запуске. Проверяются оба порядка для обоих вариантов.
+ip -n vps addr add 1.2.3.5/32 dev lo
+for v in fixed buggy; do
+	if [ "$v" = fixed ]; then variant="исправная"; else variant="restore без условия"; fi
+	"mesh_$v"
+	reload "служба mesh-VPN ($variant) уже работает"
+	mesh_checks "$variant, Труба загружена позже"
+	nft delete table ip t_mesh; "mesh_$v"
+	mesh_checks "$variant, служба загружена позже"
+	nft delete table ip t_mesh
+done
 check "свои сокеты службы (0x80000) — мимо Туннеля" eval 'ip route get 203.0.113.77 mark 0x80000 | grep -q "dev inet0"'
-nft delete table ip t_mesh
+ip -n vps addr del 1.2.3.5/32 dev lo
 for p in $(ip netns pids meshhost); do kill "$p"; done
 ip netns del meshhost
 ip rule del priority 5210; ip rule del priority 5270; ip route flush table 52
