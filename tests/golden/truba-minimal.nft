@@ -14,7 +14,7 @@ table inet truba {
 	counter c_inbound_up { }
 
 	chain prerouting {
-		type filter hook prerouting priority mangle; policy accept;
+		type filter hook prerouting priority mangle + 10; policy accept;
 		meta nfproto != ipv4 return
 		iifname "awg0" ct state new counter name c_inbound
 		iifname "awg0" meta mark set meta mark and 0xf0ffffff or 0x04000000 return

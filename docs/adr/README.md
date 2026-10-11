@@ -14,7 +14,7 @@
 | [0008](0008-ubus-api-in-truba-package.md) | ubus-API — в пакете `truba`; объект `truba` регистрирует один плагин |
 | [0009](0009-full-apply-on-tunnel-interface-events.md) | Подъём и падение Туннеля — полное применение настроек |
 | [0010](0010-speed-history-on-router-in-ram.md) | Историю скорости ведёт Роутер, только в оперативной памяти |
-| [0011](0011-own-mark-byte-survives-foreign-chains.md) | Метки Трубы — свои биты 24–27, решение в ct mark пишется последним, свои сокеты берут метку у сокета |
+| [0011](0011-own-mark-byte-survives-foreign-chains.md) | Метки Трубы — свои биты 24–27, решение ставится после чужих цепочек mangle и пишется в ct mark последним, свои сокеты берут метку у сокета |
 | [0012](0012-tests-on-real-immortalwrt-in-docker.md) | Проверки — в Docker на настоящей ImmortalWrt, независимыми частями параллельно |
 | [0013](0013-tunnel-dns-server-on-vps.md) | DNS «Туннеля» — свой сервер на Трубе: unbound в Туннеле, TLS до Cloudflare и Google держит VPS |
 

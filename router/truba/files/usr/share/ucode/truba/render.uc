@@ -19,6 +19,11 @@ function q(s) {
 // принадлежат другим службам Роутера (QoS, балансировка каналов, mesh-VPN и т.п.).
 const KEEP = hex(~C.MARK_MASK & 0xffffffff);
 
+// prerouting Трубы — после всех цепочек mangle (ADR 0011): чужие restore из ct mark и разметка с тем же
+// приоритетом шли бы в порядке загрузки и могли перезаписать метку Трубы. Но до dstnat: классификация
+// видит адрес назначения до DNAT, а перехват DNS идёт после неё.
+const PREROUTING_HOOK = '\t\ttype filter hook prerouting priority mangle + 10; policy accept;\n';
+
 function set_meta(mark) {
 	return 'meta mark set meta mark and ' + KEEP + ' or ' + hex(mark);
 }
@@ -186,7 +191,7 @@ export function nft_full(cfg, plan, ctx) {
 	s += counter_decls([ ...CONN_COUNTERS, ...TRAFFIC_COUNTERS ], ctx.counters);
 
 	s += '\tchain prerouting {\n';
-	s += '\t\ttype filter hook prerouting priority mangle; policy accept;\n';
+	s += PREROUTING_HOOK;
 	s += '\t\tmeta nfproto != ipv4 return\n';
 	// Новые соединения извне: из Туннеля — ответы в Туннель, с остальных внешних интерфейсов — Напрямую.
 	s += inbound_rules(iface);
@@ -238,7 +243,7 @@ export function nft_minimal(cfg, ctx) {
 	s += set_decl('lan_if', 'ifname', null, map(ctx.lan_if, q));
 	s += counter_decls([ 'c_inbound', ...TRAFFIC_COUNTERS ], ctx.counters);
 	s += '\tchain prerouting {\n';
-	s += '\t\ttype filter hook prerouting priority mangle; policy accept;\n';
+	s += PREROUTING_HOOK;
 	s += '\t\tmeta nfproto != ipv4 return\n';
 	s += inbound_rules(iface);
 	// persist пишет ответы как «Туннель», поэтому подходят обе метки.
