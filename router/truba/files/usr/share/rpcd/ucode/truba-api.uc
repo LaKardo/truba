@@ -3,13 +3,11 @@
 'use strict';
 
 import { popen, readfile } from 'fs';
-
-function shq(s) {
-	return "'" + replace('' + s, "'", "'\\''") + "'";
-}
+import * as C from 'truba.const';
+import * as U from 'truba.util';
 
 function truba(args) {
-	let p = popen('/usr/sbin/truba ' + args + ' 2>/dev/null', 'r');
+	let p = popen(C.CLI + ' ' + args + ' 2>/dev/null', 'r');
 	if (!p)
 		return { error: 'exec' };
 	let out = p.read('all');
@@ -26,7 +24,7 @@ function truba(args) {
 // проверку, стоит весь LuCI. Поэтому проверка запускается в фоне, а итог интерфейс забирает
 // отдельным вызовом, когда в нём появится время не раньше started.
 function background(args) {
-	system('( /usr/sbin/truba ' + args + ' >/dev/null 2>&1 & )');
+	system('( ' + C.CLI + ' ' + args + ' >/dev/null 2>&1 & )');
 	return { started: time() };
 }
 
@@ -59,6 +57,13 @@ const methods = {
 		}
 	},
 
+	// Схема настроек и константы службы (ADR 0015): умолчания, пределы и имена интерфейс берёт отсюда.
+	schema: {
+		call: function() {
+			return truba('schema');
+		}
+	},
+
 	sets: {
 		call: function() {
 			return truba('sets');
@@ -72,9 +77,9 @@ const methods = {
 			if (type(t) != 'string' || !match(t, /^[A-Za-z0-9._-]{1,253}$/))
 				return { error: 'invalid target' };
 			let mac = req.args?.mac;
-			let a = shq(t);
+			let a = U.shq(t);
 			if (type(mac) == 'string' && match(mac, /^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$/))
-				a += ' ' + shq(mac);
+				a += ' ' + U.shq(mac);
 			return truba('check ' + a);
 		}
 	},
@@ -87,7 +92,7 @@ const methods = {
 
 	nat_result: {
 		call: function() {
-			return result('/var/run/truba/nat.json');
+			return result(C.NAT_FILE);
 		}
 	},
 
@@ -99,7 +104,7 @@ const methods = {
 
 	tunnel_result: {
 		call: function() {
-			return result('/var/run/truba/tunnel-test.json');
+			return result(C.TT_FILE);
 		}
 	},
 
@@ -110,7 +115,7 @@ const methods = {
 		args: { span: 600, since: 0 },
 		call: function(req) {
 			let span = int(req.args?.span ?? 600), since = int(req.args?.since ?? 0);
-			let f = result((span > 3600) ? '/var/run/truba/rates-min.json' : '/var/run/truba/rates.json');
+			let f = result((span > C.HISTORY.fine.span) ? C.RATES_MIN_FILE : C.RATES_FILE);
 			let now = time(), from = (since > now - span) ? since : now - span;
 			let points = filter((type(f.points) == 'array') ? f.points : [], (p) => type(p) == 'array' && p[0] > from);
 			return { now, step: f.step ?? null, points };
@@ -120,7 +125,7 @@ const methods = {
 	update_lists: {
 		args: { force: false },
 		call: function(req) {
-			system('( /usr/sbin/truba update-lists' + (req.args?.force ? ' -f' : '') + ' >/dev/null 2>&1 & )');
+			system('( ' + C.CLI + ' update-lists' + (req.args?.force ? ' -f' : '') + ' >/dev/null 2>&1 & )');
 			return { started: true };
 		}
 	},
@@ -141,7 +146,7 @@ const methods = {
 				n = 200;
 			// Труба и mosdns (ошибки DNS-серверов). «invalid msg» — повреждённые запросы
 			// устройств, которые dnsmasq пересылает как есть: это шум, а не ошибка Трубы.
-			let p = popen(sprintf("logread -e 'truba\\|mosdns' | grep -v 'invalid msg' | tail -n %d", n), 'r');
+			let p = popen(sprintf("logread -e '%s\\|mosdns' | grep -v 'invalid msg' | tail -n %d", C.LOG_TAG, n), 'r');
 			let out = p ? p.read('all') : '';
 			p?.close();
 			return { log: out };

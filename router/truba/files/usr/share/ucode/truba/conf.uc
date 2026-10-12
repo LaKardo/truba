@@ -6,19 +6,12 @@ import { connect } from 'ubus';
 import * as U from 'truba.util';
 import * as C from 'truba.const';
 
-// DNS-сервер на Трубе (install-vps.sh, ADR 0013) и запасной DoH: каждый запрос идёт к обоим. Без сервера
-// на Трубе (VPS ставился другим способом) порт сразу отвечает «закрыт», и отвечает DoH.
-const DEFAULT_TUNNEL_DNS = [ 'udp://10.77.77.1', 'https://1.1.1.1/dns-query' ];
-// Два сервера: mosdns спрашивает оба разом и берёт первый ответ, поэтому обрыв одного
-// соединения не оставляет запросы без ответа (на живом роутере DoH 77.88.8.8 изредка рвался).
-// pipelining: запросы, пришедшие разом, идут по одному соединению, а не открывают по TLS на каждый.
-const DEFAULT_DIRECT_DNS = [ 'tls+pipeline://common.dot.dns.yandex.net@77.88.8.8', 'tls+pipeline://common.dot.dns.yandex.net@77.88.8.1' ];
-
 const MAC_RE = /^([0-9a-f]{2}:){5}[0-9a-f]{2}$/;
 
 // Схемы адресов, которые понимает mosdns 5; без схемы — udp. Адрес с опечаткой в схеме
 // останавливает mosdns целиком, а с ним DNS всей сети, поэтому в его конфиг он не попадает.
-const UPSTREAM_SCHEMES = [ 'udp', 'tcp', 'tcp+pipeline', 'tls', 'tls+pipeline', 'https', 'h3', 'quic', 'doq' ];
+// Интерфейс получает список вместе со схемой настроек (truba schema).
+export const UPSTREAM_SCHEMES = [ 'udp', 'tcp', 'tcp+pipeline', 'tls', 'tls+pipeline', 'https', 'h3', 'quic', 'doq' ];
 
 // «[схема://]хост[:порт][/путь][@IP]»; путь — только со схемой. Та же проверка — в dns.js.
 // Регулярные выражения ucode — POSIX: внутри [...] нет \s, только [:space:].
@@ -31,116 +24,171 @@ export function upstream_ok(u) {
 	return (m[2] == null) ? (m[5] == null) : (m[2] in UPSTREAM_SCHEMES);
 };
 
-function bool(v, dflt) {
-	if (v == null)
-		return dflt;
-	return (v == '1' || v == 'true' || v == 'on' || v == 'yes');
-}
+// Схема настроек (ADR 0015): тип каждой опции UCI, значение по умолчанию и пределы — только здесь.
+// По ней load() проверяет настройки, интерфейс (truba schema) строит подсказки и проверки полей,
+// а юнит-тест сверяет с ней /etc/config/truba из пакета.
+// Поля: type, def; int — lo, hi и min («0 или не меньше min»); enum — values; pattern — re (POSIX).
+export const SCHEMA = {
+	main: {
+		routing:    { type: 'bool', def: true },
+		mode:       { type: 'enum', values: [ 'all', 'selective' ], def: 'all' },
+		killswitch: { type: 'bool', def: true },
+		// Имя интерфейса попадает в правила nftables и в имена объектов ubus.
+		iface:      { type: 'pattern', re: '^[A-Za-z0-9_]{1,15}$', def: 'awg0' },
+		zone:       { type: 'list', def: [ 'lan' ] },
+		dns_hijack: { type: 'bool', def: true },
+		upnp:       { type: 'bool', def: false },
+		// STUN-серверы «Проверки NAT» («host:port»); пусто — стандартные из truba.nattest.
+		stun:       { type: 'list', def: [] },
+	},
+	dns: {
+		// DNS-сервер на Трубе (install-vps.sh, ADR 0013) и запасной DoH: каждый запрос идёт к обоим. Без сервера
+		// на Трубе (VPS ставился другим способом) порт сразу отвечает «закрыт», и отвечает DoH.
+		tunnel_upstream: { type: 'upstreams', def: [ 'udp://10.77.77.1', 'https://1.1.1.1/dns-query' ] },
+		// Два сервера: mosdns спрашивает оба разом и берёт первый ответ, поэтому обрыв одного
+		// соединения не оставляет запросы без ответа (на живом роутере DoH 77.88.8.8 изредка рвался).
+		// pipelining: запросы, пришедшие разом, идут по одному соединению, а не открывают по TLS на каждый.
+		direct_upstream: { type: 'upstreams', def: [ 'tls+pipeline://common.dot.dns.yandex.net@77.88.8.8',
+		                                             'tls+pipeline://common.dot.dns.yandex.net@77.88.8.1' ] },
+		port:            { type: 'int', def: 5335, lo: 1, hi: 65535 },
+		ttl_max:         { type: 'int', def: 300, lo: 30, hi: 86400 },
+		cache_size:      { type: 'int', def: 65536, lo: 1024, hi: 1048576 },
+		lazy_cache_ttl:  { type: 'int', def: 86400, lo: 0, hi: 604800 },
+		// Срок IP из DNS в наборах gs_* (ADR 0007): 0 — без срока, иначе от 10 минут до недели. Срок
+		// короче 10 минут — короче TTL ответов: адреса пропадали бы из наборов, пока устройства ещё
+		// пользуются ответом, и новые соединения шли бы мимо своей Категории.
+		set_timeout:     { type: 'int', def: 86400, lo: 0, hi: 604800, min: 600 },
+	},
+	lists: {
+		geoip_url:      { type: 'string', def: 'https://raw.githubusercontent.com/kirilllavrov/geoip-builder/release/geoip.dat' },
+		geoip_mirror:   { type: 'string', def: 'https://cdn.jsdelivr.net/gh/kirilllavrov/geoip-builder@release/geoip.dat' },
+		geosite_url:    { type: 'string', def: 'https://raw.githubusercontent.com/kirilllavrov/geosite-builder/release/geosite.dat' },
+		geosite_mirror: { type: 'string', def: 'https://cdn.jsdelivr.net/gh/kirilllavrov/geosite-builder@release/geosite.dat' },
+		update_utc:     { type: 'pattern', re: '^([01]?[0-9]|2[0-3]):[0-5][0-9]$', def: '12:00' },
+		via_tunnel:     { type: 'bool', def: true },
+		auto_update:    { type: 'bool', def: true },
+	},
+	watchdog: {
+		enabled:       { type: 'bool', def: true },
+		// Интервал 0 — цикл без пауз, 0 неудач — деление на ноль в счёте перезапусков.
+		interval:      { type: 'int', def: 30, lo: 10, hi: 600 },
+		handshake_max: { type: 'int', def: 180, lo: 60, hi: 3600 },
+		fails:         { type: 'int', def: 3, lo: 1, hi: 20 },
+		// Неверный адрес для ping — Туннель «не отвечает» навсегда, и при Аварийной блокировке
+		// весь трафик «Туннеля» отбрасывается. Пусто — адрес Трубы внутри Туннеля.
+		probe:         { type: 'ipv4', def: '' },
+	},
+	device: {
+		enabled: { type: 'bool', def: true },
+		// LuCI не сохраняет значение по умолчанию: нет policy — значит «Всё в туннель».
+		// rules — «По правилам»: устройство не попадает ни в один набор Политик.
+		policy:  { type: 'enum', values: [ 'tunnel', 'direct', 'rules' ], def: 'tunnel' },
+	},
+};
 
 // Одно неверное значение в UCI (опечатка в консоли, старый конфиг) не должно ломать
 // применение целиком: оно пропускается, вместо него — значение по умолчанию, а «Обзор»
-// показывает, что пропущено (bad → applied.invalid).
-
-// Целое в пределах [lo, hi] — те же пределы, что у полей LuCI.
-function num(bad, key, v, dflt, lo, hi) {
-	if (v == null || v == '')
-		return dflt;
-	let n = (type(v) == 'string' && match(v, /^[0-9]+$/)) ? int(v) : null;
-	if (n == null || n < lo || n > hi) {
-		push(bad, { key, value: '' + v });
-		return dflt;
+// показывает, что пропущено (bad → applied.invalid). Флаги и выбор из списка неверными
+// не бывают: всё, кроме «да», — «нет», незнакомый вариант — по умолчанию.
+// raw — значение из UCI (строка или список); null — опции нет.
+export function check_value(sec, key, raw, bad) {
+	let o = SCHEMA[sec][key];
+	let invalid = (v) => {
+		push(bad ?? [], { key: sec + '.' + key, value: '' + v });
+		return o.def;
+	};
+	if (raw == null)
+		return o.def;
+	switch (o.type) {
+	case 'bool':
+		return (type(raw) == 'bool') ? raw : (raw in [ '1', 'true', 'on', 'yes' ]);
+	case 'enum':
+		return (raw in o.values) ? raw : o.def;
+	case 'string':
+		return raw;
+	case 'list':
+		return length(U.to_list(raw)) ? U.to_list(raw) : o.def;
+	case 'int':
+		if (raw === '')
+			return o.def;
+		let n = (type(raw) == 'int') ? raw : ((type(raw) == 'string' && match(raw, /^[0-9]+$/)) ? int(raw) : null);
+		if (n == null || n < o.lo || n > o.hi || (o.min && n > 0 && n < o.min))
+			return invalid(raw);
+		return n;
+	case 'pattern':
+		if (raw === '')
+			return o.def;
+		return (type(raw) == 'string' && match(raw, regexp(o.re))) ? raw : invalid(raw);
+	case 'ipv4':
+		return (raw === '' || U.is_ipv4(raw)) ? raw : invalid(raw);
+	case 'upstreams':
+		// Неверные адреса пропускаются; если не осталось ни одного — по умолчанию.
+		let all = U.to_list(raw), good = filter(all, upstream_ok);
+		for (let u in all)
+			if (!upstream_ok(u))
+				invalid(u);
+		return length(good) ? good : o.def;
 	}
-	return n;
-}
+	die('схема: неизвестный тип ' + o.type);
+};
 
-// Список DNS-серверов без неверных адресов; если не осталось ни одного — по умолчанию.
-function upstreams(bad, key, v, dflt) {
-	let all = U.to_list(v);
-	let good = filter(all, upstream_ok);
-	for (let u in all)
-		if (!upstream_ok(u))
-			push(bad, { key, value: '' + u });
-	return length(good) ? good : dflt;
-}
-
-function pattern(bad, key, v, dflt, re) {
-	if (v == null || v == '')
-		return dflt;
-	if (type(v) == 'string' && match(v, re))
-		return v;
-	push(bad, { key, value: '' + v });
-	return dflt;
-}
+// Схема и константы, которые нужны интерфейсу (вызов truba.schema).
+export function schema() {
+	return {
+		sections: SCHEMA,
+		upstream_schemes: UPSTREAM_SCHEMES,
+		consts: { fw_zone: C.FW_ZONE, probe_window: C.PROBE_WINDOW, history: C.HISTORY, mosdns_addr: C.MOSDNS_ADDR },
+	};
+};
 
 export function load() {
 	let c = cursor();
 	c.load('truba');
 
-	let m = c.get_all('truba', 'main') ?? {};
-	let d = c.get_all('truba', 'dns') ?? {};
-	let l = c.get_all('truba', 'lists') ?? {};
-	let w = c.get_all('truba', 'watchdog') ?? {};
 	let bad = [];
-
-	// Неверный адрес для ping — Туннель «не отвечает» навсегда, и при Аварийной блокировке
-	// весь трафик «Туннеля» отбрасывается.
-	let probe = w.probe ?? '';
-	if (probe != '' && !U.is_ipv4(probe)) {
-		push(bad, { key: 'watchdog.probe', value: '' + probe });
-		probe = '';
-	}
+	let v = (sec, key) => check_value(sec, key, c.get('truba', sec, key), bad);
 
 	let cfg = {
-		routing: bool(m.routing, true),
-		mode: (m.mode == 'selective') ? 'selective' : 'all',
-		killswitch: bool(m.killswitch, true),
-		// Имя интерфейса попадает в правила nftables и в имена объектов ubus.
-		iface: pattern(bad, 'main.iface', m.iface, 'awg0', /^[A-Za-z0-9_]{1,15}$/),
-		zones: length(U.to_list(m.zone)) ? U.to_list(m.zone) : [ 'lan' ],
-		dns_hijack: bool(m.dns_hijack, true),
-		upnp: bool(m.upnp, false),
-		// STUN-серверы «Проверки NAT» («host:port»); пусто — стандартные из truba.nattest.
-		stun: U.to_list(m.stun),
+		routing: v('main', 'routing'),
+		mode: v('main', 'mode'),
+		killswitch: v('main', 'killswitch'),
+		iface: v('main', 'iface'),
+		zones: v('main', 'zone'),
+		dns_hijack: v('main', 'dns_hijack'),
+		upnp: v('main', 'upnp'),
+		stun: v('main', 'stun'),
 		rules: [],
 		devices: [],
 		dns: {
-			tunnel: upstreams(bad, 'dns.tunnel_upstream', d.tunnel_upstream, DEFAULT_TUNNEL_DNS),
-			direct: upstreams(bad, 'dns.direct_upstream', d.direct_upstream, DEFAULT_DIRECT_DNS),
-			port: num(bad, 'dns.port', d.port, 5335, 1, 65535),
-			ttl_max: num(bad, 'dns.ttl_max', d.ttl_max, 300, 30, 86400),
-			cache_size: num(bad, 'dns.cache_size', d.cache_size, 65536, 1024, 1048576),
-			lazy_cache_ttl: num(bad, 'dns.lazy_cache_ttl', d.lazy_cache_ttl, 86400, 0, 604800),
-			// Срок IP из DNS в наборах gs_* (ADR 0007): 0 — без срока, иначе от 10 минут до недели.
-			set_timeout: num(bad, 'dns.set_timeout', d.set_timeout, 86400, 0, 604800),
+			tunnel: v('dns', 'tunnel_upstream'),
+			direct: v('dns', 'direct_upstream'),
+			port: v('dns', 'port'),
+			ttl_max: v('dns', 'ttl_max'),
+			cache_size: v('dns', 'cache_size'),
+			lazy_cache_ttl: v('dns', 'lazy_cache_ttl'),
+			set_timeout: v('dns', 'set_timeout'),
 		},
 		lists: {
-			geoip_url: l.geoip_url ?? 'https://raw.githubusercontent.com/kirilllavrov/geoip-builder/release/geoip.dat',
-			geoip_mirror: l.geoip_mirror ?? 'https://cdn.jsdelivr.net/gh/kirilllavrov/geoip-builder@release/geoip.dat',
-			geosite_url: l.geosite_url ?? 'https://raw.githubusercontent.com/kirilllavrov/geosite-builder/release/geosite.dat',
-			geosite_mirror: l.geosite_mirror ?? 'https://cdn.jsdelivr.net/gh/kirilllavrov/geosite-builder@release/geosite.dat',
-			update_utc: pattern(bad, 'lists.update_utc', l.update_utc, '12:00', /^([01]?[0-9]|2[0-3]):[0-5][0-9]$/),
-			via_tunnel: bool(l.via_tunnel, true),
-			auto_update: bool(l.auto_update, true),
+			geoip_url: v('lists', 'geoip_url'),
+			geoip_mirror: v('lists', 'geoip_mirror'),
+			geosite_url: v('lists', 'geosite_url'),
+			geosite_mirror: v('lists', 'geosite_mirror'),
+			update_utc: v('lists', 'update_utc'),
+			via_tunnel: v('lists', 'via_tunnel'),
+			auto_update: v('lists', 'auto_update'),
 		},
 		watchdog: {
-			enabled: bool(w.enabled, true),
-			// Интервал 0 — цикл без пауз, 0 неудач — деление на ноль в счёте перезапусков.
-			interval: num(bad, 'watchdog.interval', w.interval, 30, 10, 600),
-			handshake_max: num(bad, 'watchdog.handshake_max', w.handshake_max, 180, 60, 3600),
-			fails: num(bad, 'watchdog.fails', w.fails, 3, 1, 20),
-			probe,
+			enabled: v('watchdog', 'enabled'),
+			interval: v('watchdog', 'interval'),
+			handshake_max: v('watchdog', 'handshake_max'),
+			fails: v('watchdog', 'fails'),
+			probe: v('watchdog', 'probe'),
 		},
 		invalid: bad,
 	};
-	// Срок короче 10 минут — короче TTL ответов: адреса пропадали бы из наборов, пока устройства
-	// ещё пользуются ответом, и новые соединения шли бы мимо своей Категории.
-	if (cfg.dns.set_timeout > 0 && cfg.dns.set_timeout < 600) {
-		push(bad, { key: 'dns.set_timeout', value: '' + d.set_timeout });
-		cfg.dns.set_timeout = 86400;
-	}
-	// HTTP API mosdns (счётчики кэша для «Обзора») — на соседнем с DNS порту, только 127.0.0.1.
+	// HTTP API mosdns (счётчики кэша для «Обзора») — на соседнем с DNS порту, на адресе mosdns.
 	let p = cfg.dns.port;
-	cfg.dns.api = sprintf('127.0.0.1:%d', (p < 65535) ? p + 1 : p - 1);
+	cfg.dns.api = sprintf('%s:%d', C.MOSDNS_ADDR, (p < 65535) ? p + 1 : p - 1);
 
 	c.foreach('truba', 'rule', (s) => {
 		if (!s.set || !s.tag || !(s.action in C.ACTIONS))
@@ -154,8 +202,9 @@ export function load() {
 	});
 
 	c.foreach('truba', 'device', (s) => {
-		// LuCI не сохраняет значение по умолчанию: нет policy — значит «Всё в туннель».
-		let policy = s.policy ?? 'tunnel';
+		// В наборы Политик попадают только «Всё в туннель» и «Всё напрямую»; незнакомая Политика —
+		// как «По правилам», а не как умолчание: устройство не уходит в Туннель по опечатке.
+		let policy = s.policy ?? SCHEMA.device.policy.def;
 		if (!s.mac || !(policy in [ 'tunnel', 'direct' ]))
 			return;
 		if (s.enabled == '0')
@@ -170,6 +219,23 @@ export function load() {
 	});
 
 	return cfg;
+};
+
+// Значения для shell-скриптов пакета (truba env, ADR 0015): eval "$(truba env)" даёт TRUBA_* —
+// пути, имена и действующие настройки после проверки, а не сырые значения UCI.
+export function env_lines() {
+	let cfg = load();
+	let vars = {
+		RUN_DIR: C.RUN_DIR, ETC_DIR: C.ETC_DIR, DATA_DIR: C.DATA_DIR, CONF_DIR: C.CONF_DIR,
+		LISTS_DIR: C.LISTS_DIR, STATE_DIR: C.STATE_DIR, GOOD_DIR: C.GOOD_DIR, DL_DIR: C.DL_DIR,
+		APPLIED: C.APPLIED_FILE, MOSDNS_CONF: C.MOSDNS_CONF, STAMP: C.STAMP_FILE,
+		INIT: C.INIT, REINSTALL: C.REINSTALL, FW_ZONE: C.FW_ZONE,
+		IFACE: cfg.iface, WATCHDOG: cfg.watchdog.enabled ? '1' : '0',
+	};
+	let s = '';
+	for (let k, v in vars)
+		s += 'TRUBA_' + k + '=' + U.shq(v) + '\n';
+	return s;
 };
 
 // Сведения о Туннеле из конфигурации network: адрес, адрес Трубы внутри, endpoint.

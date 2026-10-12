@@ -47,7 +47,7 @@ function api_port_taken(api) {
 		if (f[5] != 'LISTEN' || match(f[6] ?? '', /\/mosdns$/))
 			continue;
 		let i = rindex(f[3], ':');
-		if (substr(f[3], i + 1) == port && (substr(f[3], 0, i) in [ '127.0.0.1', '0.0.0.0', '::', '' ]))
+		if (substr(f[3], i + 1) == port && (substr(f[3], 0, i) in [ C.MOSDNS_ADDR, '0.0.0.0', '::', '' ]))
 			return true;
 	}
 	return false;
@@ -204,7 +204,7 @@ function apply_config(res, prev) {
 			// 1000>&- — блокировка procd из rc.common: фоновый процесс не должен её
 			// наследовать, иначе его собственный reload ждёт сам себя.
 			if (!U.lock_busy(C.LOCK_LISTS))
-				system('( /usr/sbin/truba update-lists >/dev/null 2>&1 1000>&- & )');
+				system('( ' + C.CLI + ' update-lists >/dev/null 2>&1 1000>&- & )');
 		}
 		plan = P.compute(cfg, dat.cats);
 		let gkey = P.geosite_key(plan, dat.hash);
@@ -416,10 +416,36 @@ export function refresh_bypass() {
 	unlink(tmp);
 };
 
+// Событие интерфейса (hotplug iface: ACTION, INTERFACE, DEVICE). Туннель: при подъёме — rp_filter 0 на его
+// устройстве (обратный маршрут к источнику входящих — не через Туннель), затем таблица Туннеля.
+// Любой интерфейс: наборы локальных подсетей — адреса могли смениться. Служба остановлена — ничего.
+export function hotplug(ev) {
+	if (!(ev.action in [ 'ifup', 'ifdown', 'ifupdate' ]) || !stat(C.APPLIED_FILE))
+		return;
+	let cfg = F.load();
+	if (ev.iface == cfg.iface) {
+		if (ev.action == 'ifup' && ev.device)
+			N.set_rp_filter(ev.device);
+		N.routes(cfg);
+	}
+	refresh_bypass();
+};
+
 // ---- Наборы правил ----
 
+// Применить настройки заново через init-скрипт: procd перезапустит то, что зависит от новых файлов.
+// bg — в фоне, не дожидаясь применения.
+function reload_service(bg) {
+	let cmd = C.INIT + ' reload >/dev/null 2>&1';
+	system(bg ? '( ' + cmd + ' & )' : cmd);
+}
+
+// Скачивание Набора правил: нет соединения за 15 с — источник недоступен, пробуется следующий;
+// весь файл — не дольше 3 минут (geosite.dat — мегабайты, в том числе через Туннель).
+const DL_CONNECT_TIMEOUT = 15, DL_MAX_TIME = 180;
+
 function curl(url, out, dev) {
-	let cmd = [ 'curl', '-fsSL', '--connect-timeout', '15', '--max-time', '180', '-o', out ];
+	let cmd = [ 'curl', '-fsSL', '--connect-timeout', '' + DL_CONNECT_TIMEOUT, '--max-time', '' + DL_MAX_TIME, '-o', out ];
 	if (dev)
 		push(cmd, '--interface', dev);
 	push(cmd, url);
@@ -434,7 +460,7 @@ export function update_lists(force) {
 
 	let cfg = F.load();
 	let st = N.iface_up(cfg.iface);
-	let tmpdir = '/tmp/truba-dl';
+	let tmpdir = C.DL_DIR;
 	U.mkdirp(tmpdir);
 
 	let result = { time: time(), sets: {} };
@@ -523,7 +549,7 @@ export function update_lists(force) {
 	lk.close();
 
 	if (changed || reapply)
-		system('/etc/init.d/truba reload >/dev/null 2>&1');
+		reload_service(false);
 	return result;
 };
 
@@ -538,7 +564,7 @@ export function rollback_lists(bg) {
 	lk.close();
 	if (length(swapped)) {
 		U.info('списки: откат ' + join(', ', swapped));
-		system(bg ? '( /etc/init.d/truba reload >/dev/null 2>&1 & )' : '/etc/init.d/truba reload >/dev/null 2>&1');
+		reload_service(bg);
 	}
 	return { swapped, applying: !!bg && length(swapped) > 0 };
 };

@@ -9,6 +9,8 @@ log() { logger -t truba-reinstall "$*"; }
 # вся сеть и сам Роутер (dnsmasq — его системный резолвер, localuse), поэтому ни nslookup ниже,
 # ни apk не прошли бы никогда. Исходные значения — из бэкапа Трубы (/etc/truba в keep.d),
 # как при truba teardown; после установки служба снова направит dnsmasq в mosdns.
+# Путь бэкапа и адрес mosdns здесь — литералами: пакета ещё нет, спросить у службы (truba env)
+# нельзя. Совпадение со службой держит юнит-тест (ADR 0015).
 restore_dnsmasq() {
 	local b=/etc/truba/state/dnsmasq.json sid k v port
 	if [ -f "$b" ]; then
@@ -40,12 +42,15 @@ apk list -I truba 2>/dev/null | grep -q '^truba-' && exit 0
 
 restore_dnsmasq
 
-# Ждём интернет (до 10 минут).
+# Ждём интернет до 10 минут (WAIT_TRIES попыток раз в WAIT_STEP с): после прошивки WAN поднимается
+# не сразу, а без интернета пакеты не поставить.
+WAIT_TRIES=60
+WAIT_STEP=10
 i=0
 until nslookup downloads.immortalwrt.org >/dev/null 2>&1; do
 	i=$((i + 1))
-	[ "$i" -ge 60 ] && { log "нет интернета — пакеты Трубы не переустановлены"; exit 1; }
-	sleep 10
+	[ "$i" -ge "$WAIT_TRIES" ] && { log "нет интернета — пакеты Трубы не переустановлены"; exit 1; }
+	sleep "$WAIT_STEP"
 done
 
 . /etc/os-release

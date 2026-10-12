@@ -18,6 +18,7 @@ const callRollbackLists = rpc.declare({ object: 'truba', method: 'rollback_lists
 const callRates = rpc.declare({ object: 'truba', method: 'rates', params: [ 'span', 'since' ], expect: { '': {} } });
 const callLog = rpc.declare({ object: 'truba', method: 'log', params: [ 'lines' ], expect: { log: '' } });
 const callLeases = rpc.declare({ object: 'luci-rpc', method: 'getDHCPLeases', expect: { '': {} } });
+const callSchema = rpc.declare({ object: 'truba', method: 'schema', expect: { '': {} } });
 
 // Общие стили — один раз на страницу; ?v= — как у модулей LuCI.
 if (!document.querySelector('link[data-truba]'))
@@ -244,8 +245,105 @@ function setResult(s) {
 		: _('failed — %s').format((s.errors || []).map(setError).join('; ') || '?');
 }
 
+// ---- Схема настроек и константы службы (truba.schema, ADR 0015) ----
+// Умолчания, пределы, имена и сроки — у службы, своих копий у интерфейса нет. Схема статична:
+// один вызов на страницу, представления ждут его в load().
+
+let schemaData = null, schemaLoading = null;
+
+function loadSchema() {
+	if (!schemaLoading)
+		schemaLoading = callSchema().then((s) => schemaData = s);
+	return schemaLoading;
+}
+
+function schema() {
+	return schemaData || { sections: {}, upstream_schemes: [], consts: {} };
+}
+
+function schemaOpt(sec, key) {
+	return schema().sections?.[sec]?.[key];
+}
+
+// Действующее значение опции — как его понимает служба (truba.conf): из UCI, а если его нет или
+// оно неверное — умолчание схемы. sid — для секций без имени (устройства).
+function get(sec, key, sid) {
+	const o = schemaOpt(sec, key), v = uci.get('truba', sid || sec, key);
+	if (!o)
+		return v;
+	if (v == null)
+		return o.def;
+	switch (o.type) {
+	case 'bool':
+		return [ '1', 'true', 'on', 'yes' ].includes(v);
+	case 'int': {
+		const n = /^\d+$/.test(v) ? +v : NaN;
+		return (n >= o.lo && n <= o.hi && !(o.min && n > 0 && n < o.min)) ? n : o.def;
+	}
+	case 'list':
+	case 'upstreams': {
+		const l = L.toArray(v);
+		return l.length ? l : o.def;
+	}
+	case 'enum':
+		return o.values.includes(v) ? v : o.def;
+	case 'pattern':
+		return (v !== '' && new RegExp(o.re).test(v)) ? v : o.def;
+	default:
+		return v;
+	}
+}
+
+// Поле формы по схеме: умолчание, подсказка и проверка. msg — текст ошибки поля с шаблоном.
+function field(o, sec, key, msg) {
+	const s = schemaOpt(sec, key);
+	if (!s)
+		return o;
+	switch (s.type) {
+	case 'bool':
+		o.default = s.def ? '1' : '0';
+		break;
+	case 'enum':
+	case 'list':
+	case 'upstreams':
+		o.default = s.def;
+		break;
+	case 'int':
+		o.placeholder = String(s.def);
+		o.datatype = s.min ? 'or(range(0,0),range(%d,%d))'.format(s.min, s.hi) : 'range(%d,%d)'.format(s.lo, s.hi);
+		break;
+	case 'pattern': {
+		const re = new RegExp(s.re);
+		o.placeholder = s.def;
+		o.validate = (sid, v) => (!v || re.test(v)) ? true : msg;
+		break;
+	}
+	case 'string':
+		o.placeholder = s.def;
+		break;
+	case 'ipv4':
+		o.datatype = 'ip4addr';
+		break;
+	}
+	return o;
+}
+
 function tunnelIface() {
-	return uci.get('truba', 'main', 'iface') || 'awg0';
+	return get('main', 'iface');
+}
+
+// Возраст рукопожатия Туннеля: норма — пока не старше max (handshake_max, так судит watchdog), дольше —
+// «внимание», пока watchdog не объявил Туннель упавшим; рукопожатия не было или Туннель упал — ошибка.
+// verdict — состояние из итога watchdog; его нет (watchdog выключен) — ошибка тогда, когда watchdog
+// объявил бы Туннель упавшим: через grace (fails × interval) после порога.
+function handshakeLevel(age, verdict, max, grace) {
+	if (age == null)
+		return 'err';
+	if (age <= max)
+		return 'ok';
+	if (verdict)
+		return verdict == 'down' ? 'err' : 'warn';
+	return age > max + grace ? 'err' : 'warn';
 }
 
 // Состояние Туннеля по status: [уровень, текст] — для плитки «Обзора» и вкладки «Туннель».
@@ -278,6 +376,7 @@ function tabUrl(tab) {
 
 return baseclass.extend({
 	callStatus, callLists, callCategories, callSets, callCheck, callUpdateLists, callRollbackLists, callRates, callLog, callLeases,
+	callSchema, loadSchema, schema, get, field, handshakeLevel,
 	runNatTest, runTunnelTest,
 	ACTION_LABELS, ACTION_LEVELS, REASON_LABELS, WARNINGS, NAT_ERRORS, UPNP_MISSING, NBSP, TABS,
 	fmtBytes, fmtRate, fmtAge, fmtTime, fmtDate, fmtNum, missingText,

@@ -1,6 +1,7 @@
 // Модули Трубы без procd и сети — секунды. Всё, что можно проверить без ядра и служб:
 // план, Приоритет, правила nftables и конфиг mosdns (эталоны в tests/golden + nft -c),
-// чтение настроек, перенаправления зон в truba, «Проверить домен/IP» на синтетических Наборах правил, история скорости,
+// чтение настроек и схема настроек, truba env, перенаправления зон в truba, «Проверить домен/IP» на синтетических
+// Наборах правил, история скорости,
 // методы ubus-API, которые читают файлы.
 //   ucode -L '/repo/router/truba/files/usr/share/ucode/*.uc' -L '/repo/tests/lib/*.uc' units.uc [каталог эталонов]
 // UPDATE_GOLDEN=1 — записать эталоны заново (tests/run.sh монтирует репозиторий на запись).
@@ -223,6 +224,81 @@ check('настройки: API mosdns — на соседнем порту', cfg
 config("config dns 'dns'\n\toption set_timeout '0'\n");
 check('настройки: срок 0 — без срока', F.load().dns.set_timeout == 0);
 
+// ---- Схема настроек (ADR 0015): умолчания и пределы — только в ней ----
+
+let sbad = [], sdefs = true;
+for (let sec, opts in F.SCHEMA ?? {})
+	for (let key, o in opts)
+		sdefs = same(F.check_value(sec, key, o.def, sbad), o.def) && sdefs;
+check('схема: каждое умолчание проходит свою проверку', length(keys(F.SCHEMA ?? {})) == 5 && sdefs && !length(sbad), sprintf('%J', sbad));
+config('');
+let dcfg = F.load();
+check('схема: пустой конфиг — умолчания схемы', dcfg.dns.port == F.SCHEMA?.dns?.port?.def && same(dcfg.zones, F.SCHEMA?.main?.zone?.def) &&
+	same(dcfg.dns.tunnel, F.SCHEMA?.dns?.tunnel_upstream?.def) && dcfg.watchdog.handshake_max == 180);
+config("config dns 'dns'\n\toption port ''\n\nconfig watchdog 'watchdog'\n\toption probe ''\n");
+dcfg = F.load();
+check('схема: пустая опция — умолчание, а не неверное значение', dcfg.dns.port == 5335 && dcfg.watchdog.probe == '' && !length(dcfg.invalid),
+	sprintf('%J', dcfg.invalid));
+
+// /etc/config/truba из пакета — полный образец настроек: совпадает со схемой в обе стороны.
+// Расхождения конфига text со схемой: опции не из схемы, не равные её умолчанию, недостающие.
+const PKG_CONFIG = readfile('/repo/router/truba/files/etc/config/truba');
+function schema_gaps(text) {
+	mkdir('/tmp/pkgconf');
+	writefile('/tmp/pkgconf/truba', text);
+	let pc = cursor('/tmp/pkgconf');
+	pc.load('truba');
+	let g = { extra: [], differ: [], absent: [] };
+	for (let sec in [ 'main', 'dns', 'lists', 'watchdog' ]) {
+		let s = pc.get_all('truba', sec) ?? {};
+		for (let key, raw in s) {
+			if (substr(key, 0, 1) == '.')
+				continue;
+			let o = F.SCHEMA?.[sec]?.[key];
+			if (!o)
+				push(g.extra, sec + '.' + key);
+			else if (!same(F.check_value(sec, key, raw), o.def))
+				push(g.differ, sec + '.' + key);
+		}
+		// Пустых значений UCI не хранит: опции с пустым умолчанием (stun, probe) в файле не видно.
+		// length() у флагов и чисел — null, поэтому «пусто» — только '' и пустой список.
+		for (let key, o in F.SCHEMA?.[sec] ?? {}) {
+			let empty = (o.def === '' || (type(o.def) == 'array' && !length(o.def)));
+			if (s[key] == null && !empty)
+				push(g.absent, sec + '.' + key);
+		}
+	}
+	return g;
+}
+let gaps = schema_gaps(PKG_CONFIG);
+check('config/truba: каждая опция — из схемы и равна её умолчанию', !length(gaps.extra) && !length(gaps.differ),
+	sprintf('нет в схеме: %J, не равны умолчанию: %J', gaps.extra, gaps.differ));
+check('config/truba: каждая опция схемы есть в файле', length(keys(F.SCHEMA ?? {})) && !length(gaps.absent), join(' ', gaps.absent));
+gaps = schema_gaps(replace(PKG_CONFIG, /\toption (routing|port|handshake_max) [^\n]*\n/g, ''));
+check('config/truba: пропуск опции заметен — и флага, и числа', same(sort(gaps.absent), [ 'dns.port', 'main.routing', 'watchdog.handshake_max' ]),
+	join(' ', gaps.absent));
+
+// ---- truba env: значения для shell-скриптов пакета (ADR 0015) ----
+
+function sh_env(script) {
+	writefile('/tmp/env.sh', F.env_lines?.() ?? '');
+	let p = popen("sh -n /tmp/env.sh && sh -c '. /tmp/env.sh; " + script + "' 2>&1", 'r');
+	let out = p.read('all');
+	p.close();
+	return out;
+}
+config("config main 'main'\n\nconfig watchdog 'watchdog'\n\toption enabled '0'\n");
+let eo = sh_env('printf \"%s|%s|%s|%s\" \"$TRUBA_APPLIED\" \"$TRUBA_FW_ZONE\" \"$TRUBA_IFACE\" \"$TRUBA_WATCHDOG\"');
+check('env: shell принимает вывод, значения — из службы', eo == C.APPLIED_FILE + '|' + C.FW_ZONE + '|awg0|0', eo);
+config("config main 'main'\n\toption iface \"x'; touch /tmp/pwned; '\"\n");
+system('rm -f /tmp/pwned');
+eo = sh_env('printf %s \"$TRUBA_IFACE\"');
+check('env: неверное имя интерфейса — умолчание, в shell не исполняется', eo == 'awg0' && system('test -e /tmp/pwned') != 0, eo);
+// reinstall.sh работает без пакета (после sysupgrade его ещё нет) — свои литералы, сверка здесь.
+let ri = readfile('/repo/router/truba/files/etc/truba/reinstall.sh');
+check('reinstall.sh: путь бэкапа dnsmasq и адрес mosdns — как у службы',
+	index(ri, C.DNSMASQ_BACKUP) >= 0 && index(ri, C.MOSDNS_ADDR + '#${port:-' + F.SCHEMA.dns.port.def + '}') >= 0);
+
 // Адрес Трубы внутри Туннеля — из адреса Роутера (ubus нет — из настроек).
 function peer_of(addr) {
 	writefile('/etc/config/network', sprintf("config interface 'awg0'\n\toption proto 'amneziawg'\n\tlist addresses '%s'\n\n" +
@@ -397,10 +473,11 @@ check('часы назад: точки по возрастанию, минуты
 
 let api = loadfile(PLUGIN)()?.truba;
 check('API: плагин регистрирует объект truba', api?.status != null);
+check('API: плагин без своих путей и своей shq', !match(readfile(PLUGIN), /'\/(var|usr|tmp|etc)\/|function shq/));
 let now = time();
-system([ 'mkdir', '-p', '/var/run/truba' ]);
-writefile('/var/run/truba/rates.json', sprintf('%J', { step: 5, points: [ [ now - 700, 1, 1, 1, 1 ], [ now - 300, 2, 2, 2, 2 ], [ now - 10 ], [ now - 5, 3, 3, 3, 3 ] ] }));
-writefile('/var/run/truba/rates-min.json', sprintf('%J', { step: 60, points: [ [ now - 90000, 1, 1, 1, 1 ], [ now - 120, 2, 2, 2, 2 ] ] }));
+system([ 'mkdir', '-p', C.RUN_DIR ]);
+writefile(C.RATES_FILE, sprintf('%J', { step: 5, points: [ [ now - 700, 1, 1, 1, 1 ], [ now - 300, 2, 2, 2, 2 ], [ now - 10 ], [ now - 5, 3, 3, 3, 3 ] ] }));
+writefile(C.RATES_MIN_FILE, sprintf('%J', { step: 60, points: [ [ now - 90000, 1, 1, 1, 1 ], [ now - 120, 2, 2, 2, 2 ] ] }));
 let rates = (args) => api.rates.call({ args });
 let rr = rates({ span: 600 });
 check('API rates: только точки за срок, разрыв тоже точка', rr.step == 5 && same(map(rr.points, p => p[0]), [ now - 300, now - 10, now - 5 ]),

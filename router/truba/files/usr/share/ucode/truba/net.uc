@@ -15,8 +15,12 @@ export function iface_up(iface, ub) {
 	return { up: !!st?.up, device: st?.l3_device ?? st?.device ?? iface };
 };
 
+// Сколько копий правила с одним приоритетом убирать за раз: ip rule add не проверяет повторы, и после
+// сбоя между удалением и добавлением правило могло задвоиться. Предел — чтобы цикл не шёл вечно.
+const RULE_DUPS_MAX = 8;
+
 function del_rule_prio(prio) {
-	for (let i = 0; i < 8; i++)
+	for (let i = 0; i < RULE_DUPS_MAX; i++)
 		if (system(sprintf('ip -4 rule del priority %d 2>/dev/null', prio)) != 0)
 			break;
 }
@@ -98,7 +102,7 @@ export function dnsmasq_enable(port) {
 	if (!sid)
 		return false;
 
-	let want = '127.0.0.1#' + port;
+	let want = C.MOSDNS_ADDR + '#' + port;
 	let cur = U.to_list(c.get('dhcp', sid, 'server'));
 
 	if (!stat(C.DNSMASQ_BACKUP)) {
@@ -217,7 +221,7 @@ export function forwardings_set(zones) {
 
 // ---- cron: блок между маркерами ----
 
-const CRONTAB = '/etc/crontabs/root';
+const CRONTAB_DIR = '/etc/crontabs', CRONTAB = CRONTAB_DIR + '/root';
 
 // update_utc «ЧЧ:ММ» → локальное время Роутера.
 function utc_to_local(hhmm) {
@@ -232,14 +236,17 @@ function utc_to_local(hhmm) {
 // Ближайший запуск обновления списков, unix-время; null — блока cron нет. Считается по
 // самой строке cron в местном времени Роутера, как её запустит crond (и после смены
 // летнего времени, когда строка уже разошлась с update_utc до следующего применения).
+// Строка — первая в блоке Трубы (cron_set).
 export function cron_next() {
-	let m = match(readfile(CRONTAB) ?? '', /(^|\n)([0-9]+) ([0-9]+) \* \* \* \/usr\/sbin\/truba update-lists/);
+	let lines = split(readfile(CRONTAB) ?? '', '\n');
+	let i = index(lines, C.CRON_BEGIN);
+	let m = (i >= 0) ? match(lines[i + 1] ?? '', /^([0-9]+) ([0-9]+) /) : null;
 	if (!m)
 		return null;
 	let now = time();
 	let tm = localtime(now);
-	tm.hour = int(m[3]);
-	tm.min = int(m[2]);
+	tm.hour = int(m[2]);
+	tm.min = int(m[1]);
 	tm.sec = 0;
 	let t = timelocal(tm);
 	if (t <= now) {
@@ -265,14 +272,14 @@ export function cron_set(enabled, update_utc) {
 	if (enabled) {
 		let t = utc_to_local(update_utc);
 		push(out, C.CRON_BEGIN);
-		push(out, sprintf('%d %d * * * /usr/sbin/truba update-lists >/dev/null 2>&1', t[1], t[0]));
+		push(out, sprintf('%d %d * * * %s update-lists >/dev/null 2>&1', t[1], t[0], C.CLI));
 		push(out, C.CRON_END);
 	}
 
 	let next = length(out) ? join('\n', out) + '\n' : '';
 	if (next == cur)
 		return false;
-	U.mkdirp('/etc/crontabs');
+	U.mkdirp(CRONTAB_DIR);
 	U.write_atomic(CRONTAB, next, 0600);
 	system('/etc/init.d/cron restart >/dev/null 2>&1');
 	return true;

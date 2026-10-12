@@ -10,10 +10,12 @@ import * as C from 'truba.const';
 import * as U from 'truba.util';
 import * as S from 'truba.state';
 
-const STEP = 5;           // точки — раз в 5 с
-const FINE_SPAN = 3600;   // за последний час
-const MIN_STEP = 60;      // поминутные средние
-const MIN_SPAN = 86400;   // за сутки
+// Шаг и сроки — C.HISTORY: те же у графика «Обзора» и у rpcd (rates).
+const STEP = C.HISTORY.fine.step;       // точки — раз в 5 с
+const FINE_SPAN = C.HISTORY.fine.span;  // за последний час
+const MIN_STEP = C.HISTORY.min.step;    // поминутные средние
+const MIN_SPAN = C.HISTORY.min.span;    // за сутки
+const MINUTE = 60;                      // с: соединения — в минуту, перерыв дольше минуты — разрыв
 
 // Значения точки после времени: байт/с к устройствам и от них по Действиям, затем новых
 // соединений в минуту. В поминутных средних — только первые MIN_VALUES: их рисует график.
@@ -41,13 +43,13 @@ export function snapshot(raw, since, m, t) {
 // который уменьшился или которого нет, даёт null только на своём месте.
 export function point(prev, cur) {
 	let dt = prev ? (cur.m - prev.m) / 1000.0 : 0;   // 1000.0: целые ucode делит нацело
-	if (!prev || prev.v == null || cur.v == null || dt < 1 || dt > 60 || prev.since != cur.since)
+	if (!prev || prev.v == null || cur.v == null || dt < 1 || dt > MINUTE || prev.since != cur.since)
 		return [ cur.t ];
 	let p = [ cur.t ];
 	for (let i = 0; i < length(cur.v); i++) {
 		let a = cur.v[i], b = prev.v[i];
 		let r = (a != null && b != null && a >= b) ? (a - b) / dt : null;
-		push(p, (r == null) ? null : int(((i < length(BYTES)) ? r : r * 60) + 0.5));
+		push(p, (r == null) ? null : int(((i < length(BYTES)) ? r : r * MINUTE) + 0.5));
 	}
 	return p;
 };

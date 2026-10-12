@@ -88,7 +88,7 @@ function renderTable(mode, cats, filterBox) {
 return view.extend({
 	load: function() {
 		return Promise.all([ common.callCategories(), uci.load('truba'), uci.load('firewall'), common.callLeases().catch(() => ({})),
-			common.callSets().catch(() => null) ]);
+			common.callSets().catch(() => null), common.loadSchema() ]);
 	},
 
 	// Не handleReset: так LuCI называет обработчик кнопки «Сброс» внизу страницы.
@@ -123,13 +123,13 @@ return view.extend({
 		o.value('selective', _('Selective'));
 		o.widget = 'radio';
 		o.orientation = 'horizontal';
-		o.default = 'all';
+		common.field(o, 'main', 'mode');
 
 		o = s.option(widgets.ZoneSelect, 'zone', _('Zones'),
 			_('Firewall zones whose devices are routed. Forwarding from them to zone «truba» is added automatically. Other zones go direct.'));
 		o.multiple = true;
 		o.nocreate = true;
-		o.default = 'lan';
+		common.field(o, 'main', 'zone');
 
 		// Размеры наборов — сколько подсетей и IP сейчас уходит по каждому Действию.
 		// Подсети geoip посчитаны при применении; в ядре соседние сливаются, там их меньше.
@@ -155,7 +155,7 @@ return view.extend({
 		ds.nodescriptions = true;
 
 		o = ds.option(form.Flag, 'enabled', _('Enabled'));
-		o.default = '1';
+		common.field(o, 'device', 'enabled');
 		o.rmempty = false;
 		o.editable = true;
 
@@ -183,7 +183,7 @@ return view.extend({
 		o.value('tunnel', _('All via tunnel'));
 		o.value('direct', _('All direct'));
 		o.value('rules', _('By rules'));
-		o.default = 'tunnel';
+		common.field(o, 'device', 'policy');
 		o.editable = true;
 		o.description = _('«All via tunnel» is recommended for game consoles: then all their traffic gets the Truba IP and full cone NAT.');
 

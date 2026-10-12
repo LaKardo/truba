@@ -103,6 +103,14 @@ async function saveApply(page) {
 			text.replace(/\s+/g, ' ').slice(0, 100));
 		fs.writeFileSync(`${out}/${t}.txt`, text);
 		await page.screenshot({ path: `${out}/${t}.png`, fullPage: true });
+		// Подсказки полей — из схемы службы (truba.schema, ADR 0015), а не из представления.
+		if (t == 'dns' || t == 'tunnel') {
+			const id = t == 'dns' ? 'widget.cbid.truba.dns.port' : 'widget.cbid.truba.watchdog.handshake_max';
+			const ph = await page.evaluate((id) => document.getElementById(id)?.placeholder, id);
+			const sch = await ubus('truba', 'schema');
+			const want = String(t == 'dns' ? sch.sections.dns.port.def : sch.sections.watchdog.handshake_max.def);
+			result(ph === want, `вкладка ${t}: подсказка поля — умолчание схемы службы`, `${ph} / ${want}`);
+		}
 	}
 
 	// «Проверить домен/IP»: IP из geoip:ru.

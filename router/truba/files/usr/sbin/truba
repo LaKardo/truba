@@ -22,6 +22,8 @@ function usage() {
 		'  teardown           снять все правила Трубы\n' +
 		'  routes             пересчитать таблицу Туннеля по его состоянию\n' +
 		'  refresh-bypass     обновить наборы локальных подсетей\n' +
+		'  hotplug            событие интерфейса из окружения (ACTION, INTERFACE, DEVICE)\n' +
+		'  env                пути и действующие настройки для shell: eval "$(truba env)"\n' +
 		'  update-lists [-f]  скачать Наборы правил (-f — применить даже без изменений)\n' +
 		'  rollback-lists [--bg]  вернуть предыдущие Наборы правил (--bg — применить в фоне)\n' +
 		'  check <домен|IP> [MAC]  какая Категория и Действие сработают\n' +
@@ -29,6 +31,7 @@ function usage() {
 		'  lists              версии Наборов правил в JSON\n' +
 		'  categories         Категории и Действия в JSON\n' +
 		'  sets               размеры наборов в JSON\n' +
+		'  schema             схема настроек и константы для интерфейса в JSON\n' +
 		'  reset-rules <all|selective>  Стартовые настройки Режима\n' +
 		'  nat-test [auto]    проверка внешнего IP и сохранения порта через Трубу\n' +
 		'                     (auto — запуск от watchdog после подъёма Туннеля)\n' +
@@ -56,6 +59,14 @@ case 'refresh-bypass':
 	load('core').refresh_bypass();
 	break;
 
+case 'hotplug':
+	load('core').hotplug({ action: getenv('ACTION'), iface: getenv('INTERFACE'), device: getenv('DEVICE') });
+	break;
+
+case 'env':
+	print(load('conf').env_lines());
+	break;
+
 case 'update-lists':
 	out(load('core').update_lists(args[0] == '-f'));
 	break;
@@ -80,6 +91,10 @@ case 'lists':
 
 case 'categories':
 	out(load('core').categories());
+	break;
+
+case 'schema':
+	out(load('conf').schema());
 	break;
 
 case 'sets':

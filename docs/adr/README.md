@@ -18,6 +18,7 @@
 | [0012](0012-tests-on-real-immortalwrt-in-docker.md) | Проверки — в Docker на настоящей ImmortalWrt, независимыми частями параллельно |
 | [0013](0013-tunnel-dns-server-on-vps.md) | DNS «Туннеля» — свой сервер на Трубе: unbound в Туннеле, TLS до Cloudflare и Google держит VPS |
 | [0014](0014-routed-zones-forwarding-and-dns-snat.md) | Перенаправления зон Маршрутизации в `truba` ведёт Труба; DNS из чужих подсетей dnsmasq получает от имени Роутера |
+| [0015](0015-single-source-schema-and-constants.md) | Один источник значений: схема настроек и константы — в ucode службы, LuCI и shell берут их у неё (`truba schema`, `truba env`) |
 
 ## Как вести
 

@@ -14,15 +14,15 @@ const NBSP = common.NBSP;
 const SLOW_POLL = 30000;
 
 // Адрес DNS-сервера в том виде, что понимает mosdns 5 (та же проверка — upstream_ok в conf.uc):
-// с опечаткой в схеме mosdns не запустился бы, а с ним пропал бы DNS всей сети.
+// с опечаткой в схеме mosdns не запустился бы, а с ним пропал бы DNS всей сети. Список схем —
+// у службы (truba.schema).
 const UPSTREAM_RE = /^(([a-z0-9+]+):\/\/)?(\[[0-9a-fA-F:.]+\]|[^\]\[\s\/@:]+)(:\d+)?(\/[^\s@]*)?(@[0-9.]+)?$/;
-const UPSTREAM_SCHEMES = [ 'udp', 'tcp', 'tcp+pipeline', 'tls', 'tls+pipeline', 'https', 'h3', 'quic', 'doq' ];
 
 function validateUpstream(sid, v) {
 	if (!v)
 		return true;
 	const m = UPSTREAM_RE.exec(v);
-	const ok = m && (m[2] == null ? m[5] == null : UPSTREAM_SCHEMES.includes(m[2]));
+	const ok = m && (m[2] == null ? m[5] == null : common.schema().upstream_schemes.includes(m[2]));
 	return ok ? true : _('Expected https://…, tls://…, quic://…, h3://…, tcp://… or udp://… (optionally «@IP»)');
 }
 
@@ -125,13 +125,13 @@ function updateVersions(r, l) {
 // Следующая проверка — по строке cron Роутера, она приходит в status.
 function updateNext(r, st) {
 	common.setText(r.next, !st.routing ? NBSP
-		: uci.get('truba', 'lists', 'auto_update') == '0' ? _('automatic update is off')
+		: !common.get('lists', 'auto_update') ? _('automatic update is off')
 		: _('Next check: %s').format(common.fmtTime(st.lists?.next)));
 }
 
 return view.extend({
 	load: function() {
-		return Promise.all([ common.callLists(), common.callStatus(), uci.load('truba') ]);
+		return Promise.all([ common.callLists(), common.callStatus(), uci.load('truba'), common.loadSchema() ]);
 	},
 
 	render: function(data) {
@@ -150,44 +150,40 @@ return view.extend({
 
 		let o = s.taboption('general', form.DynamicList, 'tunnel_upstream', _('For «Tunnel»'),
 			_('Used for categories with action Tunnel and, in mode «All via tunnel», for everything else. Requests go through the tunnel, each one to all servers at once. udp://10.77.77.1 is the DNS server on the Truba itself (install-vps.sh). Formats: https://…, tls://…, tls+pipeline://… (several requests in one connection), udp://…; «address@IP» sets the IP to connect to.'));
-		o.default = [ 'udp://10.77.77.1', 'https://1.1.1.1/dns-query' ];
+		common.field(o, 'dns', 'tunnel_upstream');
 		o.validate = validateUpstream;
 
 		o = s.taboption('general', form.DynamicList, 'direct_upstream', _('For «Direct»'),
 			_('Used for categories with action Direct, for the router\'s own hosts (NTP, list mirrors) and, in mode «Selective», for everything else.'));
-		o.default = [ 'tls+pipeline://common.dot.dns.yandex.net@77.88.8.8', 'tls+pipeline://common.dot.dns.yandex.net@77.88.8.1' ];
+		common.field(o, 'dns', 'direct_upstream');
 		o.validate = validateUpstream;
 
 		// Перехват хранится в секции main, но по смыслу — здесь.
 		o = s.taboption('general', form.Flag, 'dns_hijack', _('Intercept DNS (port 53)'),
 			_('IPv4 DNS requests of devices to any server are redirected to the router, so domain categories work for them too. Encrypted DNS in browsers (DoH) is not affected.'));
 		o.ucisection = 'main';
-		o.default = '1';
+		common.field(o, 'main', 'dns_hijack');
 		o.rmempty = false;
 
+		// Подсказки и пределы числовых полей — из схемы службы (ADR 0015).
 		o = s.taboption('general', form.Value, 'cache_size', _('Cache size, entries'));
-		o.datatype = 'range(1024,1048576)';
-		o.placeholder = '65536';
+		common.field(o, 'dns', 'cache_size');
 
 		o = s.taboption('general', form.Value, 'lazy_cache_ttl', _('Keep expired answers, s'),
 			_('An expired answer is returned at once and refreshed in the background, so familiar sites open without waiting for DNS. 0 — off.'));
-		o.datatype = 'range(0,604800)';
-		o.placeholder = '86400';
+		common.field(o, 'dns', 'lazy_cache_ttl');
 
 		o = s.taboption('general', form.Value, 'ttl_max', _('Maximum TTL, s'),
 			_('Upper limit for answers of classified domains, so devices re-resolve quickly after the rules change.'));
-		o.datatype = 'range(30,86400)';
-		o.placeholder = '300';
+		common.field(o, 'dns', 'ttl_max');
 
 		o = s.taboption('advanced', form.Value, 'set_timeout', _('Keep DNS addresses in routing sets, s'),
 			_('IPs from answers for categories with action Tunnel or Direct stay in the routing sets this long after they were added; a later answer adds them again. A CDN address the domain no longer uses stops steering traffic at the latest after this time. 0 — keep until the rules or lists change.'));
-		o.datatype = 'or(range(0,0),range(600,604800))';
-		o.placeholder = '86400';
+		common.field(o, 'dns', 'set_timeout');
 
 		o = s.taboption('advanced', form.Value, 'port', _('mosdns port'),
 			_('Local port; dnsmasq forwards requests here. The next port is taken by the mosdns statistics API (127.0.0.1 only).'));
-		o.datatype = 'port';
-		o.placeholder = '5335';
+		common.field(o, 'dns', 'port');
 
 		s = m.section(form.NamedSection, 'lists', 'lists', _('Rule sets'),
 			_('geoip.dat and geosite.dat from kirilllavrov/geoip-builder and kirilllavrov/geosite-builder. Files are used unchanged; the checksum is verified before every replacement.'));
@@ -223,25 +219,27 @@ return view.extend({
 		]));
 
 		o = s.taboption('general', form.Flag, 'auto_update', _('Update automatically'));
-		o.default = '1';
+		common.field(o, 'lists', 'auto_update');
 		o.rmempty = false;
 
 		o = s.taboption('general', form.Value, 'update_utc', _('Update time (UTC)'),
 			_('geoip.dat is published every three days around 10–11 UTC, geosite.dat irregularly, usually by 09 UTC; at 12:00 a new release is picked up the same day. Converted to the router time zone for cron.'));
-		o.placeholder = '12:00';
+		common.field(o, 'lists', 'update_utc', _('Format: HH:MM'));
 		o.depends('auto_update', '1');
-		o.validate = (sid, v) => (!v || /^([01]?\d|2[0-3]):[0-5]\d$/.test(v)) ? true : _('Format: HH:MM');
 
 		o = s.taboption('general', form.Flag, 'via_tunnel', _('Download via tunnel'),
 			_('The main source is fetched through the tunnel; the mirror always goes direct.'));
-		o.default = '1';
+		common.field(o, 'lists', 'via_tunnel');
 		o.rmempty = false;
 
 		o = s.taboption('sources', form.Value, 'geoip_url', _('geoip.dat'));
-		o.datatype = 'string';
+		common.field(o, 'lists', 'geoip_url');
 		o = s.taboption('sources', form.Value, 'geoip_mirror', _('geoip.dat mirror'), _('Downloaded directly if the main source failed.'));
+		common.field(o, 'lists', 'geoip_mirror');
 		o = s.taboption('sources', form.Value, 'geosite_url', _('geosite.dat'));
+		common.field(o, 'lists', 'geosite_url');
 		o = s.taboption('sources', form.Value, 'geosite_mirror', _('geosite.dat mirror'));
+		common.field(o, 'lists', 'geosite_mirror');
 
 		let polled = Date.now();
 		poll.add(() => {

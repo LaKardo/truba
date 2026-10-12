@@ -1,4 +1,4 @@
-// Константы Трубы: метки, таблица маршрутов, пути.
+// Константы Трубы: метки, таблица маршрутов, пути. Пути и имена записаны только здесь (ADR 0015).
 'use strict';
 
 // Биты 24–27 (ADR 0011): байт 0x00ff0000 целиком занимают mesh-VPN и маршрутизация по политикам,
@@ -15,35 +15,63 @@ export const PRIO_RULE_OIF  = 1001;
 export const NFT_TABLE = 'truba';
 // Зона межсетевого экрана Туннеля (её создаёт uci-defaults).
 export const FW_ZONE = 'truba';
+// Тег журнала: под ним пишет служба, по нему «Диагностика» отбирает её строки.
+export const LOG_TAG = 'truba';
 
-export const LISTS_DIR = '/etc/truba/lists';
-export const PREV_DIR  = '/etc/truba/lists/prev';
-export const STATE_DIR = '/etc/truba/state';
+// Команда службы и её init-скрипт.
+export const CLI  = '/usr/sbin/truba';
+export const INIT = '/etc/init.d/truba';
+
+// Адрес, на котором слушает mosdns: к нему dnsmasq пересылает запросы, там же API mosdns.
+export const MOSDNS_ADDR = '127.0.0.1';
+
+// На флеше: Наборы правил, бэкапы чужих настроек, последняя удачная копия правил.
+export const CONF_DIR  = '/etc/truba';
+export const LISTS_DIR = CONF_DIR + '/lists';
+export const PREV_DIR  = LISTS_DIR + '/prev';
+export const STATE_DIR = CONF_DIR + '/state';
+export const GOOD_DIR  = CONF_DIR + '/good';
+export const REINSTALL = CONF_DIR + '/reinstall.sh';
+// В памяти: распакованные списки, итоги и состояние, сгенерированные конфиги.
 export const DATA_DIR  = '/var/lib/truba';
 export const RUN_DIR   = '/var/run/truba';
 export const ETC_DIR   = '/var/etc/truba';
+// Временные: скачивание Наборов правил, проверка Туннеля (каталог mktemp с этим префиксом).
+export const TMP_DIR   = '/tmp';
+export const DL_DIR    = TMP_DIR + '/truba-dl';
+export const TT_TMP    = TMP_DIR + '/truba-tt';
 
-export const MOSDNS_CONF = '/var/etc/truba/mosdns.json';
-export const NFT_FILE    = '/var/etc/truba/truba.nft';
-export const STAMP_FILE  = '/var/lib/truba/stamp';
-export const CATS_FILE   = '/var/lib/truba/categories.json';
-export const HEALTH_FILE = '/var/run/truba/health.json';
-export const APPLIED_FILE = '/var/run/truba/applied.json';
-export const NAT_FILE    = '/var/run/truba/nat.json';
-export const TT_FILE     = '/var/run/truba/tunnel-test.json';
+export const MOSDNS_CONF = ETC_DIR + '/mosdns.json';
+export const NFT_FILE    = ETC_DIR + '/truba.nft';
+export const STAMP_FILE  = DATA_DIR + '/stamp';
+export const CATS_FILE   = DATA_DIR + '/categories.json';
+export const HEALTH_FILE = RUN_DIR + '/health.json';
+export const APPLIED_FILE = RUN_DIR + '/applied.json';
+export const NAT_FILE    = RUN_DIR + '/nat.json';
+export const TT_FILE     = RUN_DIR + '/tunnel-test.json';
 // История скорости для графика «Обзора» (truba.stats): точки по 5 с за час и поминутные за сутки.
-export const RATES_FILE     = '/var/run/truba/rates.json';
-export const RATES_MIN_FILE = '/var/run/truba/rates-min.json';
-export const LISTS_STATE = '/etc/truba/state/lists.json';
-export const DNSMASQ_BACKUP = '/etc/truba/state/dnsmasq.json';
-export const UPNP_BACKUP = '/etc/truba/state/upnpd.json';
+export const RATES_FILE     = RUN_DIR + '/rates.json';
+export const RATES_MIN_FILE = RUN_DIR + '/rates-min.json';
+export const LISTS_STATE = STATE_DIR + '/lists.json';
+export const DNSMASQ_BACKUP = STATE_DIR + '/dnsmasq.json';
+export const UPNP_BACKUP = STATE_DIR + '/upnpd.json';
 
 // Последняя удачная копия правил (ADR 0006) — на флеше: нужна после перезагрузки,
 // когда применить настройки не удалось, а прежних правил в памяти уже нет.
-export const GOOD_NFT    = '/etc/truba/good/truba.nft';
-export const GOOD_MOSDNS  = '/etc/truba/good/mosdns.json';
-export const GOOD_GEOSITE = '/etc/truba/good/geosite';
-export const GOOD_META    = '/etc/truba/good/meta.json';
+export const GOOD_NFT    = GOOD_DIR + '/truba.nft';
+export const GOOD_MOSDNS  = GOOD_DIR + '/mosdns.json';
+export const GOOD_GEOSITE = GOOD_DIR + '/geosite';
+export const GOOD_META    = GOOD_DIR + '/meta.json';
+
+// История скорости (truba stats, ADR 0010): step — шаг точек, с; span — сколько их хранится, с.
+// fine — каждый замер за час, min — поминутные средние за сутки. Те же сроки — у графика «Обзора».
+export const HISTORY = {
+	fine: { step: 5, span: 3600 },
+	min: { step: 60, span: 86400 },
+};
+
+// Окно последних проверок watchdog для «Обзора»: задержка и потери за ~10 минут при интервале 30 с.
+export const PROBE_WINDOW = 20;
 
 // Блокировки: применение настроек и Наборы правил.
 export const LOCK_APPLY = 'truba';

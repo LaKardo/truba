@@ -3,9 +3,10 @@
 
 import { readfile, rename, mkdir, stat, popen, unlink, open } from 'fs';
 import { connect } from 'ubus';
+import * as C from 'truba.const';
 
 export function log(level, msg) {
-	system([ 'logger', '-t', 'truba', '-p', 'daemon.' + level, msg ]);
+	system([ 'logger', '-t', C.LOG_TAG, '-p', 'daemon.' + level, msg ]);
 };
 
 export function info(msg) { log('info', msg); };

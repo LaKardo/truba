@@ -77,6 +77,7 @@ H=/var/run/truba/health.json
 health() { jsonfilter -i "$H" -e "$1" 2>/dev/null; }
 probes() { [ "$(health '@.probes[0]' | cut -d. -f1)" -ge 0 ] 2>/dev/null; }
 check "задержка и окно проверок — в health.json в /var/run, интервал 10" eval 'wait_for 15 probes && [ "$(health @.interval)" = 10 ]'
+check "health.json несёт handshake_max — по нему «Туннель» красит рукопожатие" test "$(health @.handshake_max)" = 180
 nat_auto() { [ "$(jsonfilter -i /var/run/truba/nat.json -e '@.auto' 2>/dev/null)" = true ]; }
 check "проверка NAT запущена сама после подъёма, итог OK" eval 'wait_for 20 nat_auto && [ "$(jsonfilter -i /var/run/truba/nat.json -e "@.ok")" = true ]'
 big_ok() { [ "$(health '@.big.ok')" = true ]; }

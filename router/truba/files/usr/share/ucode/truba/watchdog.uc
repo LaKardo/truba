@@ -22,15 +22,19 @@ function handshake_age(dev) {
 	return latest ? (time() - latest) : null;
 }
 
+// ping: ответа ждём 2 с (через Туннель — с запасом к обычным 30–150 мс), одиночный — не дольше 3 с всего.
+const PING_WAIT = 2, PING_DEADLINE = 3;
+// Размер пакета ping — это данные (-s): IP-пакет больше на заголовки IPv4 (20) и ICMP (8).
+const ICMP_HDR = 28;
+// Меньше минимального MTU IPv4 интерфейс не настроен (нет данных): крупные пакеты не проверяются.
+const MTU_MIN_V4 = 576;
+
 // Время ответа на ping через Туннель, мс; null — ответа нет.
 export function ping_rtt(dev, target) {
-	let r = U.run(sprintf('ping -c 1 -W 2 -w 3 -I %s %s', U.shq(dev), U.shq(target)));
+	let r = U.run(sprintf('ping -c 1 -W %d -w %d -I %s %s', PING_WAIT, PING_DEADLINE, U.shq(dev), U.shq(target)));
 	let m = (r.code == 0) ? match(r.out, /time=([0-9.]+) ?ms/) : null;
 	return m ? +m[1] : null;
 };
-
-// Окно последних проверок для «Обзора»: задержка и потери за ~10 минут при интервале 30 с.
-const PROBE_WINDOW = 20;
 
 function iface_mtu(dev) {
 	return int(trim(readfile('/sys/class/net/' + dev + '/mtu') ?? '0'));
@@ -48,9 +52,9 @@ function ping_stats(out) {
 // с задержкой, а загрузки замирают на секунды. size — размер пакета в байтах (= MTU).
 function big_probe(dev, target) {
 	let mtu = iface_mtu(dev);
-	if (mtu < 576)
+	if (mtu < MTU_MIN_V4)
 		return null;
-	let s = ping_stats(U.run(sprintf('ping -c 3 -W 2 -s %d -I %s %s', mtu - 28, U.shq(dev), U.shq(target))).out);
+	let s = ping_stats(U.run(sprintf('ping -c 3 -W %d -s %d -I %s %s', PING_WAIT, mtu - ICMP_HDR, U.shq(dev), U.shq(target))).out);
 	return { ok: s.received >= 2, sent: s.sent, received: s.received, size: mtu, time: time() };
 }
 
@@ -59,7 +63,9 @@ function big_probe(dev, target) {
 const BIG_EVERY = 10;
 
 // «Проверка Туннеля» на «Диагностике»: ping Трубы пакетами трёх размеров разом.
-// Размеры — IP-пакета в байтах: обычный ping, средний и во весь MTU Туннеля.
+// Размеры — IP-пакета в байтах: обычный ping (56 байт данных), средний (1000) и во весь MTU Туннеля.
+const TT_SMALL = 84, TT_MID = 1028;
+
 function run_tunnel_test() {
 	let cfg = F.load();
 	let tinfo = F.tunnel_info(cfg.iface);
@@ -72,17 +78,17 @@ function run_tunnel_test() {
 	if (!target)
 		return { error: 'no_target' };
 	let mtu = iface_mtu(st.device);
-	let sizes = [ 84 ];
-	if (mtu > 1028)
-		push(sizes, 1028);
-	if (mtu > 84)
+	let sizes = [ TT_SMALL ];
+	if (mtu > TT_MID)
+		push(sizes, TT_MID);
+	if (mtu > TT_SMALL)
 		push(sizes, mtu);
-	let dir = trim(U.run('mktemp -d /tmp/truba-tt.XXXXXX').out);
-	if (!match(dir, /^\/tmp\/truba-tt\./))
+	let dir = trim(U.run('mktemp -d ' + C.TT_TMP + '.XXXXXX').out);
+	if (substr(dir, 0, length(C.TT_TMP) + 1) != C.TT_TMP + '.')
 		return { error: 'tmp' };
 	let cmd = '';
 	for (let s in sizes)
-		cmd += sprintf('ping -c 5 -W 2 -s %d -I %s %s > %s/%d 2>&1 & ', s - 28, U.shq(st.device), U.shq(target), dir, s);
+		cmd += sprintf('ping -c 5 -W %d -s %d -I %s %s > %s/%d 2>&1 & ', PING_WAIT, s - ICMP_HDR, U.shq(st.device), U.shq(target), dir, s);
 	U.run(cmd + 'wait');
 	let results = map(sizes, (s) => {
 		let r = ping_stats(readfile(dir + '/' + s) ?? '');
@@ -132,13 +138,13 @@ export function run() {
 	let fresh = prev && time() - (prev.last_check ?? 0) <= 3 * cfg.watchdog.interval && prev.interval == cfg.watchdog.interval;
 	let state = prev?.state ?? 'healthy';
 	let since = (fresh && prev.since) ? prev.since : time(), fails = 0;
-	let probes = (fresh && type(prev.probes) == 'array') ? slice(prev.probes, -PROBE_WINDOW) : [];   // задержки, мс; null — потеря
+	let probes = (fresh && type(prev.probes) == 'array') ? slice(prev.probes, -C.PROBE_WINDOW) : [];   // задержки, мс; null — потеря
 	let big = fresh ? prev.big : null, big_n = 0;   // итог big_probe
 	let timer;
 
 	let probed = (rtt) => {
 		push(probes, rtt);
-		if (length(probes) > PROBE_WINDOW)
+		if (length(probes) > C.PROBE_WINDOW)
 			shift(probes);
 	};
 
@@ -165,7 +171,9 @@ export function run() {
 		let w = cfg.watchdog;
 		let tinfo = F.tunnel_info(cfg.iface);
 		let st = N.iface_up(cfg.iface);
-		let rec = { state, since, fails, last_check: time(), interval: w.interval, handshake_age: null, ping: null, rtt: null, big };
+		// interval и handshake_max — для «Туннеля»: окно проверок во времени и порог возраста рукопожатия.
+		let rec = { state, since, fails, last_check: time(), interval: w.interval, handshake_max: w.handshake_max,
+		            handshake_age: null, ping: null, rtt: null, big };
 
 		if (tinfo.disabled) {
 			fails = 0;
@@ -196,7 +204,7 @@ export function run() {
 				// В фоне: проверка ждёт ответов до 4,5 с, а цикл не должен.
 				if (nat_due(since)) {
 					nat_started = time();
-					system('( /usr/sbin/truba nat-test auto >/dev/null 2>&1 & )');
+					system('( ' + C.CLI + ' nat-test auto >/dev/null 2>&1 & )');
 				}
 				// Итога нет или он старше подъёма Туннеля — проверить сейчас, иначе раз в BIG_EVERY.
 				if (probe && (big == null || big.time < since || ++big_n >= BIG_EVERY)) {
