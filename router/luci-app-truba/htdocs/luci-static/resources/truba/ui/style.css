@@ -318,6 +318,91 @@
 .changes .btn { border-color: color-mix(in srgb, var(--card) 35%, transparent); }
 .changes .btn.p { border-color: var(--tun); }
 
+/* ---- «Устройства»: список и панель устройства ---- */
+.split { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); gap: 12px; align-items: start; }
+.split .panel { position: sticky; top: 8px; }
+.toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 10px; }
+.toolbar input, .addmac input, .check input {
+	flex: 1 1 140px;
+	min-width: 0;
+	height: 30px;
+	padding: 0 10px;
+	border: 1px solid var(--bd);
+	border-radius: 7px;
+	background: var(--pg);
+	color: var(--tx);
+	font: inherit;
+	font-size: 12px;
+}
+.dev {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) 92px 112px 64px;
+	align-items: center;
+	gap: 10px;
+	width: 100%;
+	margin: 0;
+	padding: 8px 6px;
+	border: 0;
+	border-top: 1px solid var(--bd);
+	border-radius: 6px;
+	background: transparent;
+	color: inherit;
+	font: inherit;
+	text-align: left;
+	cursor: pointer;
+}
+.dev.sel { border-top-color: transparent; background: color-mix(in srgb, var(--tun) 10%, transparent); }
+.dev .n { min-width: 0; }
+.dev .n b { display: block; overflow: hidden; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+.dev .n .mu { display: block; font-size: 11px; }
+.dev .dot { display: inline-block; width: 8px; height: 8px; box-shadow: none; vertical-align: 1px; }
+.r { font-size: 12px; font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+.r small { display: block; color: var(--mu); font-size: 11px; }
+.pol { display: inline-block; margin-top: 2px; padding: 0 7px; border-radius: 999px; font-size: 11px; }
+.pol.tunnel { background: color-mix(in srgb, var(--tun) 16%, transparent); color: var(--tun); }
+.pol.direct { background: color-mix(in srgb, var(--dir) 16%, transparent); color: var(--dir); }
+.policy { margin: 12px 0 0; }
+.policy .seg { display: flex; }
+.policy .seg button { flex: 1; }
+.policy .mu { margin-top: 6px; font-size: 11px; }
+.conn {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) auto 84px;
+	align-items: center;
+	gap: 8px;
+	padding: 6px 0;
+	border-top: 1px solid var(--bd);
+	font-size: 12px;
+}
+.conn .n b { font-weight: 500; }
+.conn .n .mu { display: block; font-size: 11px; }
+.addmac { display: grid; gap: 8px; margin: 0 0 12px; padding: 10px; border-radius: 8px; background: var(--chip); }
+.addmac label { display: grid; gap: 2px; }
+.addmac .acts, .check { display: flex; flex-wrap: wrap; gap: 8px; }
+.err-text { color: var(--blk); font-size: 12px; }
+.check-res { margin-top: 6px; }
+@container (max-width: 1000px) {
+	.split { grid-template-columns: minmax(0, 1fr); }
+	.split .panel { position: static; }
+	.panel-ph { display: none; }
+}
+@container (max-width: 600px) {
+	.dev { grid-template-columns: minmax(0, 1fr) 104px; }
+	.dev .bar { grid-column: 1 / -1; order: 3; }
+	.dev .day { display: none; }
+	/* Панель — снизу экрана поверх списка. Не position: fixed: корень Трубы — контейнер для @container,
+	   у него layout containment, и fixed отсчитывался бы от него, а не от окна. */
+	.split .panel {
+		position: sticky;
+		bottom: 0;
+		z-index: 1;
+		max-height: 75vh;
+		overflow: auto;
+		border-radius: 14px 14px 10px 10px;
+		box-shadow: 0 -6px 24px rgba(0, 0, 0, .25);
+	}
+}
+
 /* ---- Пусто и загрузка ---- */
 .empty { color: var(--mu); font-style: italic; }
 .spinning { color: var(--mu); font-style: normal; }

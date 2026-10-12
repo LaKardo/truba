@@ -82,12 +82,6 @@ msgstr "%d мин назад"
 msgid "%d h ago"
 msgstr "%d ч назад"
 
-msgid "Per-device exceptions. A device is recognised by its MAC address, also behind mesh nodes in 4-address mode (it keeps client MACs). Block still applies to all devices."
-msgstr "Исключения для отдельных устройств. Устройство узнаётся по MAC-адресу, в том числе за mesh-узлами в 4-адресном режиме (он сохраняет MAC клиентов). Блок действует на все устройства."
-
-msgid "Device policies"
-msgstr "Политики устройств"
-
 msgid "Enabled"
 msgstr "Включено"
 
@@ -949,12 +943,6 @@ msgstr "В наборах сейчас"
 msgid "nothing: routing is off"
 msgstr "пусто: Маршрутизация выключена"
 
-msgid "In the network"
-msgstr "В сети"
-
-msgid "not online"
-msgstr "не в сети"
-
 msgid "With an explicit action"
 msgstr "С явным Действием"
 
@@ -1116,3 +1104,97 @@ msgstr "решено до смены настроек"
 
 msgid "Tunnel %d%%, direct %d%%"
 msgstr "Туннель %d%%, напрямую %d%%"
+
+
+msgid "all via tunnel"
+msgstr "всё в туннель"
+
+msgid "all direct"
+msgstr "всё напрямую"
+
+msgid "DHCP"
+msgstr "DHCP"
+
+msgid "neighbour"
+msgstr "сосед"
+
+msgid "settings"
+msgstr "настройки"
+
+msgid "offline"
+msgstr "не в сети"
+
+msgid "Not a MAC address"
+msgstr "Это не MAC-адрес"
+
+msgid "Add"
+msgstr "Добавить"
+
+msgid "Add by MAC"
+msgstr "Добавить по MAC"
+
+msgid "Name, IP or MAC"
+msgstr "Имя, IP или MAC"
+
+msgid "Filter"
+msgstr "Фильтр"
+
+msgid "Active"
+msgstr "Активные"
+
+msgid "With a policy"
+msgstr "С Политикой"
+
+msgid "No devices match the filter."
+msgstr "Под фильтр не подходит ни одно устройство."
+
+msgid "No devices with traffic in the last 24 hours yet."
+msgstr "Устройств с трафиком за последние сутки пока нет."
+
+msgid "No traffic in the last hour."
+msgstr "За последний час трафика не было."
+
+msgid "Loading…"
+msgstr "Загрузка…"
+
+msgid "The connection table is not available on the router."
+msgstr "Таблица соединений на Роутере недоступна."
+
+msgid "No connections right now."
+msgstr "Сейчас соединений нет."
+
+msgid "Connections: %d"
+msgstr "Соединений: %d"
+
+msgid "domain or IP"
+msgstr "домен или IP"
+
+msgid "The check failed."
+msgstr "Проверить не удалось."
+
+msgid "Close"
+msgstr "Закрыть"
+
+msgid "no MAC"
+msgstr "без MAC"
+
+msgid "The policy is tied to the MAC address; mesh VPN nodes have none."
+msgstr "Политика привязана к MAC-адресу, у узлов mesh-VPN его нет."
+
+msgid "Last hour"
+msgstr "За последний час"
+
+msgid "Where it goes now"
+msgstr "Куда ходит сейчас"
+
+msgid "The device is offline."
+msgstr "Устройство не в сети."
+
+msgid "Check for this device"
+msgstr "Проверить для этого устройства"
+
+msgid "Who in the home network uses how much and through what; a device policy overrides the categories."
+msgstr "Кто в домашней сети сколько качает и через что; Политика устройства сильнее Категорий."
+
+msgid "Select a device to see its traffic and policy."
+msgstr "Выберите устройство, чтобы увидеть его трафик и Политику."

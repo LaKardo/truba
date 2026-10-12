@@ -15,6 +15,11 @@
 		"order": 10,
 		"action": { "type": "view", "path": "truba/overview" }
 	},
+	"admin/services/truba/devices": {
+		"title": "Devices",
+		"order": 15,
+		"action": { "type": "view", "path": "truba/devices" }
+	},
 	"admin/services/truba/tunnel": {
 		"title": "Tunnel",
 		"order": 20,
@@ -39,9 +44,6 @@
 		"title": "Diagnostics",
 		"order": 60,
 		"action": { "type": "view", "path": "truba/diagnostics" }
-	},
-	"admin/services/truba/devices": {
-		"action": { "type": "alias", "path": "admin/services/truba/routing" }
 	},
 	"admin/services/truba/lists": {
 		"action": { "type": "alias", "path": "admin/services/truba/dns" }

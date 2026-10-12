@@ -87,7 +87,7 @@ function renderTable(mode, cats, filterBox) {
 
 return view.extend({
 	load: function() {
-		return Promise.all([ common.callCategories(), uci.load('truba'), uci.load('firewall'), common.callLeases().catch(() => ({})),
+		return Promise.all([ common.callCategories(), uci.load('truba'), uci.load('firewall'),
 			common.callSets().catch(() => null), common.loadSchema() ]);
 	},
 
@@ -95,7 +95,7 @@ return view.extend({
 	handleResetRules: function(mode, starting) {
 		if (!confirm(_('Reset all category actions of this mode to the starting settings?')))
 			return;
-		// Сначала — несохранённые правки формы (Политики устройств): перезагрузка их потеряла бы.
+		// Сначала — несохранённые правки формы (Режим, Зоны): перезагрузка их потеряла бы.
 		return this.map.parse().then(() => {
 			for (let s of ruleSections(mode))
 				uci.remove('truba', s['.name']);
@@ -133,7 +133,7 @@ return view.extend({
 
 		// Размеры наборов — сколько подсетей и IP сейчас уходит по каждому Действию.
 		// Подсети geoip посчитаны при применении; в ядре соседние сливаются, там их меньше.
-		const sets = data[4];
+		const sets = data[3];
 		o = s.option(form.DummyValue, '_sets', _('In the sets now'));
 		o.rawhtml = false;
 		o.cfgvalue = () => {
@@ -145,48 +145,7 @@ return view.extend({
 				+ ' — ' + _('IPs from DNS: %s').format(parts([ [ 'tunnel', d?.tunnel ], [ 'direct', d?.direct ] ]));
 		};
 
-		// Исключения для устройств — до Категорий: политика устройства сильнее их.
-		const leases = data[3]?.dhcp_leases || [];
-		const ds = m.section(form.GridSection, 'device', _('Device policies'),
-			_('Per-device exceptions. A device is recognised by its MAC address, also behind mesh nodes in 4-address mode (it keeps client MACs). Block still applies to all devices.'));
-		ds.anonymous = true;
-		ds.addremove = true;
-		ds.sortable = true;
-		ds.nodescriptions = true;
-
-		o = ds.option(form.Flag, 'enabled', _('Enabled'));
-		common.field(o, 'device', 'enabled');
-		o.rmempty = false;
-		o.editable = true;
-
-		o = ds.option(form.Value, 'name', _('Name'));
-		o.rmempty = false;
-
-		o = ds.option(form.Value, 'mac', _('MAC address'));
-		o.datatype = 'macaddr';
-		o.rmempty = false;
-		for (let l of leases) {
-			if (l.macaddr)
-				o.value(l.macaddr.toUpperCase(), '%s (%s, %s)'.format(l.macaddr.toUpperCase(), l.hostname || '?', l.ipaddr || '?'));
-		}
-
-		// Кто это сейчас в сети: имя и IP из DHCP по MAC.
-		o = ds.option(form.DummyValue, '_host', _('In the network'));
-		o.modalonly = false;
-		o.cfgvalue = (sid) => {
-			const mac = (uci.get('truba', sid, 'mac') || '').toUpperCase();
-			const l = leases.find((x) => (x.macaddr || '').toUpperCase() == mac);
-			return l ? '%s · %s'.format(l.hostname || '?', l.ipaddr || '?') : _('not online');
-		};
-
-		o = ds.option(form.ListValue, 'policy', _('Policy'));
-		o.value('tunnel', _('All via tunnel'));
-		o.value('direct', _('All direct'));
-		o.value('rules', _('By rules'));
-		common.field(o, 'device', 'policy');
-		o.editable = true;
-		o.description = _('«All via tunnel» is recommended for game consoles: then all their traffic gets the Truba IP and full cone NAT.');
-
+		// Политики устройств — на вкладке «Устройства» (ADR 0018).
 		const FILTER_LABELS = { all: _('All'), explicit: _('With an explicit action'), tunnel: common.ACTION_LABELS.tunnel,
 			direct: common.ACTION_LABELS.direct, block: common.ACTION_LABELS.block };
 		const sections = [];

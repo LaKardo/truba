@@ -193,7 +193,7 @@ msgstr ""
 msgid "working"
 msgstr ""
 
-#: htdocs/luci-static/resources/truba/common.js
+#: menu.d
 msgid "Devices"
 msgstr ""
 
@@ -243,6 +243,174 @@ msgstr ""
 
 #: htdocs/luci-static/resources/truba/ui/kit.js
 msgid "Apply"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/devices.js
+msgid "By rules"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/devices.js
+msgid "All via tunnel"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/devices.js
+msgid "All direct"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/devices.js
+msgid "all via tunnel"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/devices.js
+msgid "all direct"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/devices.js
+msgid "DHCP"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/devices.js
+msgid "neighbour"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/devices.js
+msgid "settings"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/devices.js
+msgid "offline"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/devices.js
+msgid "MAC address"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/devices.js
+msgid "Not a MAC address"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/devices.js
+msgid "Name"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/devices.js
+msgid "Policy"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/devices.js
+msgid "Add"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/devices.js
+msgid "Cancel"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/devices.js
+msgid "Add by MAC"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/devices.js
+msgid "Name, IP or MAC"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/devices.js
+msgid "Filter"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/devices.js
+msgid "All"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/devices.js
+msgid "Active"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/devices.js
+msgid "With a policy"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/devices.js
+msgid "No devices match the filter."
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/devices.js
+msgid "No devices with traffic in the last 24 hours yet."
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/devices.js
+msgid "No traffic in the last hour."
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/devices.js
+msgid "No connection to the router"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/devices.js
+msgid "Loading…"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/devices.js
+msgid "The connection table is not available on the router."
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/devices.js
+msgid "No connections right now."
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/devices.js
+msgid "Connections: %d"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/devices.js
+msgid "domain or IP"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/devices.js
+msgid "Check"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/devices.js
+msgid "The check failed."
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/devices.js
+msgid "Close"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/devices.js
+msgid "no MAC"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/devices.js
+msgid "«All via tunnel» is recommended for game consoles: then all their traffic gets the Truba IP and full cone NAT."
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/devices.js
+msgid "The policy is tied to the MAC address; mesh VPN nodes have none."
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/devices.js
+msgid "Last hour"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/devices.js
+msgid "Where it goes now"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/devices.js
+msgid "The device is offline."
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/devices.js
+msgid "Check for this device"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/devices.js
+msgid "Who in the home network uses how much and through what; a device policy overrides the categories."
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/devices.js
+msgid "Select a device to see its traffic and policy."
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/diagnostics.js
@@ -385,10 +553,6 @@ msgstr ""
 msgid "Checking… about 5 seconds"
 msgstr ""
 
-#: htdocs/luci-static/resources/view/truba/diagnostics.js
-msgid "All"
-msgstr ""
-
 #: menu.d
 msgid "Truba"
 msgstr ""
@@ -407,10 +571,6 @@ msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/diagnostics.js
 msgid "Shows which category and action apply and why. A domain is resolved through the router, the same way a device would."
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/diagnostics.js
-msgid "Check"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/diagnostics.js
@@ -846,10 +1006,6 @@ msgid "Port forwards from the tunnel"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/inbound.js
-msgid "Name"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/inbound.js
 msgid "State"
 msgstr ""
 
@@ -1061,10 +1217,6 @@ msgstr ""
 msgid "Home network through your own VPS: the VPS gives the router its public IP, the router decides what goes through the tunnel."
 msgstr ""
 
-#: htdocs/luci-static/resources/view/truba/overview.js
-msgid "No connection to the router"
-msgstr ""
-
 #: htdocs/luci-static/resources/view/truba/routing.js
 msgid "Rule set"
 msgstr ""
@@ -1094,10 +1246,6 @@ msgid "What happens to traffic that no category with an explicit action matched.
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/routing.js
-msgid "All via tunnel"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/routing.js
 msgid "Selective"
 msgstr ""
 
@@ -1123,46 +1271,6 @@ msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/routing.js
 msgid "IPs from DNS: %s"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/routing.js
-msgid "Device policies"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/routing.js
-msgid "Per-device exceptions. A device is recognised by its MAC address, also behind mesh nodes in 4-address mode (it keeps client MACs). Block still applies to all devices."
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/routing.js
-msgid "Enabled"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/routing.js
-msgid "MAC address"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/routing.js
-msgid "In the network"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/routing.js
-msgid "not online"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/routing.js
-msgid "Policy"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/routing.js
-msgid "All direct"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/routing.js
-msgid "By rules"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/routing.js
-msgid "«All via tunnel» is recommended for game consoles: then all their traffic gets the Truba IP and full cone NAT."
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/routing.js
@@ -1314,10 +1422,6 @@ msgid "Paste router.conf produced by install-vps.sh on the VPS, or choose the fi
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/tunnel.js
-msgid "Cancel"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/tunnel.js
 msgid "Import"
 msgstr ""
 
@@ -1431,6 +1535,10 @@ msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/tunnel.js
 msgid "Pings the Truba inside the tunnel and checks the handshake age; restarts the interface after repeated failures. Every tenth check also makes sure that full-size packets get through."
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/tunnel.js
+msgid "Enabled"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/tunnel.js
