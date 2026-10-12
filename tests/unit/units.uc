@@ -17,6 +17,7 @@ import * as F from 'truba.conf';
 import * as N from 'truba.net';
 import * as K from 'truba.check';
 import * as S from 'truba.stats';
+import * as DV from 'truba.devstats';
 
 const check = T.check, same = T.same;
 const GOLDEN = ARGV[0] ?? '/repo/tests/golden';
@@ -543,6 +544,53 @@ S.add(back, S.snapshot(counters(1), 1, 0, 2006));
 check('часы назад: точки по возрастанию, минуты «из будущего» убраны',
 	same(map(back.points, (x) => x[0]), [ 2000, 2005, 2006 ]) && same(map(back.minutes, (x) => x[0]), [ 1980 ]),
 	sprintf('%J %J', back.points, back.minutes));
+
+// ---- История по устройствам (truba.devstats) без процесса и файлов ----
+
+const A = '192.168.1.50', B = '192.168.1.60', z6 = [ 0, 0, 0, 0, 0, 0 ];
+let h = { last: null, devices: {} };
+DV.add(h, DV.snapshot({ [A]: z6 }, 7, 0, 7195));
+check('устройства: первый замер — скорости нет', h.devices[A]?.rate == null && h.devices[A]?.seen == 7195);
+DV.add(h, DV.snapshot({ [A]: [ 5000, 500, 1000, 100, 0, 0 ], [B]: [ 2500, 0, 0, 0, 0, 0 ] }, 7, 5000, 7200));
+check('устройства: скорость по разнице, байт/с', same(h.devices[A].rate, [ 1000, 100, 200, 20, 0, 0 ]), sprintf('%J', h.devices[A].rate));
+check('устройства: новый элемент — весь его счётчик за шаг', same(h.devices[B]?.rate, [ 500, 0, 0, 0, 0, 0 ]));
+check('устройства: часовая сумма и время трафика',
+	same(h.devices[A].hours, [ [ 7200, 5000, 500, 1000, 100, 0, 0 ] ]) && h.devices[A].last == 7200, sprintf('%J', h.devices[A].hours));
+DV.add(h, DV.snapshot({ [A]: [ 5000, 500, 1000, 100, 0, 0 ] }, 7, 10000, 7205));
+check('устройства: минута (7140, 7200] закрыта средним за покрытые секунды',
+	same(h.devices[A].minutes, [ [ 7200, 1000, 100, 200, 20 ] ]), sprintf('%J', h.devices[A].minutes));
+check('устройства: без трафика — скорость 0, время трафика прежнее', same(h.devices[A].rate, z6) && h.devices[A].last == 7200);
+check('устройства: нет в наборах — скорости нет, устройство осталось', h.devices[B] != null && h.devices[B].rate == null);
+DV.add(h, DV.snapshot({ [A]: [ 10, 0, 0, 0, 0, 0 ] }, 8, 15000, 7210));
+check('устройства: новое поколение таблицы — пропуск шага, суммы не уменьшились',
+	h.devices[A].rate == null && same(h.devices[A].hours, [ [ 7200, 5000, 500, 1000, 100, 0, 0 ] ]), sprintf('%J', h.devices[A]));
+
+let dv2 = { last: null, devices: {} };
+DV.add(dv2, DV.snapshot({ [A]: [ 100, 100, 0, 0, 0, 0 ] }, 1, 0, 1000));
+DV.add(dv2, DV.snapshot({ [A]: [ 50, 200, 0, 0, 0, 0 ] }, 1, 5000, 1005));
+check('устройства: счётчик уменьшился — null только у него', same(dv2.devices[A].rate, [ null, 20, 0, 0, 0, 0 ]), sprintf('%J', dv2.devices[A].rate));
+DV.add(dv2, DV.snapshot({ [A]: [ 60, 300, 0, 0, 0, 0 ] }, 1, 80000, 1080));
+check('устройства: перерыв дольше минуты — скорости нет', dv2.devices[A].rate == null);
+
+let dv3 = { last: null, devices: {
+	[A]: { seen: 0, last: 1000, rate: null, acc: null,
+	       minutes: [ [ 96000, 1, 1, 1, 1 ], [ 99960, 2, 2, 2, 2 ] ], hours: [ [ 10800, 1, 1, 1, 1, 1, 1 ], [ 97200, 2, 2, 2, 2, 2, 2 ] ] },
+	[B]: { seen: 0, last: 1000, rate: null, acc: null, minutes: [], hours: [] },
+	'192.168.1.70': { seen: 50000, last: null, rate: null, acc: null, minutes: [], hours: [] },
+} };
+DV.add(dv3, DV.snapshot({ [A]: z6 }, 1, 0, 100000));
+check('устройства: минуты старше часа и часы старше суток отброшены',
+	same(dv3.devices[A].minutes, [ [ 99960, 2, 2, 2, 2 ] ]) && same(dv3.devices[A].hours, [ [ 97200, 2, 2, 2, 2, 2, 2 ] ]), sprintf('%J', dv3.devices[A]));
+check('устройства: без трафика дольше суток и не в наборах — удалено; в наборах или появилось недавно — осталось',
+	dv3.devices[B] == null && dv3.devices[A] != null && dv3.devices['192.168.1.70'] != null);
+check('устройства: day — сумма часовых', same(DV.day({ hours: [ [ 0, 1, 2, 3, 4, 5, 6 ], [ 3600, 10, 20, 30, 40, 50, 60 ] ] }), [ 11, 22, 33, 44, 55, 66 ]));
+
+let dvback = { last: { t: 5000, m: 0, gen: 1, v: { [A]: z6 } }, devices: {
+	[A]: { seen: 0, last: 4990, rate: null, acc: null, minutes: [ [ 4800, 1, 1, 1, 1 ], [ 4980, 1, 1, 1, 1 ] ], hours: [ [ 3600, 1, 1, 1, 1, 1, 1 ] ] },
+} };
+DV.add(dvback, DV.snapshot({ [A]: z6 }, 1, 5000, 4900));
+check('устройства: часы ушли назад — точки не раньше нового времени убраны', same(map(dvback.devices[A].minutes, x => x[0]), [ 4800 ]),
+	sprintf("%J", dvback.devices[A].minutes));
 
 // ---- ubus-API: методы, которые читают файлы, без rpcd ----
 

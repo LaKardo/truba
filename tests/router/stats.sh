@@ -42,14 +42,20 @@ T0=$(after_tick)
 for i in 1 2 3; do lan_tcp 1.2.3.4 48081 >/dev/null 2>&1; done
 tun_seen() { [ "$(rf 6 $R "$T0")" -gt 0 ] 2>/dev/null; }
 check "скорость Туннеля от устройств видна в следующей точке" wait_for 15 tun_seen
+# История по устройствам (ADR 0018) — тем же процессом, в том же каталоге в RAM.
+D=/var/run/truba/devices.json
+dev_f() { jsonfilter -i $D -e "@.devices['192.168.1.50'].$1" 2>/dev/null; }
+dev_seen() { [ -n "$(dev_f last)" ]; }
+check "devices.json: устройство с трафиком, в RAM" wait_for 15 dev_seen
 ubus call truba rates '{"span":600}' > /tmp/r.json
 check "rpcd rates: время Роутера, точки за 10 минут" eval '[ "$(jsonfilter -i /tmp/r.json -e "@.now")" -ge "$T0" ] && [ "$(rf 4 /tmp/r.json)" -ge 2 ]'
 
 section "перезапуск процесса продолжает историю"
-F0="$(rf 2 $R)"; L0="$(rf 3 $R)"
+F0="$(rf 2 $R)"; L0="$(rf 3 $R)"; S0="$(dev_f seen)"
 kill "$(pgrep -f 'truba stat[s]')"   # procd перезапустит через 5 с
 newer() { [ "$(rf 3 $R)" -gt "$L0" ] 2>/dev/null; }
 check "процесс перезапущен procd, история та же, без разрыва" eval 'wait_for 20 newer && [ "$(rf 2 $R)" = "$F0" ] && [ "$(rf 7 $R "$L0")" = 0 ]'
+check "история устройства продолжена после перезапуска" eval '[ -n "$S0" ] && [ "$(dev_f seen)" = "$S0" ]'
 
 section "счётчики начаты заново — разрыв, а не скачок"
 T1=$(after_tick)
