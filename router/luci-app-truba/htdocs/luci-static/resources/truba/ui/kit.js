@@ -62,7 +62,7 @@ function step(items, value, key) {
 }
 
 // Один вариант из нескольких: items — [ [ значение, подпись ], … ]. Стрелки переключают вариант,
-// фокус идёт за ним (spec §4.3).
+// фокус идёт за ним (spec §4.3). Нажатие на уже выбранный — не изменение: uci.set записал бы его и с тем же значением.
 function Segmented({ items, value, onChange, label, disabled }) {
 	const { html } = app.lib;
 	const onKey = (ev) => {
@@ -75,7 +75,7 @@ function Segmented({ items, value, onChange, label, disabled }) {
 	};
 	return html`<div class="seg" role="group" aria-label=${label} onKeyDown=${onKey}>
 		${items.map(([ v, l ]) => html`<button type="button" aria-pressed=${String(v == value)} disabled=${!!disabled}
-			onClick=${() => onChange(v)}>${l}</button>`)}
+			onClick=${() => { if (v != value) onChange(v); }}>${l}</button>`)}
 	</div>`;
 }
 
@@ -148,7 +148,8 @@ function ActionPicker({ value, onChange, label }) {
 // помечает поле неверным, и «Применить» недоступна. name — опция (не key: его Preact забирает себе),
 // sid — для секций без имени.
 function Field({ sec, name, sid, label, hint, msg, disabled }) {
-	const { html, useState, useEffect } = app.lib;
+	const { html, useState, useEffect, useRef } = app.lib;
+	const ref = useRef(null);
 	const s = sid || sec, opt = 'truba.%s.%s'.format(s, name);
 	const saved = () => uci.get('truba', s, name) ?? '';
 	const [ v, setV ] = useState(saved);
@@ -157,6 +158,9 @@ function Field({ sec, name, sid, label, hint, msg, disabled }) {
 	const err = disabled ? null : common.fieldError(sec, name, v.trim());
 	useEffect(() => { app.invalid(opt, !!err); }, [ opt, !!err ]);
 	useEffect(() => () => app.invalid(opt, false), [ opt ]);
+	// Неверное поле в свёрнутом блоке (значение из настроек) — блок раскрывается: иначе «Применить»
+	// недоступна без видимой причины.
+	useEffect(() => { if (err) ref.current?.closest('details')?.setAttribute('open', ''); }, [ !!err ]);
 	const onInput = (ev) => {
 		const x = ev.target.value;
 		setV(x);
@@ -166,7 +170,7 @@ function Field({ sec, name, sid, label, hint, msg, disabled }) {
 	const def = common.schema().sections?.[sec]?.[name]?.def;
 	const changed = uci.state?.changes?.truba?.[s]?.[name] !== undefined;
 	const id = 'f-' + s + '-' + name;
-	return html`<div class=${'field' + (err ? ' bad' : '')}>
+	return html`<div class=${'field' + (err ? ' bad' : '')} ref=${ref}>
 		<label for=${id}>${label}${changed ? html` <${Dot} level="warn" label=${_('changed, not applied yet')} />` : ''}</label>
 		<input id=${id} data-opt=${opt} autocomplete="off" value=${v} disabled=${!!disabled}
 			placeholder=${(def != null && typeof def != 'object') ? String(def) : ''}
@@ -290,9 +294,15 @@ function ChangesBar({ view }) {
 	}, [ n, !!bad ]);
 	if (!n)
 		return null;
+	// К первому неверному полю: блок с ним раскрывается, фокус — в поле.
+	const showBad = () => {
+		const el = ref.current?.parentElement?.querySelector('[aria-invalid="true"]');
+		el?.closest('details')?.setAttribute('open', '');
+		el?.focus();
+	};
 	return html`<div class="changes" role="status" ref=${ref}>
 		<${Icon} name="pencil" />
-		<span>${_('Unapplied changes: %d').format(n)}${bad ? html` · <b>${_('Fix the highlighted fields')}</b>` : ''}</span>
+		<span>${_('Unapplied changes: %d').format(n)}${bad ? html` · <button type="button" class="link" data-act="show-bad" onClick=${showBad}>${_('Fix the highlighted fields')}</button>` : ''}</span>
 		<button type="button" class="btn" data-act="reset" onClick=${() => view.handleReset()}>${_('Reset')}</button>
 		<button type="button" class="btn p" data-act="apply" disabled=${!!bad} onClick=${() => view.handleSaveApply(null, '0')}>${_('Apply')}</button>
 	</div>`;

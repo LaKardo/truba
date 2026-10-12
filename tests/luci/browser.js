@@ -222,8 +222,8 @@ async function waitApply(page) {
 
 	// 1. «Правила»: youtube → Напрямую в Режиме «Всё в туннель», применение — панелью изменений.
 	const catRow = '.rules-cats [data-cat="geosite:youtube"]';
+	// Чип по умолчанию — «С Действием»: поиск всё равно находит Категорию без Действия.
 	const findCat = async () => {
-		await clickIn('.rules-cats .chips button', '^All');
 		await (await el('.rules-cats input[type="search"]'))?.type('youtube');
 		// Список Категорий может прийти позже страницы (Наборы правил распаковываются) — ждём саму строку.
 		await page.waitForFunction((s) => document.querySelector('.truba-root')?.shadowRoot?.querySelector(s), { timeout: 20000 }, catRow).catch(() => {});
@@ -244,6 +244,11 @@ async function waitApply(page) {
 	t0 = await time();
 	await page.goto(url('rules'), { waitUntil: 'networkidle2' });
 	await settled(page);
+	await findCat();
+	await clickIn('.card.mode .seg button', '^All via tunnel$');
+	await clickIn(catRow + ' .seg button', '^Direct$');
+	await sleep(300);
+	result(!await shadowHas(page, '.changes'), '«Правила»: нажатие на уже выбранный Режим и Действие — без изменений');
 	await clickIn('.card.mode .seg button', '^Selective$');
 	const catMode = await pressed('.rules-cats .card-h .seg');
 	await tap('.changes [data-act="apply"]');
@@ -290,6 +295,21 @@ async function waitApply(page) {
 	result(/zz-gone/.test(missText) && !ruleSecs.some((x) => x.tag == 'zz-gone'), '«Правила»: пропавшая Категория — предупреждение и «Remove»',
 		missText.replace(/\s+/g, ' '));
 
+	// Неверное время обновления уже в настройках (правка из консоли): блок с полем раскрыт — иначе «Применить»
+	// недоступна без видимой причины.
+	await ubus('uci', 'set', { config: 'truba', section: 'lists', values: { update_utc: '25:00' } });
+	await ubus('uci', 'commit', { config: 'truba' });
+	await page.goto(url('rules'), { waitUntil: 'networkidle2' });
+	await settled(page);
+	await sleep(300);
+	const shownBad = await page.evaluate(() => {
+		const i = document.querySelector('.truba-root').shadowRoot.querySelector('input[data-opt="truba.lists.update_utc"]');
+		return { invalid: i?.getAttribute('aria-invalid'), open: !!i?.closest('details')?.open };
+	});
+	result(shownBad.invalid == 'true' && shownBad.open, '«Правила»: неверное значение из настроек — блок с полем раскрыт', JSON.stringify(shownBad));
+	await ubus('uci', 'set', { config: 'truba', section: 'lists', values: { update_utc: '12:00' } });
+	await ubus('uci', 'commit', { config: 'truba' });
+
 	// Наборы правил — на «Правилах» (были на «DNS и списках»): версии с датой.
 	await page.goto(url('rules'), { waitUntil: 'networkidle2' });
 	await settled(page);
@@ -326,6 +346,13 @@ async function waitApply(page) {
 			bar: r.querySelector('.changes')?.innerText.replace(/\s+/g, ' ') || '' };
 	});
 	badUtc.uci = await uciUtc();
+	await page.evaluate(() => [ ...document.querySelectorAll('.cbi-page-actions *') ]
+		.find((x) => x.childElementCount == 0 && x.textContent.trim() == 'Save & Apply')?.click());
+	await sleep(2000);
+	const footer = { via: (await ubus('uci', 'get', { config: 'truba', section: 'lists', option: 'via_tunnel' }).catch(() => ({}))).value,
+		toast: await page.evaluate(() => document.querySelector('.truba-root')?.shadowRoot?.querySelector('.toast')?.innerText || '') };
+	result(footer.via == '1' && /Fix the highlighted fields/.test(footer.toast), '«Правила»: «Save & Apply» LuCI при неверном поле ничего не применяет',
+		JSON.stringify(footer));
 	const typed = await retype('05:30');
 	// Счёт неверных полей меняет эффект Preact — после отрисовки кадра, не сразу после ввода.
 	await page.waitForFunction(() => document.querySelector('.truba-root').shadowRoot.querySelector('.changes [data-act="apply"]')?.disabled === false,

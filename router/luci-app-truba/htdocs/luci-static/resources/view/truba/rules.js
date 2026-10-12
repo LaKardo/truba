@@ -9,7 +9,6 @@
 // Настройки пишутся в UCI браузера и применяются панелью изменений, как на «Устройствах».
 
 const POLL = 5000;   // шаг опроса: status — каждый второй раз (10 с), lists и sets — по common.listsDue
-const LIMIT = 100;   // строк Категорий сразу: около 1 700 строк по четыре кнопки телефон рисовал бы долго
 
 const MODES = () => [ [ 'all', _('All via tunnel') ], [ 'selective', _('Selective') ] ];
 
@@ -191,7 +190,9 @@ function Categories({ cats, snap }) {
 	const [ shown, setShown ] = useState(null);
 	useEffect(() => setShown(null), [ pageMode ]);
 	const mode = shown || pageMode;
-	const [ q, setQ ] = useState(''), [ f, setF ] = useState('explicit'), [ full, setFull ] = useState(false), [ dlg, setDlg ] = useState(false);
+	const [ q, setQ ] = useState(''), [ f, setF ] = useState('explicit'), [ dlg, setDlg ] = useState(false);
+	// «Показать все» — для поиска, чипа и Режима, при которых нажата: смена любого снова даёт первые строки.
+	const [ fullFor, setFullFor ] = useState(null);
 	const list = useMemo(() => sorted(cats?.cats || []), [ cats ]);
 	const acts = common.ruleActions(mode), was = snap[mode];
 	const act = (c) => acts.get(c.set + ':' + c.tag) || 'mode';
@@ -204,9 +205,15 @@ function Categories({ cats, snap }) {
 			n[a]++;
 		}
 	}
-	const qq = q.trim().toLowerCase();
-	const hit = list.filter((c) => (!qq || (c.set + ':' + c.tag).includes(qq)) && (f == 'all' || (f == 'explicit' ? act(c) != 'mode' : act(c) == f)));
-	const rows = full ? hit : hit.slice(0, LIMIT);
+	const sig = [ mode, f, q.trim().toLowerCase() ].join('\n');
+	const { rows, total } = common.catRows(list, act, q, f, fullFor == sig);
+	// Поиск при чипе «С Действием» (он по умолчанию) ищет среди всех: найти Категорию без Действия и
+	// задать его — главный сценарий карточки.
+	const search = (ev) => {
+		setQ(ev.target.value);
+		if (f == 'explicit' && ev.target.value.trim())
+			setF('all');
+	};
 	// Правила для Категорий, которых нет в текущем Наборе: служба их пропускает (applied.missing).
 	const present = new Set(list.map((c) => c.set + ':' + c.tag));
 	const missing = list.length ? [ ...acts.keys() ].filter((k) => !present.has(k)) : [];
@@ -225,7 +232,7 @@ function Categories({ cats, snap }) {
 			<button type="button" class="btn" data-act="remove-missing" onClick=${removeMissing}>${_('Remove')}</button>
 		</div>` : ''}
 		<div class="toolbar">
-			<input type="search" aria-label=${_('Find a category')} placeholder=${_('Find a category')} value=${q} onInput=${(ev) => setQ(ev.target.value)} />
+			<input type="search" aria-label=${_('Find a category')} placeholder=${_('Find a category')} value=${q} onInput=${search} />
 			<${kit.Chips} label=${_('Filter by action')} value=${f} onChange=${setF} items=${[
 				[ 'all', _('All'), n.all ], [ 'explicit', _('With an action'), n.explicit ],
 				[ 'tunnel', A.tunnel, n.tunnel ], [ 'direct', A.direct, n.direct ], [ 'block', A.block, n.block ]
@@ -234,11 +241,11 @@ function Categories({ cats, snap }) {
 		</div>
 		${!list.length ? html`<${kit.Empty} text=${cats?.busy ? _('Rule sets are being unpacked — the list will appear in a minute.')
 			: _('Rule sets are not downloaded yet — see Rule sets above.')} />`
-			: !hit.length ? html`<${kit.Empty} text=${_('No categories match the filter.')} />`
+			: !total ? html`<${kit.Empty} text=${_('No categories match the filter.')} />`
 			: html`<div class="cats">${rows.map((c) => html`<${Cat} key=${c.set + ':' + c.tag} c=${c} mode=${mode} action=${act(c)}
 				changed=${(was.get(c.set + ':' + c.tag) || 'mode') != act(c)} />`)}</div>`}
-		${(hit.length > rows.length) ? html`<button type="button" class="btn more" data-act="show-all" onClick=${() => setFull(true)}>
-			${_('Show all (%d)').format(hit.length)}</button>` : ''}
+		${(total > rows.length) ? html`<button type="button" class="btn more" data-act="show-all" onClick=${() => setFullFor(sig)}>
+			${_('Show all (%d)').format(total)}</button>` : ''}
 		<${kit.Dialog} open=${dlg} title=${_('Reset all category actions of this mode to the starting settings?')} confirm=${_('Reset')}
 			onConfirm=${() => toStarting(mode, cats?.starting || [])} onClose=${() => setDlg(false)}>
 			${_('Mode: %s. The change is applied with the Apply button, like the others.').format(MODES().find(([ v ]) => v == mode)[1])}
@@ -295,6 +302,16 @@ return view.extend({
 			return Promise.all(calls).then(() => patch);
 		}, POLL / 1000);
 		return app.mount(this, Page, { store, snap, timing });
+	},
+
+	// «Применить» панели изменений и «Сохранить и применить» LuCI: пока есть неверные поля, ничего не
+	// сохраняется (spec §3.6) — иначе применилось бы остальное, а введённое значение молча пропало бы.
+	handleSaveApply: function(ev, mode) {
+		if (app.changes.get().bad) {
+			app.toast(_('Fix the highlighted fields'));
+			return Promise.resolve();
+		}
+		return this.super('handleSaveApply', [ ev, mode ]);
 	},
 
 	// Настройки меняются прямо в браузере: сохранить — отправить эти изменения, сбросить — перечитать страницу.

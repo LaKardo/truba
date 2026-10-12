@@ -553,6 +553,7 @@
 	.fold .hit > :last-child { grid-column: 1 / -1; }
 }
 .changes .btn:disabled { opacity: .5; cursor: not-allowed; }
+.changes .link { margin: 0; padding: 0; border: 0; background: none; color: inherit; font: inherit; font-weight: 600; text-decoration: underline; cursor: pointer; }
 
 /* ---- «Правила» ---- */
 .grid.g2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }

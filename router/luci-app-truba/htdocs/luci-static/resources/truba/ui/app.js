@@ -126,9 +126,14 @@ function use(s) {
 const scheme = store({ scheme: 'light' });
 
 // Опрос службы: ошибка не стирает данные — страница показывает последние и значок «нет связи».
+// Пустой ответ (на «Правилах» lists и status приходят не на каждом шаге) ничего не меняет — без
+// оповещения: иначе страница перерисовывалась бы на каждом шаге опроса.
 function pollStore(s, fetchFn, interval) {
 	poll.add(() => fetchFn().then(
-		(patch) => s.set(Object.assign({}, patch, { offline: false })),
+		(patch) => {
+			if (Object.keys(patch || {}).length || s.get().offline !== false)
+				s.set(Object.assign({}, patch, { offline: false }));
+		},
 		() => s.set({ offline: true })), interval);
 }
 

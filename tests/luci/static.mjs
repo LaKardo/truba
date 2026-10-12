@@ -218,6 +218,14 @@ if (app) {
 	app.poll(s, () => Promise.reject(new Error('rpc')), 5);
 	await pollFn?.();
 	check(s.get().offline === true && s.get().c === 4, 'app.poll: ошибка — данные остаются, offline=true');
+	// Пустой ответ опроса (на «Правилах» lists — раз в 30 с) — без оповещения: страница не перерисовывается зря.
+	const quiet = app.store({});
+	let quietCalls = 0;
+	quiet.on(() => quietCalls++);
+	app.poll(quiet, () => Promise.resolve({}), 5);
+	await pollFn?.();
+	await pollFn?.();
+	check(quietCalls === 1 && quiet.get().offline === false, `app.poll: пустой ответ — без оповещения, кроме первого (${quietCalls})`);
 	uciStub.state = { creates: {}, changes: { truba: { main: { routing: '0' } }, network: { awg0: { disabled: '1' } } }, deletes: {}, reorder: {} };
 	check(app.changeCount() === 2, 'app.changeCount: две изменённые опции');
 	uciStub.state = { creates: { truba: { cfg01: {} } }, changes: {}, deletes: { firewall: { r1: true } }, reorder: { truba: true } };
@@ -421,6 +429,15 @@ if (cdev) {
 		[ 'lists_missing', 'zones_without_devices', 'lists_rolled_back' ].every((w) => cdev.WARNINGS[w].tab === 'rules') && cdev.WARNINGS.tunnel_not_configured.tab === 'tunnel',
 		'common.TABS и WARNINGS: «Правила» вместо «Маршрутизации» и Наборов правил на «DNS»');
 	check(isText(cdev.CHECK_ERRORS?.busy), 'common.CHECK_ERRORS.busy');
+
+	// Строки Категорий: около 1 700 — сразу не больше 100 (Решение 3); поиск, чип, «Показать все».
+	const many = Array.from({ length: 1700 }, (_, i) => ({ set: 'geosite', tag: 'c' + i }));
+	const actOf = (c) => (+c.tag.slice(1) % 17 == 0) ? 'tunnel' : 'mode';
+	const CR = (...a) => cdev.catRows?.(many, actOf, ...a);
+	const r1 = CR('', 'all', false), r2 = CR('', 'all', true), r3 = CR('', 'explicit', false), r4 = CR('C17', 'all', false), r5 = CR('', 'direct', false);
+	check(r1?.rows.length === 100 && r1.total === 1700 && r2?.rows.length === 1700 && r3?.total === 100 && r3.rows.every((c) => actOf(c) == 'tunnel') &&
+		r4?.total === 11 && r5?.total === 0, 'common.catRows: не больше 100 строк, «Показать все», чип и поиск без учёта регистра',
+		JSON.stringify([ r1?.rows.length, r1?.total, r2?.rows.length, r3?.total, r4?.total, r5?.total ]));
 }
 
 const po = readFileSync(join(root, 'po/ru/truba.po'), 'utf8');

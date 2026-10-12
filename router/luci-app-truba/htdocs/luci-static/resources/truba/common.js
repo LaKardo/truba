@@ -403,6 +403,18 @@ function ruleAction(mode, set, tag) {
 	return ruleActions(mode).get(set + ':' + String(tag).toLowerCase()) || 'mode';
 }
 
+// Строки Категорий (spec §5.3): поиск по «набор:тег» без учёта регистра и чип по Действию (actOf —
+// Действие Категории); сразу — не больше CAT_LIMIT: около 1 700 строк по четыре кнопки телефон рисовал
+// бы долго, всё — по «Показать все». total — сколько подошло.
+const CAT_LIMIT = 100;
+
+function catRows(list, actOf, q, f, full) {
+	const qq = String(q || '').trim().toLowerCase();
+	const hit = list.filter((c) => (!qq || (c.set + ':' + c.tag).toLowerCase().includes(qq)) &&
+		(f == 'all' || (f == 'explicit' ? actOf(c) != 'mode' : actOf(c) == f)));
+	return { rows: full ? hit : hit.slice(0, CAT_LIMIT), total: hit.length };
+}
+
 // Пора ли спросить lists и sets (spec §5.3): раз в 30 с, а пока идёт обновление или применение
 // и 15 с после «Обновить сейчас» (замок обновления берётся не сразу) — каждый опрос. Время — в мс.
 function listsDue(now, polledAt, kickedAt, l) {
@@ -521,7 +533,7 @@ return baseclass.extend({
 	callStatus, callLists, callCategories, callSets, callCheck, callUpdateLists, callRollbackLists, callRates, callLog,
 	callSchema, loadSchema, schema, get, field, fieldError, handshakeLevel, callDevices, callConnections,
 	ACTIVE_SPAN, devRate, devShare, devActive, deviceSections, deviceSection, devicePolicy, normMac, connLabel,
-	RULE_ACTIONS, ruleKey, ruleSections, ruleActions, ruleAction, listsDue,
+	RULE_ACTIONS, ruleKey, ruleSections, ruleActions, ruleAction, catRows, listsDue,
 	runNatTest, runTunnelTest,
 	ACTION_LABELS, ACTION_LEVELS, REASON_LABELS, VIA_LABELS, WARNINGS, NAT_ERRORS, CHECK_ERRORS, UPNP_MISSING, NBSP, TABS,
 	fmtBytes, fmtRate, fmtAge, fmtTime, fmtDate, fmtNum, missingText,
