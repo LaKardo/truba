@@ -1137,3 +1137,18 @@ msgstr "Сбросить"
 
 msgid "Apply"
 msgstr "Применить"
+
+msgid "Where traffic goes"
+msgstr "Куда идёт трафик"
+
+msgid "Devices"
+msgstr "Устройства"
+
+msgid "Router"
+msgstr "Роутер"
+
+msgid "%d active"
+msgstr "%d активно"
+
+msgid "block: %s"
+msgstr "блок: %s"

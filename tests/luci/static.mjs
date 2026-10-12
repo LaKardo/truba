@@ -249,6 +249,21 @@ if (icons)
 	for (const n of [ 'circle-check', 'triangle-alert', 'circle-x', 'arrow-right', 'wifi-off', 'pencil' ])
 		check(typeof icons[n] === 'string' && /<(path|circle|line|polyline|rect)/.test(icons[n]), `icons.js: иконка ${n}`);
 
+// Верх шкалы графика скорости и толщина веток схемы потоков.
+const chart = loadModule('truba/ui/chart.js', { baseclass, app, common });
+if (chart) {
+	check(chart.scaleTop(0) === 125000, 'chart.scaleTop: не меньше 1 Мбит/с');
+	check(chart.scaleTop(130000) === 250000, 'chart.scaleTop: 1,04 Мбит/с → 2');
+	check(chart.scaleTop(600000) === 625000, 'chart.scaleTop: 4,8 Мбит/с → 5');
+	check(chart.scaleTop(1.3e6) === 2.5e6, 'chart.scaleTop: 10,4 Мбит/с → 20');
+}
+const flow = loadModule('truba/ui/flow.js', { baseclass, app, common });
+if (flow) {
+	check(flow.width(null, 1) === 0 && flow.width(0, 1) === 0, 'flow.width: нет трафика — 0');
+	check(flow.width(100, 100) === 14 && flow.width(400, 100) === 14, 'flow.width: потолок 14');
+	check(flow.width(25, 100) === 8, 'flow.width: корень доли');
+}
+
 const po = readFileSync(join(root, 'po/ru/truba.po'), 'utf8');
 const translated = new Map();
 const blocks = po.split(/\n\s*\n/);

@@ -205,6 +205,26 @@ msgstr ""
 msgid "Diagnostics"
 msgstr ""
 
+#: htdocs/luci-static/resources/truba/ui/flow.js
+msgid "Where traffic goes"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/ui/flow.js
+msgid "Devices"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/ui/flow.js
+msgid "%d active"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/ui/flow.js
+msgid "Router"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/ui/flow.js
+msgid "block: %s"
+msgstr ""
+
 #: htdocs/luci-static/resources/truba/ui/kit.js
 msgid "Unapplied changes: %d"
 msgstr ""
