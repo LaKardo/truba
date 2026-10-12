@@ -5,6 +5,48 @@ table inet truba {
 		type ifname;
 		elements = { "br-lan" }
 	}
+	set dv_tunnel_down {
+		type ipv4_addr;
+		flags dynamic,timeout;
+		timeout 86400s;
+		size 1024;
+		counter;
+	}
+	set dv_tunnel_up {
+		type ipv4_addr;
+		flags dynamic,timeout;
+		timeout 86400s;
+		size 1024;
+		counter;
+	}
+	set dv_direct_down {
+		type ipv4_addr;
+		flags dynamic,timeout;
+		timeout 86400s;
+		size 1024;
+		counter;
+	}
+	set dv_direct_up {
+		type ipv4_addr;
+		flags dynamic,timeout;
+		timeout 86400s;
+		size 1024;
+		counter;
+	}
+	set dv_inbound_down {
+		type ipv4_addr;
+		flags dynamic,timeout;
+		timeout 86400s;
+		size 1024;
+		counter;
+	}
+	set dv_inbound_up {
+		type ipv4_addr;
+		flags dynamic,timeout;
+		timeout 86400s;
+		size 1024;
+		counter;
+	}
 	counter c_inbound { }
 	counter c_tunnel_down { }
 	counter c_tunnel_up { packets 3 bytes 900 }
@@ -34,12 +76,12 @@ table inet truba {
 		type filter hook forward priority filter + 10; policy accept;
 		meta nfproto != ipv4 return
 		iifname @lan_if oifname @lan_if return
-		iifname @lan_if oifname "awg0" ct direction original counter name c_tunnel_up return
-		iifname "awg0" oifname @lan_if ct direction reply counter name c_tunnel_down return
-		iifname "awg0" oifname @lan_if counter name c_inbound_down return
-		iifname @lan_if oifname "awg0" counter name c_inbound_up return
-		iifname @lan_if ct direction original counter name c_direct_up return
-		oifname @lan_if ct direction reply counter name c_direct_down return
+		iifname @lan_if oifname "awg0" ct direction original counter name c_tunnel_up update @dv_tunnel_up { ip saddr } return
+		iifname "awg0" oifname @lan_if ct direction reply counter name c_tunnel_down update @dv_tunnel_down { ip daddr } return
+		iifname "awg0" oifname @lan_if ct direction original counter name c_inbound_down update @dv_inbound_down { ip daddr } return
+		iifname @lan_if oifname "awg0" ct direction reply counter name c_inbound_up update @dv_inbound_up { ip saddr } return
+		iifname @lan_if oifname != "awg0" ct direction original counter name c_direct_up update @dv_direct_up { ip saddr } return
+		iifname != "awg0" oifname @lan_if ct direction reply counter name c_direct_down update @dv_direct_down { ip daddr } return
 	}
 
 	chain output {

@@ -74,6 +74,15 @@ export const HISTORY = {
 	min: { step: 60, span: 86400 },
 };
 
+// Трафик по устройствам (ADR 0018): динамические наборы цепочки stats, по одному на Действие и
+// направление. Ключ — IPv4 устройства, у элемента — счётчик. Порядок — как у байтов истории
+// скорости (truba.stats): к устройству и от него — Туннель, Напрямую, Входящие.
+export const DEV_SETS = [ 'dv_tunnel_down', 'dv_tunnel_up', 'dv_direct_down', 'dv_direct_up', 'dv_inbound_down', 'dv_inbound_up' ];
+export const DEV_SET_SIZE = 1024;
+// Срок элемента набора и истории устройства без трафика, с.
+export const DEV_SPAN = 86400;
+export const DEVICES_FILE = RUN_DIR + '/devices.json';
+
 // Окно последних проверок watchdog для «Обзора»: задержка и потери за ~10 минут при интервале 30 с.
 export const PROBE_WINDOW = 20;
 

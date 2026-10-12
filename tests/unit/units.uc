@@ -142,13 +142,32 @@ check('без перехвата DNS: нет ни перехвата, ни по�
 nft_ok('таблицу без перехвата DNS', nohijack);
 
 let notimeout = R.nft_full(mk({ set_timeout: 0 }), plan, ctx_of());
+// Только наборы gs_*: у наборов устройств dv_* свой срок (ADR 0018).
+let gs_blocks = join('', map(match(notimeout, /\tset gs_[a-z0-9]+ \{[^}]*\}/g) ?? [], m => m[0]));
 check('без срока: в наборах IP из DNS нет timeout и expires',
-	!match(notimeout, /timeout|expires/) && index(notimeout, '198.51.100.1') >= 0);
+	length(gs_blocks) && !match(gs_blocks, /timeout|expires/) && index(gs_blocks, '198.51.100.1') >= 0);
 nft_ok('таблицу без срока', notimeout);
 
 let minimal = R.nft_minimal(mk(), ctx_of());
 golden('truba-minimal.nft', minimal);
 nft_ok('минимальную таблицу', minimal);
+
+// Трафик по устройствам (ADR 0018): наборы dv_* — в обеих таблицах, цепочка stats есть в обеих.
+let dv_decl = (n) => sprintf('\tset %s {\n\t\ttype ipv4_addr;\n\t\tflags dynamic,timeout;\n\t\ttimeout 86400s;\n\t\tsize 1024;\n\t\tcounter;\n\t}\n', n);
+check('stats: шесть наборов dv_* в полной и минимальной таблице — dynamic, timeout, size, counter',
+	length(C.DEV_SETS) == 6 && length(filter(C.DEV_SETS, n => index(full, dv_decl(n)) >= 0 && index(minimal, dv_decl(n)) >= 0)) == 6);
+// Счётчик — раньше update: при полном наборе update прерывает правило, и без этого порядка пакет
+// не попал бы в счётчик своего Действия и дошёл бы до следующих правил.
+// Тело цепочки — до закрывающей строки: в правилах есть «{ ip saddr }».
+let stats_body = substr(full, index(full, 'chain stats {'));
+stats_body = substr(stats_body, 0, index(stats_body, '\n\t}\n'));
+let stats_rules = filter(split(stats_body, '\n'), l => index(l, 'counter name') >= 0);
+let stats_bad = filter(stats_rules, (l) => {
+	let m = match(l, /counter name c_([a-z]+)_(up|down) update @dv_([a-z]+)_(up|down) \{ ip (saddr|daddr) \} return$/);
+	return !m || m[1] != m[3] || m[2] != m[4] || m[5] != ((m[2] == 'up') ? 'saddr' : 'daddr');
+});
+check('stats: в каждом правиле учёта счётчик, затем update своего набора, ключ — адрес устройства',
+	length(stats_rules) == 6 && !length(stats_bad), join(' | ', stats_bad));
 
 golden('mosdns.json', sprintf('%.J\n', R.mosdns(mk(), plan, [ 'ntp.example' ])));
 let noapi = R.mosdns(mk({ api: null, lazy_cache_ttl: 0 }), sel, []);

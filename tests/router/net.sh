@@ -339,19 +339,33 @@ nft delete table inet t_dscp; ip netns exec vps nft delete table inet t_dscp
 section "учёт трафика устройств"
 probe >/dev/null 2>&1
 check "входящие: посчитаны в обе стороны" eval 'gt0 c_inbound_down && gt0 c_inbound_up'
+check "входящие: устройство — в dv_inbound_down и dv_inbound_up" eval 'in_set dv_inbound_down 192.168.1.50 && in_set dv_inbound_up 192.168.1.50'
 IN_DOWN="$(bytes c_inbound_down)"
 # 1.2.3.4 нет ни в одной Категории: по Режиму «Всё в туннель» — через Туннель на сервер в netns vps.
 ip -n vps addr add 1.2.3.4/32 dev lo
 check "устройство → Туннель: ответ пришёл, посчитан в обе стороны" eval 'lan_tcp 1.2.3.4 48081 && gt0 c_tunnel_up && gt0 c_tunnel_down'
+check "устройство — в dv_tunnel_up и dv_tunnel_down" eval 'in_set dv_tunnel_up 192.168.1.50 && in_set dv_tunnel_down 192.168.1.50'
 # Ответ из Туннеля на исходящее — «Туннель», хотя ct mark он переписывает на «входящее».
 check "исходящее через Туннель не считается входящим" test "$(bytes c_inbound_down)" = "$IN_DOWN"
 # «Интернет напрямую» стенда — Труба по внешнему адресу через ul0; на время — в зоне wan.
 uci add_list firewall.@zone[1].device='ul0'; uci commit firewall; /etc/init.d/firewall reload >/dev/null 2>&1
 TUN_UP="$(bytes c_tunnel_up)"
 check "устройство → напрямую: ответ пришёл, посчитан в обе стороны" eval 'lan_tcp 198.51.100.2 48081 && gt0 c_direct_up && gt0 c_direct_down'
+check "устройство — в dv_direct_up и dv_direct_down" eval 'in_set dv_direct_up 192.168.1.50 && in_set dv_direct_down 192.168.1.50'
 check "напрямую не считается Туннелем" test "$(bytes c_tunnel_up)" = "$TUN_UP"
 uci del_list firewall.@zone[1].device='ul0'; uci commit firewall; /etc/init.d/firewall reload >/dev/null 2>&1
 check "status: трафик Туннеля — из счётчика" test "$(truba status | jsonfilter -e '@.traffic.tunnel.up')" = "$(bytes c_tunnel_up)"
+
+section "набор устройств полон"
+# 1024 чужих адреса: новый элемент в набор не помещается, и update прерывает правило (ADR 0018).
+# Счётчик Действия стоит раньше update, а правила взаимоисключающие: учёт не врёт.
+nft flush set inet truba dv_tunnel_up
+nft add element inet truba dv_tunnel_up "{ $(seq 0 1023 | awk '{ printf "%s10.200.%d.%d", (NR > 1 ? "," : ""), int($1 / 256), $1 % 256 }') }"
+TU="$(bytes c_tunnel_up)"; IU="$(bytes c_inbound_up)"
+lan_tcp 1.2.3.4 48081 >/dev/null 2>&1
+check "набор полон: устройства в нём нет, Туннель посчитан, входящие — нет" \
+	eval '! in_set dv_tunnel_up 192.168.1.50 && [ "$(bytes c_tunnel_up)" -gt "$TU" ] && [ "$(bytes c_inbound_up)" = "$IU" ]'
+nft flush set inet truba dv_tunnel_up
 SINCE="$(applied '@.counters_since')"; TUN_UP="$(bytes c_tunnel_up)"
 
 section "Политика устройства"
