@@ -196,6 +196,12 @@ async function waitApply(page) {
 	const bar = await page.waitForFunction(() => document.querySelector('.truba-root')?.shadowRoot?.querySelector('.changes')?.innerText,
 		{ timeout: 5000 }).then((h) => h.jsonValue()).catch(() => '');
 	result(/Unapplied changes: 1/.test(bar), 'панель изменений: одно несохранённое изменение', bar.replace(/\s+/g, ' '));
+	// Переключатель — в строке состояния наверху: панель должна быть видна сразу, без прокрутки.
+	const inView = await page.evaluate(() => {
+		const r = document.querySelector('.truba-root').shadowRoot.querySelector('.changes').getBoundingClientRect();
+		return r.top >= 0 && r.bottom <= window.innerHeight;
+	});
+	result(inView, 'панель изменений на 1280×900 — в пределах экрана');
 	await (await shadowSel(page, '.changes [data-act="apply"]')).click();
 	await waitApply(page);
 	result(await applied(t0, (st) => st.routing === false && st.mosdns === false),
@@ -238,6 +244,32 @@ async function waitApply(page) {
 	}
 	await theme('/luci-static/bootstrap');
 	await page.emulateMediaFeatures([ { name: 'prefers-color-scheme', value: 'light' } ]);
+
+	// Длинное неверное значение настройки попадает в предупреждение как есть — и на телефоне не должно
+	// растягивать страницу вбок. Порт DNS из 79 цифр и буквы служба пропускает как неверный (ADR 0015).
+	t0 = await time();
+	const prevPort = await ubus('uci', 'get', { config: 'truba', section: 'dns', option: 'port' }).then((r) => r.value).catch(() => null);
+	const setPort = async (v) => {
+		if (v == null)
+			await ubus('uci', 'delete', { config: 'truba', section: 'dns', option: 'port' });
+		else
+			await ubus('uci', 'set', { config: 'truba', section: 'dns', values: { port: v } });
+		await ubus('uci', 'commit', { config: 'truba' });
+	};
+	await setPort('9'.repeat(79) + 'x');
+	result(await applied(t0, (st) => (st.applied.invalid || []).some((x) => x.key == 'dns.port')), 'неверный порт DNS — в предупреждениях');
+	await page.setViewport({ width: 375, height: 812 });
+	await page.goto(url('overview'), { waitUntil: 'networkidle2' });
+	await settled(page);
+	const wide = await page.evaluate(() => {
+		const tr = document.querySelector('.truba-root')?.shadowRoot?.querySelector('.tr');
+		return { doc: document.documentElement.scrollWidth, win: window.innerWidth, tr: tr ? tr.scrollWidth - tr.clientWidth : 0 };
+	});
+	result(wide.doc <= wide.win && wide.tr <= 0, 'длинное значение в предупреждении: без горизонтальной прокрутки на 375', JSON.stringify(wide));
+	await page.screenshot({ path: `${out}/overview-long-warning-375.png`, fullPage: true });
+	t0 = await time();
+	await setPort(prevPort);
+	result(await applied(t0, (st) => !(st.applied.invalid || []).length), 'порт DNS восстановлен');
 	await page.setViewport({ width: 1280, height: 900 });
 
 	// Служба остановлена: строка состояния и график говорят об этом, ошибок JS нет. Затем — запуск.

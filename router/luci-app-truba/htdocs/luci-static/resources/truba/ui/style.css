@@ -161,6 +161,9 @@
 
 .card {
 	min-width: 0;
+	/* Строки службы (неверное значение настройки, ошибка применения) бывают одним длинным словом:
+	   переносятся где угодно, а не растягивают страницу вбок на телефоне. */
+	overflow-wrap: anywhere;
 	padding: 14px;
 	border: 1px solid var(--bd);
 	border-radius: 10px;
@@ -264,8 +267,13 @@
 .warns li > span { flex: 1 1 24em; min-width: 0; }
 .warns .go { margin-top: 0; }
 
-/* ---- Панель несохранённых изменений ---- */
+/* ---- Панель несохранённых изменений ----
+   Прилипает к низу окна на любой ширине: переключатель обычно наверху страницы, и без этого
+   панель на ПК оказалась бы под краем экрана — изменение выглядело бы применённым. */
 .changes {
+	position: sticky;
+	bottom: 8px;
+	z-index: 1;
 	display: flex;
 	flex-wrap: wrap;
 	align-items: center;
@@ -279,9 +287,6 @@
 .changes > span { flex: 1 1 12em; }
 .changes .btn { border-color: color-mix(in srgb, var(--card) 35%, transparent); }
 .changes .btn.p { border-color: var(--tun); }
-@container (max-width: 600px) {
-	.changes { position: sticky; bottom: 8px; z-index: 1; }
-}
 
 /* ---- Пусто и загрузка ---- */
 .empty { color: var(--mu); font-style: italic; }

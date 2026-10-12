@@ -256,6 +256,12 @@ if (chart) {
 	check(chart.scaleTop(130000) === 250000, 'chart.scaleTop: 1,04 Мбит/с → 2');
 	check(chart.scaleTop(600000) === 625000, 'chart.scaleTop: 4,8 Мбит/с → 5');
 	check(chart.scaleTop(1.3e6) === 2.5e6, 'chart.scaleTop: 10,4 Мбит/с → 20');
+	// Перерыв в записи (служба стояла) — разрыв линии, а не прямая через него: в поминутных средних
+	// отметки разрыва нет, есть только пропуск по времени.
+	const g = chart.gaps?.([ [ 0, 1 ], [ 5, 2 ], [ 100, 3 ] ], 5);
+	check(JSON.stringify(g) === '[[0,1],[5,2],[10],[100,3]]', 'chart.gaps: пропуск дольше трёх шагов — строка-разрыв', JSON.stringify(g));
+	check(JSON.stringify(chart.gaps?.([ [ 0, 1 ], [ 5, 2 ], [ 15, 3 ] ], 5)) === '[[0,1],[5,2],[15,3]]', 'chart.gaps: три шага — без разрыва');
+	check(JSON.stringify(chart.gaps?.([], 5)) === '[]', 'chart.gaps: пустая история');
 }
 const flow = loadModule('truba/ui/flow.js', { baseclass, app, common });
 if (flow) {

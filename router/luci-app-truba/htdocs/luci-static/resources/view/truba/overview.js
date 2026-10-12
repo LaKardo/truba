@@ -241,7 +241,8 @@ function SpeedCard({ st }) {
 			fetchRates(hist.min).then(() => redraw((x) => x + 1));
 	};
 	const now = hist.now ?? Date.now() / 1000;
-	const pts = ring().points.filter((p) => p[0] > now - span);
+	const h = ring();
+	const pts = chart.gaps(h.points.filter((p) => p[0] > now - span), h.step);
 	const data = [ pts.map((p) => p[0]), ...SERIES.map((s) => pts.map((p) => p[s.i] ?? null)) ];
 	// Истории нет — пояснение поверх приглушённого графика: старые точки ещё видны, но не мешают читать.
 	const rec = latest() != null;

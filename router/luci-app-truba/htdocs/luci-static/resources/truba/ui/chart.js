@@ -14,6 +14,20 @@ function scaleTop(peak) {
 	return [ 1, 2, 5, 10 ].find((k) => bits <= k * p) * p / 8;
 }
 
+// Строка-разрыв [t] там, где точек нет дольше трёх шагов (служба стояла, процесс stats не писал):
+// uPlot рвёт линию только на null, а в поминутных средних отметки разрыва нет — только пропуск
+// по времени. Без этого график провёл бы прямую через время, когда скорость не записывалась.
+function gaps(points, step) {
+	const out = [];
+	for (let p of points) {
+		const prev = out[out.length - 1];
+		if (prev && p[0] - prev[0] > 3 * step)
+			out.push([ prev[0] + step ]);
+		out.push(p);
+	}
+	return out;
+}
+
 // Токен стиля (--tun, --mu…) с корня страницы: переменные наследуются внутрь Shadow DOM.
 function token(el, name) {
 	return getComputedStyle(el).getPropertyValue('--' + name).trim();
@@ -113,4 +127,4 @@ function Spark({ values, color, height }) {
 	return html`<div class="spark" ref=${box}></div>`;
 }
 
-return baseclass.extend({ scaleTop, TimeChart, Spark });
+return baseclass.extend({ scaleTop, gaps, TimeChart, Spark });
