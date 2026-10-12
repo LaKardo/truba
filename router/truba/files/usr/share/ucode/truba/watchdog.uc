@@ -22,9 +22,16 @@ function handshake_age(dev) {
 	return latest ? (time() - latest) : null;
 }
 
+// ping: ответа ждём 2 с (через Туннель — с запасом к обычным 30–150 мс), одиночный — не дольше 3 с всего.
+const PING_WAIT = 2, PING_DEADLINE = 3;
+// Размер пакета ping — это данные (-s): IP-пакет больше на заголовки IPv4 (20) и ICMP (8).
+const ICMP_HDR = 28;
+// Меньше минимального MTU IPv4 интерфейс не настроен (нет данных): крупные пакеты не проверяются.
+const MTU_MIN_V4 = 576;
+
 // Время ответа на ping через Туннель, мс; null — ответа нет.
 export function ping_rtt(dev, target) {
-	let r = U.run(sprintf('ping -c 1 -W 2 -w 3 -I %s %s', U.shq(dev), U.shq(target)));
+	let r = U.run(sprintf('ping -c 1 -W %d -w %d -I %s %s', PING_WAIT, PING_DEADLINE, U.shq(dev), U.shq(target)));
 	let m = (r.code == 0) ? match(r.out, /time=([0-9.]+) ?ms/) : null;
 	return m ? +m[1] : null;
 };
@@ -45,9 +52,9 @@ function ping_stats(out) {
 // с задержкой, а загрузки замирают на секунды. size — размер пакета в байтах (= MTU).
 function big_probe(dev, target) {
 	let mtu = iface_mtu(dev);
-	if (mtu < 576)
+	if (mtu < MTU_MIN_V4)
 		return null;
-	let s = ping_stats(U.run(sprintf('ping -c 3 -W 2 -s %d -I %s %s', mtu - 28, U.shq(dev), U.shq(target))).out);
+	let s = ping_stats(U.run(sprintf('ping -c 3 -W %d -s %d -I %s %s', PING_WAIT, mtu - ICMP_HDR, U.shq(dev), U.shq(target))).out);
 	return { ok: s.received >= 2, sent: s.sent, received: s.received, size: mtu, time: time() };
 }
 
@@ -56,7 +63,9 @@ function big_probe(dev, target) {
 const BIG_EVERY = 10;
 
 // «Проверка Туннеля» на «Диагностике»: ping Трубы пакетами трёх размеров разом.
-// Размеры — IP-пакета в байтах: обычный ping, средний и во весь MTU Туннеля.
+// Размеры — IP-пакета в байтах: обычный ping (56 байт данных), средний (1000) и во весь MTU Туннеля.
+const TT_SMALL = 84, TT_MID = 1028;
+
 function run_tunnel_test() {
 	let cfg = F.load();
 	let tinfo = F.tunnel_info(cfg.iface);
@@ -69,17 +78,17 @@ function run_tunnel_test() {
 	if (!target)
 		return { error: 'no_target' };
 	let mtu = iface_mtu(st.device);
-	let sizes = [ 84 ];
-	if (mtu > 1028)
-		push(sizes, 1028);
-	if (mtu > 84)
+	let sizes = [ TT_SMALL ];
+	if (mtu > TT_MID)
+		push(sizes, TT_MID);
+	if (mtu > TT_SMALL)
 		push(sizes, mtu);
 	let dir = trim(U.run('mktemp -d ' + C.TT_TMP + '.XXXXXX').out);
 	if (substr(dir, 0, length(C.TT_TMP) + 1) != C.TT_TMP + '.')
 		return { error: 'tmp' };
 	let cmd = '';
 	for (let s in sizes)
-		cmd += sprintf('ping -c 5 -W 2 -s %d -I %s %s > %s/%d 2>&1 & ', s - 28, U.shq(st.device), U.shq(target), dir, s);
+		cmd += sprintf('ping -c 5 -W %d -s %d -I %s %s > %s/%d 2>&1 & ', PING_WAIT, s - ICMP_HDR, U.shq(st.device), U.shq(target), dir, s);
 	U.run(cmd + 'wait');
 	let results = map(sizes, (s) => {
 		let r = ping_stats(readfile(dir + '/' + s) ?? '');

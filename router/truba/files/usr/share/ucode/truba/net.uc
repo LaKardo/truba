@@ -15,8 +15,12 @@ export function iface_up(iface, ub) {
 	return { up: !!st?.up, device: st?.l3_device ?? st?.device ?? iface };
 };
 
+// Сколько копий правила с одним приоритетом убирать за раз: ip rule add не проверяет повторы, и после
+// сбоя между удалением и добавлением правило могло задвоиться. Предел — чтобы цикл не шёл вечно.
+const RULE_DUPS_MAX = 8;
+
 function del_rule_prio(prio) {
-	for (let i = 0; i < 8; i++)
+	for (let i = 0; i < RULE_DUPS_MAX; i++)
 		if (system(sprintf('ip -4 rule del priority %d 2>/dev/null', prio)) != 0)
 			break;
 }

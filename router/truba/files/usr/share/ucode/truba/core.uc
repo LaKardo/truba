@@ -440,8 +440,12 @@ function reload_service(bg) {
 	system(bg ? '( ' + cmd + ' & )' : cmd);
 }
 
+// Скачивание Набора правил: нет соединения за 15 с — источник недоступен, пробуется следующий;
+// весь файл — не дольше 3 минут (geosite.dat — мегабайты, в том числе через Туннель).
+const DL_CONNECT_TIMEOUT = 15, DL_MAX_TIME = 180;
+
 function curl(url, out, dev) {
-	let cmd = [ 'curl', '-fsSL', '--connect-timeout', '15', '--max-time', '180', '-o', out ];
+	let cmd = [ 'curl', '-fsSL', '--connect-timeout', '' + DL_CONNECT_TIMEOUT, '--max-time', '' + DL_MAX_TIME, '-o', out ];
 	if (dev)
 		push(cmd, '--interface', dev);
 	push(cmd, url);

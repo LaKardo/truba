@@ -24,6 +24,10 @@ const KEEP = hex(~C.MARK_MASK & 0xffffffff);
 // видит адрес назначения до DNAT, а перехват DNS идёт после неё.
 const PREROUTING_HOOK = '\t\ttype filter hook prerouting priority mangle + 10; policy accept;\n';
 
+// persist — в самом конце postrouting: после srcnat (100) и чужих цепочек с обычными приоритетами,
+// чтобы решение Трубы попало в ct mark последним (ADR 0011).
+const PERSIST_HOOK = '\t\ttype filter hook postrouting priority 300; policy accept;\n';
+
 function set_meta(mark) {
 	return 'meta mark set meta mark and ' + KEEP + ' or ' + hex(mark);
 }
@@ -37,7 +41,7 @@ function ct_is(mark) {
 // перезаписывают ct mark целиком раньше (например, «ct mark set ip dscp | 0x80»).
 function persist_chain() {
 	let s = '\n\tchain persist {\n';
-	s += '\t\ttype filter hook postrouting priority 300; policy accept;\n';
+	s += PERSIST_HOOK;
 	s += '\t\tmeta nfproto != ipv4 return\n';
 	for (let m in [ C.MARK_INBOUND, C.MARK_TUNNEL, C.MARK_DIRECT ])
 		s += '\t\tmeta mark and ' + hex(C.MARK_MASK) + ' == ' + hex(m) +
