@@ -48,6 +48,34 @@ export function counters_raw() {
 	return out;
 };
 
+// Байты по устройствам из наборов dv_* (ADR 0018): { ip: [ байты по C.DEV_SETS ] }, адреса нет в
+// наборе — 0 на его месте; null — набора нет (таблицы нет или она загружена до наборов). Каждый
+// набор — своим вызовом nft: несколько «list set» в одном вызове находят только последний набор,
+// а «list table» прочитал бы и все подсети geoip.
+export function dev_counters() {
+	let out = {};
+	for (let k, name in C.DEV_SETS) {
+		let r = U.run('nft -j list set inet ' + C.NFT_TABLE + ' ' + name);
+		if (r.code != 0)
+			return null;
+		try {
+			for (let o in json(r.out)?.nftables ?? []) {
+				for (let e in o?.set?.elem ?? []) {
+					let el = (type(e) == 'object') ? e.elem : null;
+					if (type(el?.val) != 'string' || !U.is_ipv4(el.val))
+						continue;
+					out[el.val] ??= [ 0, 0, 0, 0, 0, 0 ];
+					out[el.val][k] = el.counter?.bytes ?? 0;
+				}
+			}
+		}
+		catch (e) {
+			return null;
+		}
+	}
+	return out;
+};
+
 function health_state() {
 	return U.read_json(C.HEALTH_FILE, null);
 }

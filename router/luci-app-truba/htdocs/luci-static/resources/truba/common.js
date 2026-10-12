@@ -19,6 +19,9 @@ const callRates = rpc.declare({ object: 'truba', method: 'rates', params: [ 'spa
 const callLog = rpc.declare({ object: 'truba', method: 'log', params: [ 'lines' ], expect: { log: '' } });
 const callLeases = rpc.declare({ object: 'luci-rpc', method: 'getDHCPLeases', expect: { '': {} } });
 const callSchema = rpc.declare({ object: 'truba', method: 'schema', expect: { '': {} } });
+// Устройства с трафиком и Политиками; куда устройство ходит сейчас (ADR 0018).
+const callDevices = rpc.declare({ object: 'truba', method: 'devices', expect: { '': {} } });
+const callConnections = rpc.declare({ object: 'truba', method: 'connections', params: [ 'ip' ], expect: { '': {} } });
 
 // Общие стили — один раз на страницу; ?v= — как у модулей LuCI.
 if (!document.querySelector('link[data-truba]'))
@@ -46,7 +49,8 @@ const REASON_LABELS = {
 	geosite_block: _('geosite category with action Block (DNS answers NXDOMAIN)'),
 	shared_ip: _('shared CDN address: Tunnel wins over Direct'),
 	geoip: _('geoip category'),
-	mode: _('no category matched — the mode default applies')
+	mode: _('no category matched — the mode default applies'),
+	changed: _('decided before the settings changed')
 };
 
 // Предупреждения службы (applied.warnings): текст и вкладка, где их исправляют.
@@ -67,7 +71,7 @@ const NAT_ERRORS = {
 };
 
 // Неверные значения настроек, которые служба пропустила (applied.invalid), — вкладка, где их исправить.
-const INVALID_TABS = { device: 'routing', dns: 'dns', lists: 'dns', watchdog: 'tunnel', main: 'tunnel' };
+const INVALID_TABS = { device: 'devices', dns: 'dns', lists: 'dns', watchdog: 'tunnel', main: 'tunnel' };
 
 function invalidTab(list) {
 	return INVALID_TABS[String(list[0]?.key || '').split('.')[0]] || 'routing';
@@ -332,6 +336,71 @@ function tunnelIface() {
 	return get('main', 'iface');
 }
 
+// ---- Устройства (truba.devices, ADR 0018) ----
+
+// Активное устройство — с трафиком за последние 5 минут (чип «Активные», схема потоков «Обзора»).
+const ACTIVE_SPAN = 300;
+
+// Скорость устройства сейчас, байт/с: [ к нему, от него ] по всем Действиям; null — не известна.
+function devRate(d) {
+	const r = d?.rate;
+	return r ? [ (r[0] || 0) + (r[2] || 0) + (r[4] || 0), (r[1] || 0) + (r[3] || 0) + (r[5] || 0) ] : null;
+}
+
+// Туннель и Напрямую за последнюю минуту (точка [ t, Туннель ↓, ↑, Напрямую ↓, ↑ ]), без неё — сейчас.
+// Минуты без трафика служба не пишет: точка старше двух минут — уже не последняя минута.
+function devShare(d, now) {
+	const m = d?.minutes?.[d.minutes.length - 1];
+	const v = (m && m.length > 1 && now - m[0] <= 120) ? m.slice(1) : (d?.rate || []);
+	return [ (v[0] || 0) + (v[1] || 0), (v[2] || 0) + (v[3] || 0) ];
+}
+
+function devActive(d, now) {
+	return d?.last != null && now - d.last <= ACTIVE_SPAN;
+}
+
+// Секции device с этим MAC — без учёта регистра (прежняя таблица «Маршрутизации» сохраняла его
+// заглавными и не проверяла повторы). Действует первая, как у службы (conf.uc, device_sections).
+function deviceSections(mac) {
+	if (!mac)
+		return [];
+	const m = String(mac).toLowerCase();
+	return uci.sections('truba', 'device').filter((s) => String(s.mac || '').toLowerCase() == m).map((s) => s['.name']);
+}
+
+function deviceSection(mac) {
+	return deviceSections(mac)[0] || null;
+}
+
+// Политика устройства так, как её поймёт служба (truba.conf, device_sections), — по настройкам
+// браузера, с несохранёнными изменениями. Незнакомая — «по правилам», а не умолчание схемы.
+function devicePolicy(mac) {
+	const sid = deviceSection(mac);
+	if (!sid || !get('device', 'enabled', sid))
+		return 'rules';
+	const p = uci.get('truba', sid, 'policy') ?? schemaOpt('device', 'policy')?.def;
+	return (p == 'tunnel' || p == 'direct') ? p : 'rules';
+}
+
+// Подпись адреса в «Куда ходит сейчас» (truba.connections). «Решено до смены настроек» и Политика
+// устройства — раньше тега geoip: иначе «geoip ru · Туннель» противоречил бы Действию Категории ru.
+// Без причины (Маршрутизация выключена) — протокол и порт.
+function connLabel(a) {
+	if (a.reason == 'changed' || a.reason == 'device')
+		return REASON_LABELS[a.reason];
+	if ((a.geoip || []).length)
+		return 'geoip ' + a.geoip.join(', ');
+	if (a.reason)
+		return REASON_LABELS[a.reason] || a.reason;
+	return a.port ? a.proto + '/' + a.port : a.proto;
+}
+
+// MAC так, как его хранит служба: «aa:bb:cc:dd:ee:ff»; «AA-BB-…» тоже подходит. null — не MAC.
+function normMac(s) {
+	const m = String(s || '').trim().toLowerCase().replace(/-/g, ':');
+	return /^([0-9a-f]{2}:){5}[0-9a-f]{2}$/.test(m) ? m : null;
+}
+
 // Возраст рукопожатия Туннеля: норма — пока не старше max (handshake_max, так судит watchdog), дольше —
 // «внимание», пока watchdog не объявил Туннель упавшим; рукопожатия не было или Туннель упал — ошибка.
 // verdict — состояние из итога watchdog; его нет (watchdog выключен) — ошибка тогда, когда watchdog
@@ -364,6 +433,7 @@ function tunnelState(st) {
 
 // Вкладки Трубы: адрес и название — для ссылок из плиток и предупреждений «Обзора».
 const TABS = {
+	devices: _('Devices'),
 	tunnel: _('Tunnel'),
 	routing: _('Routing'),
 	dns: _('DNS & lists'),
@@ -376,7 +446,8 @@ function tabUrl(tab) {
 
 return baseclass.extend({
 	callStatus, callLists, callCategories, callSets, callCheck, callUpdateLists, callRollbackLists, callRates, callLog, callLeases,
-	callSchema, loadSchema, schema, get, field, handshakeLevel,
+	callSchema, loadSchema, schema, get, field, handshakeLevel, callDevices, callConnections,
+	ACTIVE_SPAN, devRate, devShare, devActive, deviceSections, deviceSection, devicePolicy, normMac, connLabel,
 	runNatTest, runTunnelTest,
 	ACTION_LABELS, ACTION_LEVELS, REASON_LABELS, WARNINGS, NAT_ERRORS, UPNP_MISSING, NBSP, TABS,
 	fmtBytes, fmtRate, fmtAge, fmtTime, fmtDate, fmtNum, missingText,

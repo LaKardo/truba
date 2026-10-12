@@ -31,6 +31,8 @@ function usage() {
 		'  lists              версии Наборов правил в JSON\n' +
 		'  categories         Категории и Действия в JSON\n' +
 		'  sets               размеры наборов в JSON\n' +
+		'  devices            устройства с трафиком и Политиками в JSON\n' +
+		'  connections <IP>   куда устройство ходит сейчас, в JSON\n' +
 		'  schema             схема настроек и константы для интерфейса в JSON\n' +
 		'  reset-rules <all|selective>  Стартовые настройки Режима\n' +
 		'  nat-test [auto]    проверка внешнего IP и сохранения порта через Трубу\n' +
@@ -99,6 +101,16 @@ case 'schema':
 
 case 'sets':
 	out(load('state').sets());
+	break;
+
+case 'devices':
+	out(load('devices').list());
+	break;
+
+case 'connections':
+	if (!args[0])
+		usage();
+	out(load('devices').connections(args[0]));
 	break;
 
 case 'reset-rules':

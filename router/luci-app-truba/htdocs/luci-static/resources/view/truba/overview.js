@@ -80,6 +80,12 @@ function fetchHistory() {
 	return Promise.all([ fetchRates(hist.fine), minDue ? fetchRates(hist.min) : null ]);
 }
 
+// Устройства (ADR 0018) — число активных на схеме и карточка «Устройства»; если служба не ответила,
+// остальной «Обзор» работает без них.
+function fetchDevices() {
+	return common.callDevices().catch(() => null);
+}
+
 // Последняя точка, если она свежая: значит, история пишется. null — процесс stats не работает.
 function latest() {
 	const p = hist.fine.points[hist.fine.points.length - 1];
@@ -188,11 +194,13 @@ function Hero({ st, iface, warns }) {
 	</div>`;
 }
 
-function FlowCard({ st }) {
+// devices — ответ truba.devices или null (служба не ответила): тогда у узла «Устройства» нет числа.
+function FlowCard({ st, devices }) {
 	const { html } = app.lib;
 	const p = latest(), c = st.counters || {}, pct = tunnelShare(c);
+	const active = devices ? (devices.devices || []).filter((d) => common.devActive(d, devices.now)).length : null;
 	return html`<${kit.Card} cls="w2" title=${_('Where traffic goes')} aside=${_('now')}>
-		<${flow.Flow} devices=${null} block=${c.block?.packets || 0}
+		<${flow.Flow} devices=${active} block=${c.block?.packets || 0}
 			tunnel=${p ? [ p[COLS.tunnel.down], p[COLS.tunnel.up] ] : null}
 			direct=${p ? [ p[COLS.direct.down], p[COLS.direct.up] ] : null}
 			caption=${(pct == null) ? _('No outgoing connections yet.') : _('%d%% of new connections via tunnel').format(pct)} />
@@ -260,6 +268,24 @@ function SpeedCard({ st }) {
 	</${kit.Card}>`;
 }
 
+// Пять устройств с наибольшей скоростью к ним сейчас: доля Туннеля и Напрямую, скорость.
+function DevicesCard({ devices }) {
+	const { html } = app.lib;
+	const down = (d) => common.devRate(d)?.[0] ?? -1;
+	const top = (devices?.devices || []).filter((d) => d.ip).sort((a, b) => (down(b) - down(a)) || ((b.last || 0) - (a.last || 0))).slice(0, 5);
+	return html`<${kit.Card} cls="w2 devs" title=${_('Devices')} aside=${_('tunnel / direct · now')}>
+		${top.length ? top.map((d) => {
+			const [ tun, dir ] = common.devShare(d, devices.now), r = common.devRate(d);
+			return html`<div class="devrow">
+				<span class="n">${d.name || d.ip}</span>
+				<${kit.ShareBar} tunnel=${tun} direct=${dir} />
+				<span class="r">${r ? '↓ ' + common.fmtRate(r[0]) : '—'}</span>
+			</div>`;
+		}) : html`<${kit.Empty} text=${devices ? _('No devices with traffic in the last 24 hours yet.') : _('No device data: the router did not answer.')} />`}
+		<${kit.Go} tab="devices" />
+	</${kit.Card}>`;
+}
+
 // DNS и списки, входящие: значки и строки — как у прежних плиток, плюс скорость входящих сейчас.
 function InfoCard({ st }) {
 	const { html } = app.lib;
@@ -280,8 +306,9 @@ function InfoCard({ st }) {
 	const forwards = uci.sections('firewall', 'redirect').filter((x) => x.src == zone && x.enabled != '0').length;
 	const p = latest();
 
-	return html`<${kit.Card} cls="w3">
-		<div class="cols">
+	// Одна колонка рядом с карточкой «Устройства»: «DNS и списки» над «Входящими».
+	return html`<${kit.Card}>
+		<div class="stack">
 			<div>
 				<div class="card-h"><h3>${_('DNS & lists')}</h3><${kit.Badge} level=${dLevel}>${dText}</${kit.Badge}></div>
 				<div class="big">${newest ? _('Lists from %s').format(common.fmtDate(newest)) : _('No lists yet')}</div>
@@ -321,7 +348,7 @@ function WarningsCard({ list }) {
 
 function Page({ store, view, iface }) {
 	const { html } = app.lib;
-	const { status, offline } = app.use(store);
+	const { status, devices, offline } = app.use(store);
 	app.use(app.changes);   // переключатели читают UCI — перерисовка после app.set
 	const st = status || {};
 	const list = warnings(st);
@@ -333,9 +360,10 @@ function Page({ store, view, iface }) {
 		</div>
 		<${Hero} st=${st} iface=${iface} warns=${list.length} />
 		<div class="grid">
-			<${FlowCard} st=${st} />
+			<${FlowCard} st=${st} devices=${devices} />
 			<${TunnelCard} st=${st} iface=${iface} />
 			<${SpeedCard} st=${st} />
+			<${DevicesCard} devices=${devices} />
 			<${InfoCard} st=${st} />
 			${list.length ? html`<${WarningsCard} list=${list} />` : ''}
 		</div>
@@ -347,13 +375,15 @@ return view.extend({
 		// Сроки истории — из схемы службы: без них fetchHistory не знает, сколько точек просить.
 		return Promise.all([ app.load(), common.loadSchema() ]).then(([ , s ]) => {
 			setHistory(s.consts.history);
-			return Promise.all([ common.callStatus(), uci.load('network'), uci.load('truba'), uci.load('firewall'), fetchHistory() ]);
+			return Promise.all([ common.callStatus(), uci.load('network'), uci.load('truba'), uci.load('firewall'), fetchHistory(),
+				fetchDevices() ]);
 		});
 	},
 
 	render: function(data) {
-		const store = app.store({ status: data[0], now: hist.now });
-		app.poll(store, () => Promise.all([ common.callStatus(), fetchHistory() ]).then(([ st ]) => ({ status: st, now: hist.now })), POLL);
+		const store = app.store({ status: data[0], now: hist.now, devices: data[5] });
+		app.poll(store, () => Promise.all([ common.callStatus(), fetchHistory(), fetchDevices() ])
+			.then(([ st, , dv ]) => ({ status: st, now: hist.now, devices: dv })), POLL);
 		return app.mount(this, Page, { store, iface: common.tunnelIface() });
 	},
 

@@ -9,7 +9,7 @@ const fs = require('fs');
 const base = process.argv[2];
 const out = process.argv[3] || '/out';
 const url = (p) => `${base}/cgi-bin/luci/admin/services/truba/${p}`;
-const tabs = [ 'overview', 'tunnel', 'routing', 'dns', 'inbound', 'diagnostics' ];
+const tabs = [ 'overview', 'devices', 'tunnel', 'routing', 'dns', 'inbound', 'diagnostics' ];
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 let fails = 0;
@@ -127,6 +127,15 @@ async function waitApply(page) {
 	result(await shadowHas(page, 'svg.flow'), '«Обзор»: схема потоков');
 	result(await shadowHas(page, 'canvas'), '«Обзор»: график uPlot');
 	result(/Where traffic goes/.test(await pageText(page)), '«Обзор»: карточка «Куда идёт трафик»');
+	// Устройства стенда (stand.sh): оба с трафиком за 5 минут — на схеме «2 active», в карточке — список.
+	const flowText = await page.evaluate(() => document.querySelector('.truba-root')?.shadowRoot?.querySelector('svg.flow')?.textContent || '');
+	result(/2 active/.test(flowText), '«Обзор»: схема потоков — число активных устройств', flowText.replace(/\s+/g, ' ').slice(0, 80));
+	const devCard = await page.evaluate(() => {
+		const c = document.querySelector('.truba-root')?.shadowRoot?.querySelector('.card.devs');
+		return { text: c?.innerText || '', link: c?.querySelector('a.go')?.getAttribute('href') || '' };
+	});
+	result(/192\.168\.1\.50/.test(devCard.text) && /\/admin\/services\/truba\/devices$/.test(devCard.link),
+		'«Обзор»: карточка «Устройства» — устройство и ссылка на вкладку', devCard.text.replace(/\s+/g, ' ').slice(0, 80));
 
 	for (const t of tabs) {
 		await page.goto(url(t), { waitUntil: 'networkidle2' });
@@ -155,6 +164,46 @@ async function waitApply(page) {
 	result(verdict != null, '«Проверить домен/IP»', verdict);
 	await page.screenshot({ path: `${out}/diagnostics-check.png`, fullPage: true });
 
+	// «Устройства» (ADR 0018): на стенде сосед с MAC и узел mesh-VPN без него (stand.sh).
+	const rowSel = (ip) => `button.dev[data-ip="${ip}"]`;
+	const el = async (sel) => (await shadowSel(page, sel)).asElement();
+	const tap = async (sel) => { const e = await el(sel); if (e) await e.click(); return !!e; };
+	const panelText = () => page.evaluate(() => document.querySelector('.truba-root')?.shadowRoot?.querySelector('.panel')?.innerText || '');
+	const clickIn = (sel, re) => page.evaluate((sel, re) => [ ...document.querySelector('.truba-root').shadowRoot.querySelectorAll(sel) ]
+		.find((b) => new RegExp(re).test(b.textContent))?.click(), sel, re);
+	await page.goto(url('devices'), { waitUntil: 'networkidle2' });
+	await settled(page);
+	result(await shadowHas(page, rowSel('192.168.1.50')) && await shadowHas(page, rowSel('100.64.0.9')), '«Устройства»: в списке сосед и узел mesh-VPN');
+	// Разметка строки: в кнопке — только фразовые элементы; у карточки списка нет пустого заголовка.
+	const markup = await page.evaluate(() => {
+		const r = document.querySelector('.truba-root').shadowRoot;
+		return { divs: r.querySelectorAll('button.dev div').length, h3: r.querySelectorAll('.card.list .card-h h3').length };
+	});
+	result(markup.divs == 0 && markup.h3 == 0, '«Устройства»: в строке-кнопке нет div, у списка нет пустого заголовка', JSON.stringify(markup));
+	const chips = await page.evaluate(() => document.querySelector('.truba-root').shadowRoot.querySelector('.chips')?.innerText || '');
+	result(/Active\s*2/.test(chips), '«Устройства»: у обоих трафик за 5 минут — активны', chips.replace(/\s+/g, ' '));
+	await tap(rowSel('192.168.1.50'));
+	await page.waitForFunction(() => /02:11:22:33:44:55/.test(document.querySelector('.truba-root')?.shadowRoot?.querySelector('.panel')?.innerText || ''),
+		{ timeout: 5000 }).catch(() => {});
+	const p50 = await panelText();
+	result(/02:11:22:33:44:55/.test(p50) && /Where it goes now/.test(p50) && await shadowHas(page, '.panel .policy .seg'),
+		'«Устройства»: панель — MAC, Политика, «Куда ходит сейчас»', p50.replace(/\s+/g, ' ').slice(0, 120));
+	await tap(rowSel('100.64.0.9'));
+	await sleep(300);
+	const off = await page.evaluate(() => [ ...document.querySelector('.truba-root').shadowRoot.querySelectorAll('.panel .policy button') ]
+		.every((b) => b.disabled));
+	result(/tied to the MAC address/.test(await panelText()) && off, '«Устройства»: без MAC — Политика недоступна, с пояснением');
+	// «Проверить для этого устройства» без MAC — проверка для всех устройств: mac не передаётся вовсе
+	// (rpcd отклоняет null вместо строки).
+	await (await el('.panel form.check input[name="target"]'))?.type('77.88.8.8');
+	await tap('.panel form.check button[type="submit"]');
+	const noMac = await page.waitForFunction(() => {
+		const t = document.querySelector('.truba-root')?.shadowRoot?.querySelector('.panel .check-res')?.innerText || '';
+		return /→|failed/.test(t) && t;
+	}, { timeout: 20000 }).then((h) => h.jsonValue()).catch(() => '');
+	result(/77\.88\.8\.8 →/.test(noMac), '«Устройства»: проверка у устройства без MAC', noMac);
+	await page.screenshot({ path: `${out}/devices-1280.png`, fullPage: true });
+
 	const time = async () => (await ubus('truba', 'status')).applied?.time ?? 0;
 
 	// 1. Маршрутизация: youtube → Напрямую в Режиме «Всё в туннель».
@@ -172,21 +221,113 @@ async function waitApply(page) {
 	result(await applied(t0, (st) => (st.applied.geosite_order || []).includes('youtube=direct')),
 		'«Сохранить и применить»: Действие Категории → служба перестроила правила');
 
-	// 2. Политика устройства «Всё в туннель».
+	// 2. Политика устройства «Всё в туннель» — в панели устройства, применение — панелью изменений.
 	t0 = await time();
-	await page.goto(url('routing'), { waitUntil: 'networkidle2' });
+	await page.goto(url('devices'), { waitUntil: 'networkidle2' });
 	await settled(page);
-	await page.waitForSelector('#cbi-truba-device .cbi-button-add', { timeout: 20000 });
-	await page.click('#cbi-truba-device .cbi-button-add');
-	await page.waitForSelector('.modal input[id$=".name"]', { visible: true });
-	await page.type('.modal input[id$=".name"]', 'console');
-	await page.type('.modal input[id$=".mac"]', '02:11:22:33:44:55');
-	await page.evaluate(() => [ ...document.querySelectorAll('.modal button') ].find((b) => /Save/.test(b.textContent)).click());
-	await page.waitForSelector('.modal', { hidden: true });
-	await saveApply(page);
+	await tap(rowSel('192.168.1.50'));
+	await page.waitForFunction(() => document.querySelector('.truba-root')?.shadowRoot?.querySelector('.panel .policy .seg'), { timeout: 5000 }).catch(() => {});
+	await clickIn('.panel .policy button', '^All via tunnel$');
+	await tap('.changes [data-act="apply"]');
+	await waitApply(page);
 	result(await applied(t0, async () =>
 		(await ubus('truba', 'check', { target: '8.8.8.8', mac: '02:11:22:33:44:55' })).reason == 'device'),
-		'«Сохранить и применить»: Политика устройства → действует');
+		'«Применить»: Политика устройства → действует');
+	// Имя из IP не пишется: адрес устройства меняется, а имя в настройках осталось бы прежним адресом.
+	const devSecs = async (mac) => Object.values((await ubus('uci', 'get', { config: 'truba', type: 'device' })).values || {})
+		.filter((s) => String(s.mac).toLowerCase() == mac);
+	const s50 = await devSecs('02:11:22:33:44:55');
+	result(s50.length == 1 && !s50[0].name, '«Политика устройства»: без имени у аренды в имя не пишется IP', JSON.stringify(s50));
+
+	// «Добавить по MAC»: Политика заранее — устройству, которого нет в сети.
+	t0 = await time();
+	await page.goto(url('devices'), { waitUntil: 'networkidle2' });
+	await settled(page);
+	await tap('[data-act="add-mac"]');
+	const macIn = await el('.addmac input[name="mac"]');
+	await macIn?.type('zz');
+	const badMac = await page.evaluate(() => {
+		const r = document.querySelector('.truba-root').shadowRoot;
+		return !!r.querySelector('.addmac .err-text') && r.querySelector('.addmac [data-act="add"]')?.disabled && !r.querySelector('.changes');
+	});
+	result(badMac, '«Добавить по MAC»: неверный MAC — ошибка у поля, изменений нет');
+	await macIn?.click({ clickCount: 3 });
+	await macIn?.type('02:AA:BB:CC:DD:01');
+	await (await el('.addmac input[name="name"]'))?.type('console');
+	await clickIn('.addmac .seg button', '^All direct$');
+	await tap('.addmac [data-act="add"]');
+	const newRow = 'button.dev[data-mac="02:aa:bb:cc:dd:01"]';
+	const rowText = await page.waitForFunction((s) => document.querySelector('.truba-root')?.shadowRoot?.querySelector(s)?.innerText, { timeout: 5000 }, newRow)
+		.then((h) => h.jsonValue()).catch(() => '');
+	result(/console/.test(rowText) && /offline/.test(rowText) && await shadowHas(page, newRow + ' .dot.warn[aria-label]'),
+		'«Добавить по MAC»: строка «offline» с точкой изменения', rowText.replace(/\s+/g, ' '));
+	// Тот же MAC ещё раз — новой секции нет, выбрана его строка.
+	await tap('[data-act="add-mac"]');
+	await (await el('.addmac input[name="mac"]'))?.type('02:aa:bb:cc:dd:01');
+	await clickIn('.addmac .seg button', '^All direct$');   // Политика из формы — его секции
+	await tap('.addmac [data-act="add"]');
+	const same = await page.evaluate(async () => (await L.require('uci')).sections('truba', 'device')
+		.filter((s) => String(s.mac).toLowerCase() == '02:aa:bb:cc:dd:01').length);
+	result(same == 1 && await shadowHas(page, newRow + '.sel'), '«Добавить по MAC»: тот же MAC — без второй секции, строка выбрана', String(same));
+	await tap('.changes [data-act="apply"]');
+	await waitApply(page);
+	result(await applied(t0, async () => {
+		const d = (await ubus('truba', 'devices')).devices.find((x) => x.mac == '02:aa:bb:cc:dd:01');
+		return d?.policy == 'direct' && d.source == 'config' && d.ip == null;
+	}), '«Добавить по MAC» → служба знает устройство: «напрямую», из настроек');
+
+	// «Добавить по MAC» с MAC устройства в сети, у которого секция уже есть: Политика из формы — его
+	// секции, выбрана его строка. Затем «Сбросить» — изменение не нужно.
+	await page.goto(url('devices'), { waitUntil: 'networkidle2' });
+	await settled(page);
+	await tap('[data-act="add-mac"]');
+	await (await el('.addmac input[name="mac"]'))?.type('02:11:22:33:44:55');
+	await clickIn('.addmac .seg button', '^All direct$');
+	await tap('.addmac [data-act="add"]');
+	await sleep(300);
+	const online = await page.evaluate(() => {
+		const r = document.querySelector('.truba-root').shadowRoot;
+		return { sel: !!r.querySelector('button.dev.sel[data-ip="192.168.1.50"]'),
+			pol: [ ...r.querySelectorAll('.panel .policy button') ].find((b) => b.getAttribute('aria-pressed') == 'true')?.textContent };
+	});
+	result(online.sel && online.pol == 'All direct', '«Добавить по MAC»: устройство в сети — его строка выбрана, Политика из формы', JSON.stringify(online));
+	// Имя устройства с секцией меняется в панели.
+	const nameIn = await el('.panel input[name="devname"]');
+	await nameIn?.click({ clickCount: 3 });
+	await nameIn?.type('tv-box');
+	await page.keyboard.press('Tab');
+	await sleep(300);
+	const renamed = await page.evaluate(async () => ({
+		row: document.querySelector('.truba-root').shadowRoot.querySelector('button.dev[data-ip="192.168.1.50"]')?.innerText || '',
+		uci: (await L.require('uci')).sections('truba', 'device').find((s) => String(s.mac).toLowerCase() == '02:11:22:33:44:55')?.name
+	}));
+	result(!!nameIn && renamed.uci == 'tv-box' && /tv-box/.test(renamed.row), '«Устройства»: имя меняется в панели', JSON.stringify(renamed));
+	await Promise.all([ page.waitForNavigation({ waitUntil: 'networkidle2' }).catch(() => {}), tap('.changes [data-act="reset"]') ]);
+	await settled(page);
+
+	// «По правилам» убирает секцию: устройство без Политики и без трафика уходит из списка.
+	t0 = await time();
+	await tap(newRow);
+	await page.waitForFunction(() => document.querySelector('.truba-root')?.shadowRoot?.querySelector('.panel .policy .seg'), { timeout: 5000 }).catch(() => {});
+	await clickIn('.panel .policy button', '^By rules$');
+	const gone = await page.waitForFunction((s) => !document.querySelector('.truba-root').shadowRoot.querySelector(s), { timeout: 5000 }, newRow)
+		.then(() => true).catch(() => false);
+	await tap('.changes [data-act="apply"]');
+	await waitApply(page);
+	result(gone && await applied(t0, async () => !(await ubus('truba', 'devices')).devices.some((x) => x.mac == '02:aa:bb:cc:dd:01')) &&
+		!(await devSecs('02:aa:bb:cc:dd:01')).length, '«По правилам»: секция убрана, устройство ушло из списка');
+
+	// Секция с неверным MAC: служба её пропускает и предупреждает, ссылка ведёт сюда — здесь её видно и можно убрать.
+	await ubus('uci', 'add', { config: 'truba', type: 'device', values: { mac: 'zz:zz', policy: 'direct' } });
+	await ubus('uci', 'commit', { config: 'truba' });
+	await page.goto(url('devices'), { waitUntil: 'networkidle2' });
+	await settled(page);
+	const badText = await page.evaluate(() => document.querySelector('.truba-root').shadowRoot.querySelector('.badmac')?.innerText || '');
+	await tap('.badmac [data-act="remove-bad"]');
+	await tap('.changes [data-act="apply"]');
+	await waitApply(page);
+	result(/zz:zz/.test(badText) && !(await devSecs('zz:zz')).length, '«Устройства»: секция с неверным MAC видна и убирается',
+		badText.replace(/\s+/g, ' '));
 
 	// 3. Переключатель «Маршрутизация» в строке состояния «Обзора» — выкл, применение — панелью изменений.
 	t0 = await time();
@@ -244,6 +385,37 @@ async function waitApply(page) {
 	}
 	await theme('/luci-static/bootstrap');
 	await page.emulateMediaFeatures([ { name: 'prefers-color-scheme', value: 'light' } ]);
+
+	// «Устройства» на телефоне — здесь, а не сразу после входа: к этому времени закрылась минута трафика
+	// стенда, и в панели есть график — она выше и не должна уходить за край экрана.
+	await page.setViewport({ width: 375, height: 812 });
+	await page.goto(url('devices'), { waitUntil: 'networkidle2' });
+	await settled(page);
+	await tap(rowSel('192.168.1.50'));
+	// Панель растёт, пока рисуется график: мерить, когда в ней уже есть холст uPlot (трафик на стенде есть).
+	const measure = () => {
+		const p = document.querySelector('.truba-root').shadowRoot.querySelector('.panel');
+		const r = p?.getBoundingClientRect();
+		return { ready: !!p?.querySelector('canvas'), ok: !!r && r.top >= 0 && r.bottom <= window.innerHeight + 1 && r.left >= 0 && r.right <= window.innerWidth + 1,
+			doc: document.documentElement.scrollWidth, win: window.innerWidth, top: r && Math.round(r.top), bottom: r && Math.round(r.bottom), vh: window.innerHeight };
+	};
+	await page.waitForFunction(`(${measure})().ready`, { timeout: 30000 }).catch(() => {});
+	await sleep(300);
+	const sheet = await page.evaluate(measure);
+	result(sheet.ok && sheet.doc <= sheet.win, '«Устройства» 375: панель в пределах экрана, без горизонтальной прокрутки', JSON.stringify(sheet));
+	// Несохранённое изменение: панель изменений не закрывает низ панели устройства.
+	await clickIn('.panel .policy button', '^All direct$');
+	await page.waitForFunction(() => document.querySelector('.truba-root')?.shadowRoot?.querySelector('.changes'), { timeout: 5000 }).catch(() => {});
+	await sleep(300);
+	const overlap = await page.evaluate(() => {
+		const r = document.querySelector('.truba-root').shadowRoot;
+		const p = r.querySelector('.panel')?.getBoundingClientRect(), b = r.querySelector('.changes')?.getBoundingClientRect();
+		return { panel: p && Math.round(p.bottom), bar: b && Math.round(b.top) };
+	});
+	result(overlap.bar != null && overlap.panel <= overlap.bar + 1, '«Устройства» 375: панель изменений не закрывает панель устройства', JSON.stringify(overlap));
+	await Promise.all([ page.waitForNavigation({ waitUntil: 'networkidle2' }).catch(() => {}), tap('.changes [data-act="reset"]') ]);
+	await page.screenshot({ path: `${out}/devices-375.png`, fullPage: true });
+	await page.setViewport({ width: 1280, height: 900 });
 
 	// Длинное неверное значение настройки попадает в предупреждение как есть — и на телефоне не должно
 	// растягивать страницу вбок. Порт DNS из 79 цифр и буквы служба пропускает как неверный (ADR 0015).

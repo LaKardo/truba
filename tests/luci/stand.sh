@@ -75,4 +75,20 @@ uci set luci.main.mediaurlbase='/luci-static/bootstrap'; uci commit luci
 /etc/init.d/truba enable
 /etc/init.d/truba start
 wait_for 15 ubus call truba status
+# Устройства для вкладки «Устройства» (ADR 0018). Клиентов в домашней сети стенда нет, поэтому
+# элементы наборов с трафиком добавляются вручную: процесс stats видит новые элементы и пишет их
+# в историю. 192.168.1.50 — сосед с MAC (на нём сценарий Политики), 100.64.0.9 — узел mesh-VPN без MAC.
+ip neigh replace 192.168.1.50 lladdr 02:11:22:33:44:55 dev br-lan nud permanent
+D=/var/run/truba/devices.json
+inject() { nft delete element inet truba "$1" "{ $2 }" 2>/dev/null || true; nft add element inet truba "$1" "{ $2 counter packets 10 bytes $3 }"; }
+inject dv_tunnel_down 192.168.1.50 600000
+inject dv_direct_down 100.64.0.9 300000
+dev_seen() { grep -q '"192.168.1.50"' $D && grep -q '"100.64.0.9"' $D; }
+wait_for 15 dev_seen
+# Первый снимок с элементом мог стать точкой отсчёта (прошлый снимок — до загрузки таблицы): ещё
+# порция байт — уже трафик, с ним у устройств есть скорость, сутки и время трафика.
+inject dv_tunnel_down 192.168.1.50 1200000
+inject dv_direct_down 100.64.0.9 600000
+dev_last() { [ -n "$(jsonfilter -i $D -e "@.devices['192.168.1.50'].last")" ] && [ -n "$(jsonfilter -i $D -e "@.devices['100.64.0.9'].last")" ]; }
+wait_for 20 dev_last
 echo "стенд LuCI готов: $STAND_ADDR"

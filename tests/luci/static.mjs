@@ -123,6 +123,13 @@ for (const f of files.filter((f) => rel(f).includes('/view/truba/'))) {
 	});
 }
 
+// Шаг и срок поминутной истории устройств — из схемы (consts.devices), а не числами в представлении.
+const devView = join(root, 'htdocs/luci-static/resources/view/truba/devices.js');
+if (existsSync(devView) && /\b3600\b|, 60\)/.test(readFileSync(devView, 'utf8'))) {
+	console.log('FAIL  view/truba/devices.js: копия сроков истории устройств (3600, 60) — они в truba.schema consts.devices');
+	fails++;
+}
+
 // Интерфейс вызывает truba.schema, которой нет в службе до 1.1.0-r7: с более старой truba страницы не строятся.
 // Нижняя граница зависимости — не ниже неё и не выше версии truba из этого же репозитория.
 const SCHEMA_SINCE = '1.1.0-r7';
@@ -215,6 +222,34 @@ if (app) {
 	check(app.changeCount() === 2, 'app.changeCount: две изменённые опции');
 	uciStub.state = { creates: { truba: { cfg01: {} } }, changes: {}, deletes: { firewall: { r1: true } }, reorder: { truba: true } };
 	check(app.changeCount() === 3, 'app.changeCount: новая секция, удалённая секция, порядок');
+	// Несохранённое у секции — точка «изменено» у строки устройства.
+	uciStub.state = { creates: { truba: { cfg01: {} } }, changes: { truba: { cfg02: { policy: 'direct' } } }, deletes: { truba: { cfg03: true } } };
+	check(app.pending?.('truba', 'cfg01') && app.pending('truba', 'cfg02') && app.pending('truba', 'cfg03') &&
+		!app.pending('truba', 'cfg04') && !app.pending('truba', null), 'app.pending: новая, изменённая, удалённая секция');
+	uciStub.add = (c, t) => { uciStub.state.creates[c].cfg05 = { '.type': t }; return 'cfg05'; };
+	check(app.add?.('truba', 'device') === 'cfg05' && app.changes.get().n === app.changeCount(), 'app.add: секция и пересчёт изменений');
+	// Опрос внутри компонента: следующий вызов — после ответа на прошлый (медленный connections не копится
+	// в rpcd), ошибка не останавливает, stop — останавливает.
+	let active = 0, most = 0, calls = 0;
+	const stop = app.every?.(() => {
+		calls++;
+		active++;
+		most = Math.max(most, active);
+		return new Promise((ok, fail) => setTimeout(() => { active--; (calls % 2 ? ok : fail)(new Error('rpc')); }, 30));
+	}, 5);
+	await new Promise((r) => setTimeout(r, 150));
+	stop?.();
+	const after = calls;
+	await new Promise((r) => setTimeout(r, 80));
+	check(stop && most === 1 && calls >= 3 && calls === after, `app.every: вызовы не накладываются, ошибка не останавливает, stop — останавливает (${calls}, ${most})`);
+}
+
+// kit: стрелки в группе сегментов — по кругу.
+const kit = app && loadModule('truba/ui/kit.js', { baseclass, common: {}, app, icons: {} });
+if (kit) {
+	const it = [ [ 'rules', 'R' ], [ 'tunnel', 'T' ], [ 'direct', 'D' ] ];
+	check(kit.step?.(it, 'direct', 'ArrowRight') === 'rules' && kit.step(it, 'rules', 'ArrowLeft') === 'direct' &&
+		kit.step(it, 'rules', 'ArrowRight') === 'tunnel' && kit.step(it, 'tunnel', 'Enter') === 'tunnel', 'kit.step: → и ← по кругу, другие клавиши — без смены');
 }
 
 // Стиль A (spec §4.1): цвета Действий и состояний читаются на карточке (контраст не ниже 3:1), текст —
@@ -268,6 +303,57 @@ if (flow) {
 	check(flow.width(null, 1) === 0 && flow.width(0, 1) === 0, 'flow.width: нет трафика — 0');
 	check(flow.width(100, 100) === 14 && flow.width(400, 100) === 14, 'flow.width: потолок 14');
 	check(flow.width(25, 100) === 8, 'flow.width: корень доли');
+}
+
+// Устройства (common): Политика — как её поймёт служба, по настройкам браузера; MAC без учёта регистра
+// (прежняя таблица «Маршрутизации» сохраняла заглавными); первая из секций с одним MAC.
+const devSecs = [
+	{ '.name': 'd1', '.type': 'device', mac: 'AA:BB:CC:DD:EE:01', policy: 'direct' },
+	{ '.name': 'd2', '.type': 'device', mac: 'aa:bb:cc:dd:ee:02', policy: 'tunnel', enabled: '0' },
+	{ '.name': 'd3', '.type': 'device', mac: 'aa:bb:cc:dd:ee:03' },
+	{ '.name': 'd4', '.type': 'device', mac: 'aa:bb:cc:dd:ee:04', policy: 'weird' },
+	{ '.name': 'd5', '.type': 'device', mac: 'aa:bb:cc:dd:ee:01', policy: 'tunnel' },
+];
+const devSchema = { sections: { device: { enabled: { type: 'bool', def: true },
+	policy: { type: 'enum', values: [ 'tunnel', 'direct', 'rules' ], def: 'tunnel' } } }, upstream_schemes: [], consts: {} };
+let cdev = null;
+try {
+	cdev = new Function('baseclass', 'rpc', 'uci', '_', 'L', 'E', 'document', commonSrc)(
+		baseclass, { declare: (o) => () => Promise.resolve(o.method == 'schema' ? devSchema : {}) },
+		{ sections: (c, t) => devSecs.filter((s) => s['.type'] == t), get: (c, sid, o) => devSecs.find((s) => s['.name'] == sid)?.[o] },
+		(s) => s, stub, stub, { querySelector: () => true });
+	await cdev.loadSchema();
+} catch (e) {
+	console.log(`FAIL  common.js с заглушкой uci: ${e.message}`);
+	fails++;
+}
+if (cdev) {
+	const P = (m) => cdev.devicePolicy?.(m);
+	check(P('aa:bb:cc:dd:ee:01') === 'direct' && cdev.deviceSection('AA:BB:CC:DD:EE:01') === 'd1',
+		'common.devicePolicy: MAC заглавными в секции, первая из двух с одним MAC');
+	check(P('aa:bb:cc:dd:ee:02') === 'rules' && P('aa:bb:cc:dd:ee:03') === 'tunnel' && P('aa:bb:cc:dd:ee:04') === 'rules',
+		'common.devicePolicy: выключенная — «по правилам», без Политики — умолчание схемы, незнакомая — «по правилам»');
+	check(P('aa:bb:cc:dd:ee:99') === 'rules' && P(null) === 'rules' && cdev.deviceSection(null) === null, 'common.devicePolicy: нет секции или MAC — «по правилам»');
+	check(cdev.normMac?.('AA-BB-CC-DD-EE-FF') === 'aa:bb:cc:dd:ee:ff' && cdev.normMac('zz') === null && cdev.normMac('') === null,
+		'common.normMac: дефисы и регистр, не MAC — null');
+	check(JSON.stringify(cdev.devRate?.({ rate: [ 1, 2, 3, 4, 5, 6 ] })) === '[9,12]' && cdev.devRate({ rate: null }) === null,
+		'common.devRate: к устройству и от него по всем Действиям');
+	check(JSON.stringify(cdev.devShare?.({ minutes: [ [ 60, 9, 9, 9, 9 ], [ 120, 1, 2, 3, 4 ] ], rate: [ 50, 50, 0, 0, 0, 0 ] }, 150)) === '[3,7]' &&
+		JSON.stringify(cdev.devShare({ minutes: [], rate: [ 1, 2, 3, 4, 5, 6 ] }, 150)) === '[3,7]' && JSON.stringify(cdev.devShare({}, 150)) === '[0,0]',
+		'common.devShare: Туннель и Напрямую за последнюю минуту, без неё — сейчас');
+	// Минуты без трафика служба не пишет: последняя точка может быть старой — тогда по скорости сейчас.
+	check(JSON.stringify(cdev.devShare({ minutes: [ [ 120, 1, 2, 3, 4 ] ], rate: [ 50, 50, 0, 0, 0, 0 ] }, 1000)) === '[100,0]',
+		'common.devShare: старая минута — не последняя, доля по скорости сейчас');
+	check(JSON.stringify(cdev.deviceSections?.('aa:bb:cc:dd:ee:01')) === '["d1","d5"]', 'common.deviceSections: все секции MAC, первая — первой');
+	// «Куда ходит сейчас»: причина «решено до смены настроек» и Политика устройства важнее тега geoip —
+	// иначе «geoip ru · Туннель» противоречил бы Действию Категории ru.
+	const CL = (a) => cdev.connLabel?.(a);
+	check(CL({ reason: 'changed', geoip: [ 'ru' ] }) === cdev.REASON_LABELS.changed && CL({ reason: 'device', geoip: [ 'ru' ] }) === cdev.REASON_LABELS.device &&
+		CL({ reason: 'geoip', geoip: [ 'ru', 'private' ] }) === 'geoip ru, private' && CL({ reason: 'mode', geoip: [] }) === cdev.REASON_LABELS.mode &&
+		CL({ reason: null, geoip: [], proto: 'tcp', port: 443 }) === 'tcp/443' && CL({ reason: null, geoip: [], proto: 'icmp', port: null }) === 'icmp',
+		'common.connLabel: changed и device — раньше geoip, без причины — протокол и порт');
+	check(cdev.devActive?.({ last: 700 }, 1000) === true && cdev.devActive({ last: 699 }, 1000) === false && cdev.devActive({ last: null }, 1000) === false,
+		'common.devActive: трафик за 5 минут');
 }
 
 const po = readFileSync(join(root, 'po/ru/truba.po'), 'utf8');

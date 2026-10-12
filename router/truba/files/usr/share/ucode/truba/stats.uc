@@ -9,6 +9,7 @@ import * as uloop from 'uloop';
 import * as C from 'truba.const';
 import * as U from 'truba.util';
 import * as S from 'truba.state';
+import * as DV from 'truba.devstats';
 
 // Шаг и сроки — C.HISTORY: те же у графика «Обзора» и у rpcd (rates).
 const STEP = C.HISTORY.fine.step;       // точки — раз в 5 с
@@ -128,12 +129,15 @@ function save(hist, minutes) {
 }
 
 export function run() {
-	let hist = load();
+	let hist = load(), dev = DV.load();
 	let timer;
 	let tick = () => {
-		let m = int(U.now_ms());
-		let since = U.read_json(C.APPLIED_FILE, null)?.counters_since;
-		save(hist, add(hist, snapshot(S.counters_raw(), since, m, time())));
+		let m = int(U.now_ms()), t = time();
+		let applied = U.read_json(C.APPLIED_FILE, null);
+		save(hist, add(hist, snapshot(S.counters_raw(), applied?.counters_since, m, t)));
+		// По устройствам (ADR 0018): поколение — время применения, наборы при нём начаты заново.
+		DV.add(dev, DV.snapshot(S.dev_counters(), applied?.time, m, t));
+		DV.save(dev);
 		// Следующий замер — через STEP от начала этого, сколько бы ни шёл этот.
 		let wait = STEP * 1000 - (int(U.now_ms()) - m);
 		timer.set((wait < 1000) ? 1000 : wait);

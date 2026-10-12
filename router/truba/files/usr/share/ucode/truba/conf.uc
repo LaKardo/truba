@@ -137,8 +137,41 @@ export function schema() {
 	return {
 		sections: SCHEMA,
 		upstream_schemes: UPSTREAM_SCHEMES,
-		consts: { fw_zone: C.FW_ZONE, probe_window: C.PROBE_WINDOW, history: C.HISTORY, mosdns_addr: C.MOSDNS_ADDR },
+		consts: { fw_zone: C.FW_ZONE, probe_window: C.PROBE_WINDOW, history: C.HISTORY, mosdns_addr: C.MOSDNS_ADDR,
+		          devices: C.DEV_HISTORY },
 	};
+};
+
+// Секции устройств с Политикой так, как её понимает служба: tunnel и direct — у включённой секции
+// с одной из них (нет опции — умолчание схемы), иначе rules. Незнакомая Политика — как «По правилам»,
+// а не как умолчание: устройство не уходит в Туннель по опечатке. Секция без верного MAC пропускается:
+// MAC попадает в набор nftables, с опечаткой не загрузилась бы вся таблица; если секция что-то
+// меняла бы, она — в bad. Из нескольких секций с одним MAC действует первая: иначе в наборах ядра
+// «напрямую» одной побеждала бы «туннель» другой, а вкладка и проверка показывали бы первую.
+// c — курсор с загруженным truba (иначе свой).
+export function device_sections(bad, c) {
+	if (!c) {
+		c = cursor();
+		c.load('truba');
+	}
+	let out = [], seen = {};
+	c.foreach('truba', 'device', (s) => {
+		// enabled — флаг схемы, как его читает и интерфейс: «off», «no», «false» тоже выключают.
+		let policy = s.policy ?? SCHEMA.device.policy.def;
+		if (!(policy in [ 'tunnel', 'direct' ]) || !check_value('device', 'enabled', s.enabled))
+			policy = 'rules';
+		let mac = (type(s.mac) == 'string') ? lc(s.mac) : '';
+		if (!match(mac, MAC_RE)) {
+			if (s.mac && policy != 'rules')
+				push(bad ?? [], { key: 'device.mac', value: '' + s.mac });
+			return;
+		}
+		if (seen[mac])
+			return;
+		seen[mac] = true;
+		push(out, { name: s.name ?? '', mac, policy });
+	});
+	return out;
 };
 
 export function load() {
@@ -201,22 +234,8 @@ export function load() {
 		});
 	});
 
-	c.foreach('truba', 'device', (s) => {
-		// В наборы Политик попадают только «Всё в туннель» и «Всё напрямую»; незнакомая Политика —
-		// как «По правилам», а не как умолчание: устройство не уходит в Туннель по опечатке.
-		let policy = s.policy ?? SCHEMA.device.policy.def;
-		if (!s.mac || !(policy in [ 'tunnel', 'direct' ]))
-			return;
-		if (s.enabled == '0')
-			return;
-		// MAC попадает в набор nftables: с опечаткой не загрузилась бы вся таблица.
-		let mac = (type(s.mac) == 'string') ? lc(s.mac) : '';
-		if (!match(mac, MAC_RE)) {
-			push(bad, { key: 'device.mac', value: '' + s.mac });
-			return;
-		}
-		push(cfg.devices, { name: s.name ?? '', mac, policy });
-	});
+	// В наборы Политик попадают только «Всё в туннель» и «Всё напрямую».
+	cfg.devices = filter(device_sections(bad, c), (d) => d.policy != 'rules');
 
 	return cfg;
 };
@@ -332,6 +351,23 @@ export function zone_devices(zones, ub) {
 	}
 	own?.disconnect();
 	return uniq(devs);
+};
+
+// Зона межсетевого экрана каждого l3-устройства: { устройство: зона } по всем зонам — для списка
+// устройств (через какой интерфейс виден адрес).
+export function dev_zones(ub) {
+	let c = cursor();
+	c.load('firewall');
+	let zones = [];
+	c.foreach('firewall', 'zone', (z) => {
+		if (z.name)
+			push(zones, z.name);
+	});
+	let out = {};
+	for (let z in zones)
+		for (let d in zone_devices([ z ], ub))
+			out[d] ??= z;
+	return out;
 };
 
 // Все подключённые IPv4-подсети (scope link в main) — локальный трафик не трогаем.

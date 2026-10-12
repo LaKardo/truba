@@ -352,6 +352,9 @@ table inet truba {
   set gs_direct4 { type ipv4_addr; flags timeout; timeout 1d; }          # наполняет mosdns
   set dev_tunnel { type ether_addr; }                                    # Политика «Всё в туннель»
   set dev_direct { type ether_addr; }                                    # Политика «Всё напрямую»
+  set dv_tunnel_up { type ipv4_addr; flags dynamic,timeout; timeout 1d; size 1024; counter; }
+                             # трафик по устройствам (ADR 0018): адрес устройства и его счётчик;
+                             # так же dv_tunnel_down, dv_direct_*, dv_inbound_*
 
   counter c_tunnel {}        # новые соединения устройств по Действиям
   counter c_direct {}
@@ -413,16 +416,18 @@ table inet truba {
 
   # Учёт трафика устройств: только транзит, уже пропущенный fw4. Направление — по интерфейсам
   # и ct direction, не по ct mark (ответы из Туннеля переписывают её на «входящее»).
+  # Сначала счётчик Действия, затем адрес устройства в его набор: при полном наборе update
+  # прерывает правило, а правила не пересекаются — пакет не попадёт в чужой счётчик (ADR 0018).
   chain stats {
     type filter hook forward priority filter + 10; policy accept;
     meta nfproto != ipv4 return
     iifname @lan_if oifname @lan_if return
-    iifname @lan_if oifname "awg0" ct direction original counter name c_tunnel_up return
-    iifname "awg0" oifname @lan_if ct direction reply counter name c_tunnel_down return
-    iifname "awg0" oifname @lan_if counter name c_inbound_down return
-    iifname @lan_if oifname "awg0" counter name c_inbound_up return
-    iifname @lan_if ct direction original counter name c_direct_up return
-    oifname @lan_if ct direction reply counter name c_direct_down return
+    iifname @lan_if oifname "awg0" ct direction original counter name c_tunnel_up update @dv_tunnel_up { ip saddr } return
+    iifname "awg0" oifname @lan_if ct direction reply counter name c_tunnel_down update @dv_tunnel_down { ip daddr } return
+    iifname "awg0" oifname @lan_if ct direction original counter name c_inbound_down update @dv_inbound_down { ip daddr } return
+    iifname @lan_if oifname "awg0" ct direction reply counter name c_inbound_up update @dv_inbound_up { ip saddr } return
+    iifname @lan_if oifname != "awg0" ct direction original counter name c_direct_up update @dv_direct_up { ip saddr } return
+    iifname != "awg0" oifname @lan_if ct direction reply counter name c_direct_down update @dv_direct_down { ip daddr } return
   }
 
   # Свои сокеты Роутера с SO_MARK TUNNEL (mosdns, «Проверить NAT»): биты Трубы — из метки
@@ -617,8 +622,9 @@ upnpd.config.external_ip='<VPS_IP>'        # у awg0 частный адрес; 
 - **Замер.** Раз в 5 с — счётчики таблицы Трубы одним `nft -j list counters`, скорость по разнице с прошлым замером: байт/с к устройствам и от них по Действиям (Туннель, Напрямую, Входящие) и новых соединений в минуту. Интервал меряется монотонными часами: NTP, поправляя время, не искажает скорость.
 - **Разрывы.** Счётчики начаты заново (новый `counters_since` в `applied.json`), таблицы нет, перерыв дольше минуты — в истории разрыв, а не скачок. Счётчик, который уменьшился или исчез, — `null` только на своём месте.
 - **Хранение.** В оперативной памяти: точки по 5 с за последний час (`rates.json`, переписывается каждый замер) и поминутные средние за сутки (`rates-min.json`, переписывается раз в минуту; в них только четыре значения графика). Флеш не изнашивается, а после перезагрузки счётчики и так начинаются с нуля. Перезапуск процесса (смена кода, сбой) продолжает историю из файлов без разрыва: монотонные часы общие для всей загрузки.
-- **Цена.** Два процесса (`sh` и `nft`) раз в 5 с, постоянно.
+- **Цена.** Раз в 5 с, постоянно: `sh` и `nft` для общих счётчиков и ещё шесть `nft` для наборов устройств (каждый читает только свой набор, без подсетей geoip).
 - **Чтение.** `truba.rates` читает файл в самом rpcd, без запуска процессов, и отдаёт только точки новее `since`: страница при открытии забирает историю целиком, дальше — по одной точке за опрос. После свёрнутой вкладки первый же опрос приносит всё пропущенное. Ось графика строится по времени Роутера из ответа (`now`), а не по часам компьютера.
+- **По устройствам** (ADR 0018, модуль `truba.devstats`). Тем же замером — счётчики наборов `dv_*`, по одному `nft -j list set` на набор. По каждому адресу: скорость по шести значениям, поминутные средние за час (Туннель и Напрямую, к устройству и от него), почасовые суммы байт за сутки, время последнего трафика. Файл `devices.json` в оперативной памяти переписывается каждый замер. Применение настроек начинает наборы с нуля: замер после него сравнивается только с замером того же поколения таблицы (`applied.time`), иначе — пропуск шага. Устройство, которого нет в наборах и у которого не было трафика дольше суток, из истории удаляется.
 
 ---
 
@@ -723,6 +729,8 @@ config watchdog 'watchdog'
 | `truba.tunnel_test` | запуск в фоне ping Трубы внутри Туннеля пакетами трёх размеров до полного MTU, разом (~5 с) → `{ started }` |
 | `truba.tunnel_result` | итог последней проверки Туннеля: отправлено, получено, средняя задержка по каждому размеру |
 | `truba.rates {span, since}` | история скорости (§4.10) из файла, без запуска процессов: точки новее `since` за последние `span` секунд — по 5 с, а дольше часа — поминутные средние; `now` — время Роутера для оси графика |
+| `truba.devices` | устройства для вкладки «Устройства» и «Обзора» (ADR 0018): адреса из истории по устройствам (не больше 256 самых недавних) и все устройства с Политикой; секция «по правилам» без трафика в список не попадает. Из секций с одним MAC действует первая. У каждого — MAC и имя (аренды dnsmasq, соседи, секции `device`), откуда известно, зона fw4 по интерфейсу, Политика, как её понимает служба, скорость, поминутные средние за час, байты за сутки, время последнего трафика. Устройство с Политикой, которого сейчас нет в сети, — без адреса |
+| `truba.connections {ip}` | куда устройство ходит сейчас: записи conntrack, где оно источник, по адресам назначения — 20 самых крупных (без `nf_conntrack_acct` — по числу соединений) и общее число соединений. У адреса — протокол и порт самого крупного соединения, байты в обе стороны, Действие по ct mark, причина и Категория geoip по нынешним правилам (только Категории с Действием: полный проход по geoip держал бы rpcd). Правила решили бы иначе, чем ct mark, — причина `changed`: соединение началось до смены настроек |
 | `truba.log` | последние строки журнала |
 
 Долгие проверки идут в фоне: rpcd обслуживает вызовы по одному, и пока он ждал бы проверку, остальные вызовы LuCI стояли бы секундами.

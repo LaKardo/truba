@@ -160,6 +160,62 @@ function setOpt(config, section, option, value) {
 	changes.set({ n: changeCount() });
 }
 
+// Новая секция (устройство с Политикой) — тоже несохранённое изменение.
+function addSection(config, type) {
+	const sid = uci.add(config, type);
+	changes.set({ n: changeCount() });
+	return sid;
+}
+
+// Удалить секцию (устройство «по правилам», секция с неверным MAC) — тоже несохранённое изменение.
+function removeSection(config, sid) {
+	uci.remove(config, sid);
+	changes.set({ n: changeCount() });
+}
+
+// У секции есть несохранённые изменения: она новая, изменена или удалена (точка «изменено» у строки).
+function pending(config, sid) {
+	const st = uci.state || {};
+	return !!(sid && (st.creates?.[config]?.[sid] || st.changes?.[config]?.[sid] || st.deletes?.[config]?.[sid]));
+}
+
+// Повторять fn раз в ms, но следующий вызов — только после ответа на прошлый, как poll LuCI: медленный
+// ответ службы не копит вызовы в rpcd, который обслуживает их по одному. Ошибка не останавливает.
+// Возвращает stop.
+function every(fn, ms) {
+	let alive = true, timer = null;
+	const run = () => {
+		if (!alive)
+			return;
+		Promise.resolve().then(fn).catch(() => {}).then(() => {
+			if (alive)
+				timer = setTimeout(run, ms);
+		});
+	};
+	run();
+	return () => {
+		alive = false;
+		clearTimeout(timer);
+	};
+}
+
+// Опрос внутри компонента (панель устройства): сразу и раз в ms, пока компонент на странице; смена deps
+// начинает заново. Ошибка оставляет прежние данные и ставит offline.
+function usePoll(fetchFn, ms, deps) {
+	const [ st, setSt ] = lib.useState({ data: null, offline: false });
+	lib.useEffect(() => {
+		let alive = true;
+		setSt({ data: null, offline: false });
+		const stop = every(() => fetchFn().then((data) => { if (alive) setSt({ data, offline: false }); },
+			() => { if (alive) setSt((s) => ({ data: s.data, offline: true })); }), ms);
+		return () => {
+			alive = false;
+			stop();
+		};
+	}, deps);
+	return st;
+}
+
 // ---- Страница ----
 
 // Корень страницы — свой Shadow DOM: стили темы LuCI не попадают внутрь, наши — наружу.
@@ -194,7 +250,9 @@ function mount(view, Page, props) {
 }
 
 return baseclass.extend({
-	load, lib, luminance, schemeFrom, mount, store, use, scheme, changes, changeCount,
+	load, lib, luminance, schemeFrom, mount, store, use, scheme, changes, changeCount, pending, every, usePoll,
 	poll: pollStore,
-	set: setOpt
+	set: setOpt,
+	add: addSection,
+	remove: removeSection
 });
