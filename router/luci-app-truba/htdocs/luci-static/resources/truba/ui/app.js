@@ -150,7 +150,27 @@ function changeCount() {
 	return n + Object.keys(st.reorder || {}).length;
 }
 
-const changes = store({ n: 0 });
+// bad — сколько полей страницы сейчас с неверным значением (spec §3.6): в UCI оно не пишется, а
+// «Применить» недоступна, пока такие поля есть, — иначе применилось бы прежнее значение незаметно.
+const changes = store({ n: 0, bad: 0 });
+const badFields = new Set();
+
+// Поле key («конфиг.секция.опция») неверно или снова верно.
+function invalid(key, isBad) {
+	if (isBad)
+		badFields.add(key);
+	else
+		badFields.delete(key);
+	if (changes.get().bad !== badFields.size)
+		changes.set({ bad: badFields.size });
+}
+
+// Всплывающее сообщение (kit.Toast): id растёт и при том же тексте — второе «Обновление запущено» видно.
+const toasts = store({ text: null, id: 0 });
+
+function toast(text) {
+	toasts.set({ text, id: toasts.get().id + 1 });
+}
 
 function setOpt(config, section, option, value) {
 	if (value == null)
@@ -251,6 +271,7 @@ function mount(view, Page, props) {
 
 return baseclass.extend({
 	load, lib, luminance, schemeFrom, mount, store, use, scheme, changes, changeCount, pending, every, usePoll,
+	invalid, toast, toasts,
 	poll: pollStore,
 	set: setOpt,
 	add: addSection,

@@ -228,6 +228,16 @@ if (app) {
 		!app.pending('truba', 'cfg04') && !app.pending('truba', null), 'app.pending: новая, изменённая, удалённая секция');
 	uciStub.add = (c, t) => { uciStub.state.creates[c].cfg05 = { '.type': t }; return 'cfg05'; };
 	check(app.add?.('truba', 'device') === 'cfg05' && app.changes.get().n === app.changeCount(), 'app.add: секция и пересчёт изменений');
+	// Неверные поля (spec §3.6): «Применить» недоступна, пока они есть; одно поле считается один раз.
+	app.invalid?.('truba.lists.update_utc', true);
+	app.invalid?.('truba.lists.update_utc', true);
+	const bad1 = app.changes.get().bad;
+	app.invalid?.('truba.lists.update_utc', false);
+	check(bad1 === 1 && app.changes.get().bad === 0, `app.invalid: неверное поле — bad 1, снова верное — 0 (${bad1}, ${app.changes.get().bad})`);
+	app.toast?.('Done');
+	const t1 = app.toasts?.get();
+	app.toast?.('Done');
+	check(t1?.text === 'Done' && app.toasts.get().id > t1.id, 'app.toast: последнее сообщение, повтор того же текста — новое');
 	// Опрос внутри компонента: следующий вызов — после ответа на прошлый (медленный connections не копится
 	// в rpcd), ошибка не останавливает, stop — останавливает.
 	let active = 0, most = 0, calls = 0;
@@ -313,9 +323,23 @@ const devSecs = [
 	{ '.name': 'd3', '.type': 'device', mac: 'aa:bb:cc:dd:ee:03' },
 	{ '.name': 'd4', '.type': 'device', mac: 'aa:bb:cc:dd:ee:04', policy: 'weird' },
 	{ '.name': 'd5', '.type': 'device', mac: 'aa:bb:cc:dd:ee:01', policy: 'tunnel' },
+	// Правила Категорий — как их читает служба (conf.uc): без mode и с незнакомым — «all», неизвестное Действие
+	// пропускается, из нескольких секций одного ключа действует последняя.
+	{ '.name': 'r1', '.type': 'rule', set: 'geosite', tag: 'youtube', action: 'tunnel' },
+	{ '.name': 'r2', '.type': 'rule', mode: 'all', set: 'geosite', tag: 'YouTube', action: 'direct' },
+	{ '.name': 'r3', '.type': 'rule', mode: 'all', set: 'geosite', tag: 'youtube', action: 'weird' },
+	{ '.name': 'r4', '.type': 'rule', mode: 'selective', set: 'geoip', tag: 'ru', action: 'weird' },
+	{ '.name': 'r5', '.type': 'rule', mode: 'selective', set: 'geosite', tag: 'openai', action: 'tunnel' },
+	{ '.name': 'r6', '.type': 'rule', mode: 'odd', set: 'geoip', tag: 'private', action: 'block' },
 ];
-const devSchema = { sections: { device: { enabled: { type: 'bool', def: true },
-	policy: { type: 'enum', values: [ 'tunnel', 'direct', 'rules' ], def: 'tunnel' } } }, upstream_schemes: [], consts: {} };
+const devSchema = { sections: {
+	device: { enabled: { type: 'bool', def: true }, policy: { type: 'enum', values: [ 'tunnel', 'direct', 'rules' ], def: 'tunnel' } },
+	lists: { update_utc: { type: 'pattern', re: '^([01]?[0-9]|2[0-3]):[0-5][0-9]$', def: '12:00' }, geoip_url: { type: 'string', def: 'https://x' } },
+	dns: { set_timeout: { type: 'int', def: 86400, lo: 0, hi: 604800, min: 600 } },
+	watchdog: { probe: { type: 'ipv4', def: '' } }
+}, upstream_schemes: [], consts: {} };
+// String.prototype.format задаёт luci.js; в Node — замена для текстов ошибок полей.
+String.prototype.format ??= function(...a) { let i = 0; return this.replace(/%[sd]/g, () => String(a[i++])); };
 let cdev = null;
 try {
 	cdev = new Function('baseclass', 'rpc', 'uci', '_', 'L', 'E', 'document', commonSrc)(
@@ -354,6 +378,44 @@ if (cdev) {
 		'common.connLabel: changed и device — раньше geoip, без причины — протокол и порт');
 	check(cdev.devActive?.({ last: 700 }, 1000) === true && cdev.devActive({ last: 699 }, 1000) === false && cdev.devActive({ last: null }, 1000) === false,
 		'common.devActive: трафик за 5 минут');
+
+	// «Правила»: Действие Категории — как его поймёт служба, по настройкам браузера.
+	const RA = (...a) => cdev.ruleAction?.(...a);
+	check(RA('all', 'geosite', 'youtube') === 'direct', `common.ruleAction: тег без учёта регистра, последняя верная из секций одного ключа (${RA('all', 'geosite', 'youtube')})`);
+	check(RA('selective', 'geoip', 'ru') === 'mode' && RA('all', 'geoip', 'ru') === 'mode', 'common.ruleAction: неизвестное Действие и нет секции — «По режиму»');
+	check(RA('selective', 'geosite', 'openai') === 'tunnel' && RA('all', 'geosite', 'openai') === 'mode', 'common.ruleAction: правило — только своего Режима');
+	check(RA('all', 'geoip', 'private') === 'block', 'common.ruleAction: незнакомый mode — «all», как у службы');
+	check(JSON.stringify(cdev.ruleSections?.('selective').map((s) => s['.name'])) === '["r4","r5"]' &&
+		JSON.stringify(cdev.ruleSections('all').map((s) => s['.name'])) === '["r1","r2","r3","r6"]', 'common.ruleSections: секции Режима, без mode — «all»');
+
+	// Поле по схеме: текст ошибки или null — та же проверка, что у службы (conf.uc, check_value).
+	const FE = (...a) => cdev.fieldError?.(...a);
+	const isText = (x) => typeof x === 'string' && x.length > 0;
+	check(isText(FE('lists', 'update_utc', '25:00')) && FE('lists', 'update_utc', '05:30') === null && FE('lists', 'update_utc', '') === null,
+		'common.fieldError: pattern — 25:00 неверно, 05:30 и пусто — верно');
+	check(isText(FE('dns', 'set_timeout', '300')) && isText(FE('dns', 'set_timeout', '604801')) && isText(FE('dns', 'set_timeout', '1e3')) &&
+		FE('dns', 'set_timeout', '0') === null && FE('dns', 'set_timeout', '600') === null, 'common.fieldError: int — пределы и min, 0 — верно');
+	check(isText(FE('watchdog', 'probe', '1.2.3')) && isText(FE('watchdog', 'probe', '1.2.3.256')) && FE('watchdog', 'probe', '10.0.0.1') === null,
+		'common.fieldError: ipv4');
+	check(isText(FE('device', 'policy', 'weird')) && FE('device', 'policy', 'direct') === null && FE('lists', 'geoip_url', 'anything') === null &&
+		FE('lists', 'nope', 'x') === null, 'common.fieldError: enum; string и опция не из схемы — без проверки');
+
+	// Опрос Наборов правил: раз в 30 с, а пока идёт обновление или применение и 15 с после «Обновить сейчас» — каждый раз.
+	const LD = (...a) => cdev.listsDue?.(...a);
+	check(LD(30000, 0, -Infinity, {}) === true && LD(29999, 0, -Infinity, {}) === false, 'common.listsDue: граница 30 с');
+	check(LD(1000, 0, -Infinity, { updating: true }) === true && LD(1000, 0, -Infinity, { applying: true }) === true && LD(1000, 0, -Infinity, null) === false,
+		'common.listsDue: обновление или применение — сразу');
+	check(LD(20000, 15000, 10000, {}) === true && LD(30000, 15000, 10000, {}) === false, 'common.listsDue: 15 с после запуска обновления — сразу');
+
+	// Вкладки: «Правила» вместо «Маршрутизации», «DNS» без списков (spec §3.1).
+	const IT = (k) => cdev.invalidTab([ { key: k } ]);
+	check(IT('main.zone') === 'rules' && IT('main.mode') === 'rules' && IT('main.routing') === 'rules' && IT('lists.update_utc') === 'rules' &&
+		IT('rule.x') === 'rules' && IT('main.iface') === 'tunnel' && IT('dns.port') === 'dns' && IT('device.mac') === 'devices' && cdev.invalidTab([]) === 'rules',
+		'common.invalidTab: Режим, Зоны, Маршрутизация, Наборы правил и правила — «Правила»');
+	check(cdev.TABS.rules && !('routing' in cdev.TABS) && cdev.TABS.dns === 'DNS' &&
+		[ 'lists_missing', 'zones_without_devices', 'lists_rolled_back' ].every((w) => cdev.WARNINGS[w].tab === 'rules') && cdev.WARNINGS.tunnel_not_configured.tab === 'tunnel',
+		'common.TABS и WARNINGS: «Правила» вместо «Маршрутизации» и Наборов правил на «DNS»');
+	check(isText(cdev.CHECK_ERRORS?.busy), 'common.CHECK_ERRORS.busy');
 }
 
 const po = readFileSync(join(root, 'po/ru/truba.po'), 'utf8');

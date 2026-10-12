@@ -94,6 +94,10 @@ msgid "no result in time"
 msgstr ""
 
 #: htdocs/luci-static/resources/truba/common.js
+msgid "the rule sets are being unpacked, try again in a minute"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/common.js
 msgid "UPnP is enabled, but miniupnpd is not installed: install luci-app-upnp."
 msgstr ""
 
@@ -170,6 +174,26 @@ msgid "failed — %s"
 msgstr ""
 
 #: htdocs/luci-static/resources/truba/common.js
+msgid "Enter 0 or a whole number from %d to %d"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/common.js
+msgid "Enter a whole number from %d to %d"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/common.js
+msgid "Invalid value"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/common.js
+msgid "Choose one of: %s"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/common.js
+msgid "Enter an IPv4 address"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/common.js
 msgid "service stopped"
 msgstr ""
 
@@ -197,12 +221,12 @@ msgstr ""
 msgid "Devices"
 msgstr ""
 
-#: menu.d
-msgid "Routing"
+#: htdocs/luci-static/resources/truba/common.js
+msgid "Rules"
 msgstr ""
 
-#: menu.d
-msgid "DNS & lists"
+#: htdocs/luci-static/resources/truba/common.js
+msgid "DNS"
 msgstr ""
 
 #: menu.d
@@ -234,7 +258,63 @@ msgid "Tunnel %d%%, direct %d%%"
 msgstr ""
 
 #: htdocs/luci-static/resources/truba/ui/kit.js
+msgid "changed, not applied yet"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/ui/kit.js
+msgid "Cancel"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/ui/kit.js
+msgid "Not checked: %s"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/ui/kit.js
+msgid "The check failed."
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/ui/kit.js
+msgid "geosite categories containing the domain"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/ui/kit.js
+msgid "none"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/ui/kit.js
+msgid "Decisive category (the narrowest one with an explicit action): %s"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/ui/kit.js
+msgid "Addresses (%d)"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/ui/kit.js
+msgid "Domain or IP"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/ui/kit.js
+msgid "domain or IPv4, e.g. gosuslugi.ru"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/ui/kit.js
+msgid "domain or IP"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/ui/kit.js
+msgid "Check"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/ui/kit.js
+msgid "Checking…"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/ui/kit.js
 msgid "Unapplied changes: %d"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/ui/kit.js
+msgid "Fix the highlighted fields"
 msgstr ""
 
 #: htdocs/luci-static/resources/truba/ui/kit.js
@@ -278,10 +358,6 @@ msgid "settings"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/devices.js
-msgid "changed, not applied yet"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/devices.js
 msgid "offline"
 msgstr ""
 
@@ -303,10 +379,6 @@ msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/devices.js
 msgid "Add"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/devices.js
-msgid "Cancel"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/devices.js
@@ -374,18 +446,6 @@ msgid "Connections: %d"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/devices.js
-msgid "domain or IP"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/devices.js
-msgid "Check"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/devices.js
-msgid "The check failed."
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/devices.js
 msgid "Close"
 msgstr ""
 
@@ -435,14 +495,6 @@ msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/diagnostics.js
 msgid "no room for temporary files on the router"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/diagnostics.js
-msgid "the rule sets are being unpacked, try again in a minute"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/diagnostics.js
-msgid "Not checked: %s"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/diagnostics.js
@@ -510,10 +562,6 @@ msgid "Why: %s"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/diagnostics.js
-msgid "geosite categories containing the domain"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/diagnostics.js
 msgid "Category"
 msgstr ""
 
@@ -530,14 +578,6 @@ msgid "Action"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/diagnostics.js
-msgid "none"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/diagnostics.js
-msgid "Decisive category (the narrowest one with an explicit action): %s"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/diagnostics.js
 msgid "Addresses"
 msgstr ""
 
@@ -550,15 +590,7 @@ msgid "Why"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/diagnostics.js
-msgid "domain or IPv4, e.g. gosuslugi.ru"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/diagnostics.js
 msgid "— any device —"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/diagnostics.js
-msgid "Checking…"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/diagnostics.js
@@ -699,10 +731,6 @@ msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/dns.js
 msgid "Next check: %s"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/dns.js
-msgid "DNS"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/dns.js
@@ -855,6 +883,10 @@ msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/dns.js
 msgid "geosite.dat mirror"
+msgstr ""
+
+#: menu.d
+msgid "DNS & lists"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/dns.js
@@ -1107,6 +1139,10 @@ msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/overview.js
 msgid "Truba IP"
+msgstr ""
+
+#: menu.d
+msgid "Routing"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/overview.js

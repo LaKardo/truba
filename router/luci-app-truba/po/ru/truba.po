@@ -1210,3 +1210,30 @@ msgstr "изменено, ещё не применено"
 
 msgid "No device data: the router did not answer."
 msgstr "Данных об устройствах нет: Роутер не ответил."
+
+msgid "Rules"
+msgstr "Правила"
+
+msgid "Enter 0 or a whole number from %d to %d"
+msgstr "Введите 0 или целое число от %d до %d"
+
+msgid "Enter a whole number from %d to %d"
+msgstr "Введите целое число от %d до %d"
+
+msgid "Invalid value"
+msgstr "Неверное значение"
+
+msgid "Choose one of: %s"
+msgstr "Выберите одно из: %s"
+
+msgid "Enter an IPv4 address"
+msgstr "Введите адрес IPv4"
+
+msgid "Addresses (%d)"
+msgstr "Адреса (%d)"
+
+msgid "Domain or IP"
+msgstr "Домен или IP"
+
+msgid "Fix the highlighted fields"
+msgstr "Исправьте отмеченные поля"

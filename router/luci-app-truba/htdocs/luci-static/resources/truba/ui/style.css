@@ -443,3 +443,113 @@
 	animation: truba-spin 1s linear infinite;
 }
 @keyframes truba-spin { to { transform: rotate(360deg); } }
+
+/* ---- Действие Категории: сегменты, до 600 px — значок-select ---- */
+.ap { display: inline-flex; }
+.ap .seg { display: flex; }
+.ap .seg button { padding: 3px 8px; font-size: 11px; white-space: nowrap; }
+/* Выбранное Действие — своим цветом; порядок кнопок — PICK в kit.js: По режиму, Напрямую, Туннель, Блок. */
+.ap .seg button:nth-child(2)[aria-pressed="true"] { background: var(--dir); color: #fff; box-shadow: none; }
+.ap .seg button:nth-child(3)[aria-pressed="true"] { background: var(--tun); color: #fff; box-shadow: none; }
+.ap .seg button:nth-child(4)[aria-pressed="true"] { background: var(--blk); color: #fff; box-shadow: none; }
+.ap-sel {
+	display: none;
+	max-width: 100%;
+	height: 26px;
+	padding: 0 8px;
+	border: 0;
+	border-radius: 999px;
+	background: var(--chip);
+	color: var(--tx);
+	font: inherit;
+	font-size: 12px;
+}
+.ap.a-tunnel .ap-sel { background: color-mix(in srgb, var(--tun) 16%, transparent); color: var(--tun); }
+.ap.a-direct .ap-sel { background: color-mix(in srgb, var(--dir) 16%, transparent); color: var(--dir); }
+.ap.a-block .ap-sel { background: color-mix(in srgb, var(--blk) 16%, transparent); color: var(--blk); }
+.ap-sel option { background: var(--card); color: var(--tx); }
+@container (max-width: 600px) {
+	.ap .seg { display: none; }
+	.ap .ap-sel { display: inline-block; }
+}
+
+/* ---- Поле по схеме ---- */
+.field { display: grid; gap: 3px; min-width: 0; }
+.field label { color: var(--mu); font-size: 12px; }
+.field label .dot { display: inline-block; width: 8px; height: 8px; box-shadow: none; vertical-align: 1px; }
+.field input {
+	min-width: 0;
+	height: 30px;
+	padding: 0 10px;
+	border: 1px solid var(--bd);
+	border-radius: 7px;
+	background: var(--pg);
+	color: var(--tx);
+	font: inherit;
+	font-size: 12px;
+}
+.field input:disabled { opacity: .55; }
+.field.bad input { border-color: var(--blk); }
+.field .mu { font-size: 11px; }
+
+/* ---- Сворачиваемый блок ---- */
+.fold { margin: 10px 0 0; }
+.fold summary { color: var(--mu); font-size: 12px; cursor: pointer; }
+.fold summary:hover { color: var(--tx); }
+.fold-b { display: grid; gap: 10px; margin: 8px 0 0; }
+
+/* ---- Окно подтверждения ---- */
+.dlg {
+	max-width: min(420px, calc(100vw - 32px));
+	padding: 16px;
+	border: 1px solid var(--bd);
+	border-radius: 12px;
+	background: var(--card);
+	color: var(--tx);
+	box-shadow: 0 12px 40px rgba(0, 0, 0, .3);
+}
+.dlg::backdrop { background: rgba(0, 0, 0, .4); }
+.dlg h3 { margin: 0 0 8px; font-size: 15px; font-weight: 500; }
+.dlg-b { margin: 0 0 14px; color: var(--mu); font-size: 13px; }
+.dlg .acts { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+
+/* ---- Всплывающее сообщение: над панелью изменений, когда она есть ---- */
+.toasts {
+	position: sticky;
+	bottom: var(--changes-h, 8px);
+	z-index: 2;
+	display: flex;
+	justify-content: center;
+	pointer-events: none;
+}
+.toast {
+	margin: 8px 0 0;
+	padding: 8px 14px;
+	border-radius: 8px;
+	background: var(--tx);
+	color: var(--card);
+	box-shadow: 0 6px 20px rgba(0, 0, 0, .2);
+	pointer-events: auto;
+}
+
+/* ---- Итог проверки домена ---- */
+/* Итог — одной строкой текста, без flex: так он и копируется, и читается экранным чтецом подряд. */
+.check-res .res .mu { margin-left: 6px; }
+.check-res .res .tag { font-size: 12px; }
+.hit {
+	display: grid;
+	grid-template-columns: minmax(0, auto) minmax(0, 1fr) auto;
+	align-items: baseline;
+	gap: 4px 10px;
+	padding: 4px 0;
+	border-top: 1px solid var(--bd);
+	font-size: 12px;
+}
+.hit b { font-weight: 500; }
+.hit code { overflow: hidden; color: var(--mu); text-overflow: ellipsis; white-space: nowrap; }
+.fold .hit { grid-template-columns: minmax(0, auto) minmax(0, 1fr) auto minmax(0, 1.4fr); }
+@container (max-width: 600px) {
+	.fold .hit { grid-template-columns: minmax(0, auto) minmax(0, 1fr) auto; }
+	.fold .hit > :last-child { grid-column: 1 / -1; }
+}
+.changes .btn:disabled { opacity: .5; cursor: not-allowed; }
