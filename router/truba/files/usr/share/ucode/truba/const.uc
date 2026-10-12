@@ -15,6 +15,10 @@ export const PRIO_RULE_OIF  = 1001;
 export const NFT_TABLE = 'truba';
 // Зона межсетевого экрана Туннеля (её создаёт uci-defaults).
 export const FW_ZONE = 'truba';
+// Свои секции межсетевого экрана у зон Маршрутизации: <зона>_truba — перенаправление в зону Туннеля
+// (ADR 0014), <зона>_truba_no_ipv6 — правило, закрывающее зоне IPv6-интернет (ADR 0016).
+export const FW_FWD_SUFFIX = '_' + FW_ZONE;
+export const FW_NO6_SUFFIX = FW_FWD_SUFFIX + '_no_ipv6';
 // Тег журнала: под ним пишет служба, по нему «Диагностика» отбирает её строки.
 export const LOG_TAG = 'truba';
 

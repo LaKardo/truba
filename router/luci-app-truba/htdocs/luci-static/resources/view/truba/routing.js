@@ -126,7 +126,7 @@ return view.extend({
 		common.field(o, 'main', 'mode');
 
 		o = s.option(widgets.ZoneSelect, 'zone', _('Zones'),
-			_('Firewall zones whose devices are routed. Forwarding from them to zone «truba» is added automatically. Other zones go direct.'));
+			_('Firewall zones whose devices are routed. Forwarding from them to zone «truba» is added automatically, and IPv6 internet is closed to them. Other zones go direct.'));
 		o.multiple = true;
 		o.nocreate = true;
 		common.field(o, 'main', 'zone');

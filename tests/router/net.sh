@@ -1,15 +1,18 @@
 #!/bin/sh
 # Путь пакетов: что ставит установка, правила и маршруты после применения, входящие через
 # Туннель, свои сокеты Роутера, чужие цепочки nftables и mesh-VPN (ADR 0011), mesh-VPN как зона Маршрутизации:
-# перенаправление в truba и DNS (ADR 0014), DSCP Туннеля, учёт трафика, Политика
+# перенаправление в truba и DNS (ADR 0014), закрытый IPv6-интернет зон (ADR 0016), DSCP Туннеля, учёт трафика, Политика
 # устройства, Аварийная блокировка, Маршрутизация выкл, Режим «Выборочный», teardown, uninstall.
 . /repo/tests/router/stand.sh
+
+# Правило зоны, закрывающее IPv6-интернет (ADR 0016), — в цепочке зоны у fw4: отказ всем адресам, кроме локальных.
+no6_chain() { nft list chain inet fw4 "forward_$1" 2>/dev/null | grep -q 'ip6 daddr != { fc00::/7, fe80::/10, ff00::/8 } .*jump handle_reject'; }
 
 section "установка (uci-defaults)"
 check "зона truba (установка) и перенаправление lan → truba (применение)" eval '[ "$(uci -q get firewall.truba.name)" = truba ] && [ "$(uci -q get firewall.lan_truba.dest)" = truba ]'
 check "fullcone включён, аппаратное ускорение выключено" eval '[ "$(uci -q get firewall.@defaults[0].fullcone)" = 1 ] && [ "$(uci -q get firewall.@defaults[0].flow_offloading_hw)" = 0 ]'
 check "программное ускорение не тронуто" cmp -s /tmp/offload.before /tmp/offload.after
-check "IPv6 из lan в интернет — REJECT, IPv6 сети не тронут" eval '[ "$(uci -q get firewall.truba_no_ipv6_inet.family)" = ipv6 ] && [ "$(uci -q get dhcp.lan.ra)" != disabled ]'
+check "IPv6-интернет зоне lan закрыт (применение), IPv6 сети не тронут" eval 'no6_chain lan && [ "$(uci -q get dhcp.lan.ra)" != disabled ]'
 check "Стартовые настройки: 8 правил" test "$(uci -q show truba | grep -c '=rule$')" -eq 8
 # rc.local стенда — маркер готовности (tests/run.sh): здесь — как на Роутере, с «exit 0», и uci-defaults дважды.
 printf '# Put your custom commands here\n\nexit 0\n' > /etc/rc.local
@@ -215,9 +218,20 @@ pk() { nft list counter inet t_snat "$1" | awk '/packets/ { print $2 }'; }
 dns_seen() { [ "$(pk "dns_$1")" -gt 0 ]; }
 dns_snat() { [ "$(pk "snat_$1")" -gt 0 ]; }
 check "до: dnsmasq узлу сети не отвечает" eval '! dns_from meshhost 100.64.0.1'
+# IPv6 стенда: у узла сети ULA за ms0; за ul0 (зона wan) — «интернет» 2001:db8:100::2 и ULA fd66::2.
+sysctl -qw net.ipv6.conf.all.forwarding=1
+ip addr add fd64::1/64 dev ms0 nodad
+ip -n meshhost addr add fd64::2/64 dev ms1 nodad; ip -n meshhost -6 route add default via fd64::1
+ip addr add 2001:db8:100::1/64 dev ul0 nodad; ip addr add fd66::1/64 dev ul0 nodad
+ip -n vps addr add 2001:db8:100::2/64 dev ul1 nodad; ip -n vps addr add fd66::2/64 dev ul1 nodad
+ip -n vps -6 route add fd64::/64 via fd66::1
+v6_mesh() { ip netns exec meshhost ping -6 -c 2 -w 3 "$1" >/dev/null 2>&1; }
+check "до: узел сети выходит в IPv6-интернет" v6_mesh 2001:db8:100::2
 uci add_list truba.main.zone='mesh'; uci commit truba
 reload "зона mesh выбрана"
 check "перенаправление mesh → truba заведено, ms0 — в lan_if" eval '[ "$(uci -q get firewall.mesh_truba.src)" = mesh ] && [ "$(uci -q get firewall.mesh_truba.dest)" = truba ] && in_set lan_if ms0'
+check "IPv6-интернет зоне mesh закрыт, lan — по-прежнему" eval 'no6_chain mesh && no6_chain lan'
+check "узел сети: IPv6 в интернет — отказ, к ULA за той же зоной wan — проходит" eval '! v6_mesh 2001:db8:100::2 && v6_mesh fd66::2'
 check "узел сети → Туннель (по Режиму)" mesh_tunnel
 uci delete firewall.mesh_truba; uci commit firewall; /etc/init.d/firewall reload >/dev/null 2>&1
 check "без перенаправления fw4 отбрасывает трафик узла в Туннель" eval '! mesh_tunnel'
@@ -234,6 +248,8 @@ ip addr del 10.99.0.1/24 dev ms0
 uci del_list truba.main.zone='mesh'; uci commit truba
 reload "зона mesh убрана"
 check "своё перенаправление mesh → truba убрано, lan → truba на месте" eval '[ -z "$(uci -q get firewall.mesh_truba)" ] && [ "$(uci -q get firewall.lan_truba.dest)" = truba ]'
+check "правило IPv6 зоны mesh убрано — узел сети снова выходит в IPv6-интернет, lan закрыт" eval \
+	'[ -z "$(uci -q get firewall.mesh_truba_no_ipv6)" ] && ! no6_chain mesh && v6_mesh 2001:db8:100::2 && no6_chain lan'
 # Перенаправление, которое владелец завёл сам: засчитывается, второе не заводится, без зоны остаётся.
 uci -q batch <<-'EOF'
 	set firewall.my_mesh=forwarding
@@ -251,6 +267,8 @@ reload "зона mesh убрана снова"
 check "перенаправление владельца не тронуто" test "$(uci -q get firewall.my_mesh.dest)" = truba
 uci delete firewall.my_mesh; uci commit firewall; /etc/init.d/firewall reload >/dev/null 2>&1
 ip -n vps addr del 1.2.3.5/32 dev lo
+ip addr del 2001:db8:100::1/64 dev ul0; ip addr del fd66::1/64 dev ul0
+ip -n vps addr del 2001:db8:100::2/64 dev ul1; ip -n vps addr del fd66::2/64 dev ul1
 for p in $(ip netns pids meshhost); do kill "$p"; done
 ip netns del meshhost
 ip rule del priority 5210; ip rule del priority 5270; ip route flush table 52
@@ -383,6 +401,7 @@ section "teardown"
 /etc/init.d/truba stop
 check "таблица, ip rule и table 77 сняты" eval '! nft list table inet truba && ! ip rule show | grep -q "lookup 77" && [ -z "$(ip route show table 77)" ]'
 check "без Трубы ответ на входящее уходит мимо Туннеля" eval '! probe'
+check "остановка службы правило IPv6 зоны lan не снимает" no6_chain lan
 
 section "uninstall"
 # Перенаправление в truba, которое владелец завёл сам (секция без имени), удаляется вместе с зоной.
@@ -394,6 +413,7 @@ uci -q batch >/dev/null <<-'EOF'
 EOF
 sh /usr/share/truba/uninstall.sh
 check "зона truba и перенаправления в неё удалены, аппаратное ускорение возвращено" eval '[ -z "$(uci -q get firewall.truba)" ] && ! uci -q show firewall | grep -q "dest=.truba.$" && [ "$(uci -q get firewall.@defaults[0].flow_offloading_hw)" = 1 ]'
+check "правила IPv6 зон удалены" eval '! uci -q show firewall | grep -q "_truba_no_ipv6=" && ! no6_chain lan'
 check "данные службы удалены: Наборы правил, копия правил, распакованные списки" eval '[ ! -e /etc/truba/lists ] && [ ! -e /etc/truba/state ] && [ ! -e /etc/truba/good ] && [ ! -e /var/lib/truba ]'
 check "rc.local: строки переустановки нет, exit 0 на месте" eval '! grep -qF /etc/truba/reinstall.sh /etc/rc.local && grep -qx "exit 0" /etc/rc.local'
 

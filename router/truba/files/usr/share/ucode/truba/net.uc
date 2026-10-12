@@ -159,37 +159,23 @@ export function dnsmasq_restore() {
 	return true;
 };
 
-// ---- Межсетевой экран: перенаправления зон Маршрутизации в зону Туннеля ----
+// ---- Межсетевой экран зон Маршрутизации: перенаправления в зону Туннеля, IPv6-интернет ----
 
-// Своя секция перенаправления зоны: <зона>_truba (имя секции UCI — только буквы, цифры и «_»).
-function fwd_name(zone) {
-	return replace(zone, /[^A-Za-z0-9_]/g, '_') + '_' + C.FW_ZONE;
+// Своя секция зоны: имя зоны (имя секции UCI — только буквы, цифры и «_») и окончание из truba.const.
+function own_name(zone, suffix) {
+	return replace(zone, /[^A-Za-z0-9_]/g, '_') + suffix;
 }
 
 // Без перенаправления зоны в truba fw4 отбрасывает трафик её устройств, которому Труба выбрала Туннель
 // (ADR 0014). У каждой выбранной зоны оно должно быть: нет никакого — Труба заводит своё, секцию
-// fwd_name(). Перенаправления владельца (любое другое имя) засчитываются и не трогаются, а свои
-// секции зон, которые больше не выбраны или удалены, убираются. Межсетевой экран перезагружается,
-// только если что-то изменилось.
-export function forwardings_set(zones) {
-	let c = cursor();
-	c.load('firewall');
-	let exist = {};
-	c.foreach('firewall', 'zone', (z) => {
-		if (z.name)
-			exist[z.name] = true;
-	});
-	let want = {};
-	if (exist[C.FW_ZONE])
-		for (let z in zones)
-			if (exist[z] && z != C.FW_ZONE)
-				want[z] = true;
-
+// <зона>_truba. Перенаправления владельца (любое другое имя) засчитываются и не трогаются, а свои
+// секции зон, которые больше не выбраны или удалены, убираются.
+function forwardings_sync(c, zones) {
 	let changed = false, drop = [], have = {};
 	c.foreach('firewall', 'forwarding', (f) => {
 		if (f.dest != C.FW_ZONE || !f.src)
 			return;
-		if (f['.name'] == fwd_name(f.src) && !want[f.src])
+		if (f['.name'] == own_name(f.src, C.FW_FWD_SUFFIX) && !(f.src in zones))
 			push(drop, f['.name']);
 		else
 			have[f.src] = true;
@@ -198,10 +184,10 @@ export function forwardings_set(zones) {
 		c.delete('firewall', sid);
 		changed = true;
 	}
-	for (let z in want) {
+	for (let z in zones) {
 		if (have[z])
 			continue;
-		let sid = fwd_name(z);
+		let sid = own_name(z, C.FW_FWD_SUFFIX);
 		// Имя занято чужой секцией — её не трогаем.
 		if (c.get('firewall', sid) != null) {
 			U.err(sprintf('межсетевой экран: секция %s уже есть — перенаправление %s → %s не заведено', sid, z, C.FW_ZONE));
@@ -212,6 +198,79 @@ export function forwardings_set(zones) {
 		c.set('firewall', sid, 'dest', C.FW_ZONE);
 		changed = true;
 	}
+	return changed;
+}
+
+// Локальные IPv6-адреса — ULA, link-local и multicast: между зонами сети IPv6 остаётся (ADR 0005).
+const IPV6_LOCAL = [ 'fc00::/7', 'fe80::/10', 'ff00::/8' ];
+
+// Правило зоны: IPv6 в любую зону, кроме локальных адресов, — REJECT, а не DROP: Happy Eyeballs
+// сразу уходит на IPv4. Интернет — по адресу, а не по зоне: имя и число зон WAN неважны (ADR 0016).
+// «enabled» здесь нет: выключить правило зоны может владелец.
+function no6_rule(zone) {
+	return {
+		name: 'Truba: no IPv6 internet from ' + zone,
+		src: zone,
+		dest: '*',
+		family: 'ipv6',
+		proto: 'all',
+		dest_ip: map(IPV6_LOCAL, (p) => '!' + p),
+		target: 'REJECT',
+	};
+}
+
+// Маршрутизация только IPv4: IPv6-интернет выбранной зоны шёл бы мимо Туннеля. У каждой выбранной
+// зоны — своё правило, секция <зона>_truba_no_ipv6: изменённое применение возвращает, удалённое
+// заводит снова. Свои правила зон, которые больше не выбраны или удалены, убираются.
+function no6_sync(c, zones) {
+	let changed = false, drop = [];
+	c.foreach('firewall', 'rule', (r) => {
+		if (r.src && r['.name'] == own_name(r.src, C.FW_NO6_SUFFIX) && !(r.src in zones))
+			push(drop, r['.name']);
+	});
+	for (let sid in drop) {
+		c.delete('firewall', sid);
+		changed = true;
+	}
+	for (let z in zones) {
+		let sid = own_name(z, C.FW_NO6_SUFFIX), t = c.get('firewall', sid);
+		// Имя занято чужой секцией — её не трогаем.
+		if (t != null && (t != 'rule' || c.get('firewall', sid, 'src') != z)) {
+			U.err(sprintf('межсетевой экран: секция %s уже есть — IPv6-интернет зоны %s не закрыт', sid, z));
+			continue;
+		}
+		if (t == null) {
+			c.set('firewall', sid, 'rule');
+			changed = true;
+		}
+		for (let k, v in no6_rule(z))
+			if (sprintf('%J', c.get('firewall', sid, k)) != sprintf('%J', v)) {
+				c.set('firewall', sid, k, v);
+				changed = true;
+			}
+	}
+	return changed;
+}
+
+// Межсетевой экран выбранных зон: перенаправления в truba и правила IPv6 — при каждом применении,
+// и при выключенной Маршрутизации тоже. Зоны, которой нет, и самой truba это не касается; без зоны
+// truba перенаправлений нет, правила IPv6 есть. Межсетевой экран перезагружается, только если что-то изменилось.
+export function zones_firewall(zones) {
+	let c = cursor();
+	c.load('firewall');
+	let exist = {};
+	c.foreach('firewall', 'zone', (z) => {
+		if (z.name)
+			exist[z.name] = true;
+	});
+	let sel = [];
+	for (let z in zones)
+		if (exist[z] && z != C.FW_ZONE && !(z in sel))
+			push(sel, z);
+
+	let changed = forwardings_sync(c, exist[C.FW_ZONE] ? sel : []);
+	if (no6_sync(c, sel))
+		changed = true;
 	if (!changed)
 		return false;
 	c.commit('firewall');
