@@ -1198,3 +1198,6 @@ msgstr "Кто в домашней сети сколько качает и че�
 
 msgid "Select a device to see its traffic and policy."
 msgstr "Выберите устройство, чтобы увидеть его трафик и Политику."
+
+msgid "tunnel / direct · now"
+msgstr "Туннель / Напрямую · сейчас"

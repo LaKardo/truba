@@ -1142,6 +1142,10 @@ msgid "Tunnel ↓ %s ↑ %s · Direct ↓ %s ↑ %s · Inbound ↓ %s ↑ %s"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/overview.js
+msgid "tunnel / direct · now"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/overview.js
 msgid "not used"
 msgstr ""
 

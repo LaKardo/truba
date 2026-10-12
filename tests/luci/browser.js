@@ -127,6 +127,15 @@ async function waitApply(page) {
 	result(await shadowHas(page, 'svg.flow'), '«Обзор»: схема потоков');
 	result(await shadowHas(page, 'canvas'), '«Обзор»: график uPlot');
 	result(/Where traffic goes/.test(await pageText(page)), '«Обзор»: карточка «Куда идёт трафик»');
+	// Устройства стенда (stand.sh): оба с трафиком за 5 минут — на схеме «2 active», в карточке — список.
+	const flowText = await page.evaluate(() => document.querySelector('.truba-root')?.shadowRoot?.querySelector('svg.flow')?.textContent || '');
+	result(/2 active/.test(flowText), '«Обзор»: схема потоков — число активных устройств', flowText.replace(/\s+/g, ' ').slice(0, 80));
+	const devCard = await page.evaluate(() => {
+		const c = document.querySelector('.truba-root')?.shadowRoot?.querySelector('.card.devs');
+		return { text: c?.innerText || '', link: c?.querySelector('a.go')?.getAttribute('href') || '' };
+	});
+	result(/192\.168\.1\.50/.test(devCard.text) && /\/admin\/services\/truba\/devices$/.test(devCard.link),
+		'«Обзор»: карточка «Устройства» — устройство и ссылка на вкладку', devCard.text.replace(/\s+/g, ' ').slice(0, 80));
 
 	for (const t of tabs) {
 		await page.goto(url(t), { waitUntil: 'networkidle2' });
