@@ -175,12 +175,31 @@ async function waitApply(page) {
 	result(verdict != null, '«Правила»: «Куда пойдёт»', verdict);
 	await page.screenshot({ path: `${out}/rules-check.png`, fullPage: true });
 
-	// Последнюю Зону снять нельзя: без Зон служба взяла бы умолчание схемы. На стенде выбрана одна lan.
-	const lastZone = await page.evaluate(() => {
-		const b = document.querySelector('.truba-root').shadowRoot.querySelector('.zones button[data-zone="lan"]');
-		return { on: b?.getAttribute('aria-pressed'), disabled: b?.disabled, title: b?.title || '' };
-	});
-	result(lastZone.on == 'true' && lastZone.disabled && /At least one zone/.test(lastZone.title), '«Правила»: последнюю Зону снять нельзя', JSON.stringify(lastZone));
+	// Последнюю Зону снять нельзя: без Зон служба взяла бы умолчание схемы. На стенде выбрана одна lan. Кнопка
+	// не disabled, а aria-disabled: экранный чтец её объявляет, а нажатие объясняет запрет сообщением — и на телефоне.
+	const zoneSel = (z) => `.zones button[data-zone="${z}"]`;
+	const zoneOf = (z) => page.evaluate((s) => {
+		const b = document.querySelector('.truba-root').shadowRoot.querySelector(s);
+		return { on: b?.getAttribute('aria-pressed'), aria: b?.getAttribute('aria-disabled'), disabled: b?.disabled };
+	}, zoneSel(z));
+	const lastZone = await zoneOf('lan');
+	await tap(zoneSel('lan'));
+	lastZone.toast = await page.waitForFunction(() => document.querySelector('.truba-root')?.shadowRoot?.querySelector('.toast')?.innerText, { timeout: 3000 })
+		.then((h) => h.jsonValue()).catch(() => '');
+	lastZone.after = (await zoneOf('lan')).on;
+	lastZone.changes = await shadowHas(page, '.changes');
+	result(lastZone.on == 'true' && lastZone.aria == 'true' && !lastZone.disabled && /At least one zone/.test(lastZone.toast) && lastZone.after == 'true' &&
+		!lastZone.changes, '«Правила»: последнюю Зону снять нельзя — нажатие объясняет', JSON.stringify(lastZone));
+	// Зоны: добавить wan, снять lan — в UCI браузера список Зон; затем «Сбросить».
+	const uciZone = () => page.evaluate(async () => (await L.require('uci')).get('truba', 'main', 'zone'));
+	await tap(zoneSel('wan'));
+	await sleep(300);
+	const z1 = await uciZone();
+	await tap(zoneSel('lan'));
+	await sleep(300);
+	const z2 = await uciZone();
+	result(JSON.stringify(z1) == '["lan","wan"]' && JSON.stringify(z2) == '["wan"]', '«Правила»: Зоны — добавить и снять', JSON.stringify({ z1, z2 }));
+	await Promise.all([ page.waitForNavigation({ waitUntil: 'networkidle2' }).catch(() => {}), tap('.changes [data-act="reset"]') ]);
 
 	// «Устройства» (ADR 0018): на стенде сосед с MAC и узел mesh-VPN без него (stand.sh).
 	const rowSel = (ip) => `button.dev[data-ip="${ip}"]`;
@@ -249,6 +268,16 @@ async function waitApply(page) {
 	await clickIn(catRow + ' .seg button', '^Direct$');
 	await sleep(300);
 	result(!await shadowHas(page, '.changes'), '«Правила»: нажатие на уже выбранный Режим и Действие — без изменений');
+	await clickIn(catRow + ' .seg button', '^By mode$');
+	await sleep(300);
+	await clickIn(catRow + ' .seg button', '^Tunnel$');
+	await sleep(300);
+	const viaMode = await page.evaluate(() => document.querySelector('.truba-root').shadowRoot.querySelector('.changes')?.innerText.replace(/\s+/g, ' ') || '');
+	await clickIn(catRow + ' .seg button', '^Direct$');
+	await sleep(300);
+	result(/Unapplied changes: 1/.test(viaMode) && !await shadowHas(page, '.changes'), '«Правила»: Действие через «По режиму» — одно изменение, возврат — ни одного', viaMode);
+	const viewLabel = await page.evaluate(() => document.querySelector('.truba-root').shadowRoot.querySelector('.rules-cats .card-h .seg')?.getAttribute('aria-label'));
+	result(viewLabel == 'Show actions for mode', '«Правила»: сегмент вида Категорий — своя подпись', viewLabel);
 	await clickIn('.card.mode .seg button', '^Selective$');
 	const catMode = await pressed('.rules-cats .card-h .seg');
 	await tap('.changes [data-act="apply"]');
@@ -272,6 +301,11 @@ async function waitApply(page) {
 	// Окно открывается в эффекте Preact — после отрисовки, не сразу после клика.
 	const dlgOpen = await page.waitForFunction(() => document.querySelector('.truba-root')?.shadowRoot?.querySelector('dialog[open]'), { timeout: 5000 })
 		.then(() => true).catch(() => false);
+	const dlgName = await page.evaluate(() => {
+		const r = document.querySelector('.truba-root').shadowRoot, d = r.querySelector('dialog[open]');
+		return d && r.getElementById(d.getAttribute('aria-labelledby'))?.textContent;
+	});
+	result(/Reset all category actions/.test(dlgName || ''), '«Правила»: у окна подтверждения — доступное имя', dlgName);
 	await tap('dialog[open] [data-act="confirm"]');
 	const startAct = (await ubus('truba', 'categories')).starting.find((r) => r.mode == 'all' && r.set == 'geosite' && r.tag == 'youtube')?.action || 'mode';
 	const LABEL = { mode: 'By mode', direct: 'Direct', tunnel: 'Tunnel', block: 'Block' };
@@ -340,6 +374,9 @@ async function waitApply(page) {
 		return utc?.evaluate((e) => e.value);
 	};
 	await retype('25:00');
+	const early = await shadowHas(page, '.rule-sets [role="alert"]');
+	await page.waitForFunction(() => document.querySelector('.truba-root').shadowRoot.querySelector('.rule-sets [role="alert"]'), { timeout: 3000 }).catch(() => {});
+	result(!early, '«Правила»: ошибка поля — после паузы в наборе, а не на каждое нажатие');
 	const badUtc = await page.evaluate(() => {
 		const r = document.querySelector('.truba-root').shadowRoot;
 		return { err: r.querySelector('.rule-sets .field.bad [role="alert"]')?.textContent || '', apply: r.querySelector('.changes [data-act="apply"]')?.disabled,
@@ -579,6 +616,9 @@ async function waitApply(page) {
 	});
 	result(phone.doc <= phone.win && phone.tr <= 0 && phone.rows > 0 && phone.rows <= 100 && phone.sel != 'none' && phone.seg == 'none',
 		'«Правила» 375: не больше 100 строк, Действие — select, без горизонтальной прокрутки', JSON.stringify(phone));
+	await page.evaluate(() => document.querySelector('.truba-root').shadowRoot.querySelectorAll('.rule-sets details.fold').forEach((d) => { d.open = true; }));
+	const versText = await page.evaluate(() => document.querySelector('.truba-root').shadowRoot.querySelector('.rule-sets .vers')?.innerText || '');
+	result(/Current version/.test(versText) && /Previous version/.test(versText), '«Правила» 375: версии с подписями', versText.replace(/\s+/g, ' '));
 	await page.screenshot({ path: `${out}/rules-375.png`, fullPage: true });
 	await page.setViewport({ width: 1280, height: 900 });
 

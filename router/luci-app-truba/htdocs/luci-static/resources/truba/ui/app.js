@@ -177,8 +177,23 @@ function toast(text) {
 	toasts.set({ text, id: toasts.get().id + 1 });
 }
 
+// Значение как в сохранённых настройках — не изменение: прежняя правка опции снимается, и A → B → A даёт
+// ноль изменений. uci.set записал бы изменение и с тем же значением — панель показала бы его, а точки нет.
+const same = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+
 function setOpt(config, section, option, value) {
-	if (value == null)
+	const st = uci.state || {};
+	const saved = st.values?.[config]?.[section];
+	if (saved && !st.creates?.[config]?.[section] && st.deletes?.[config]?.[section] !== true && same(saved[option], value)) {
+		for (let pend of [ st.changes?.[config], st.deletes?.[config] ]) {
+			if (!pend?.[section])
+				continue;
+			delete pend[section][option];
+			if (!Object.keys(pend[section]).length)
+				delete pend[section];
+		}
+	}
+	else if (value == null)
 		uci.unset(config, section, option);
 	else
 		uci.set(config, section, option, value);
@@ -195,6 +210,15 @@ function addSection(config, type) {
 // Удалить секцию (устройство «по правилам», секция с неверным MAC) — тоже несохранённое изменение.
 function removeSection(config, sid) {
 	uci.remove(config, sid);
+	changes.set({ n: changeCount() });
+}
+
+// Сохранённая секция, удалённая в браузере, — снова на месте со своими значениями (uci.remove сбросил и её
+// правки). Своего вызова у uci нет: снимается пометка удаления.
+function restoreSection(config, sid) {
+	const d = uci.state?.deletes?.[config];
+	if (d?.[sid] === true)
+		delete d[sid];
 	changes.set({ n: changeCount() });
 }
 
@@ -280,5 +304,6 @@ return baseclass.extend({
 	poll: pollStore,
 	set: setOpt,
 	add: addSection,
-	remove: removeSection
+	remove: removeSection,
+	restore: restoreSection
 });

@@ -1224,3 +1224,9 @@ msgstr "Настройки обновления"
 
 msgid "The files are swapped at once; the rules are rebuilt in the background."
 msgstr "Файлы меняются местами сразу, правила перестраиваются в фоне."
+
+msgid "The check failed: %s"
+msgstr "Проверить не удалось: %s"
+
+msgid "Show actions for mode"
+msgstr "Показать Действия Режима"

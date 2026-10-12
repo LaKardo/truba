@@ -84,6 +84,13 @@ const CHECK_ERRORS = {
 	busy: _('the rule sets are being unpacked, try again in a minute')
 };
 
+// Текст неудачной проверки: причина службы или текст ошибки вызова (rpcd, нет связи).
+function checkErrorText(r) {
+	if (CHECK_ERRORS[r?.error])
+		return _('Not checked: %s').format(CHECK_ERRORS[r.error]);
+	return r?.message ? _('The check failed: %s').format(r.message) : _('The check failed.');
+}
+
 // Долгая проверка (NAT, Туннель): rpcd запускает её в фоне и отвечает сразу, а итог —
 // первый, у которого время не раньше запуска. limit — сколько секунд ждать.
 function runInBackground(start, result, limit) {
@@ -382,10 +389,15 @@ function ruleKey(s) {
 	return ((s.set == 'geoip') ? 'geoip' : 'geosite') + ':' + String(s.tag || '').toLowerCase();
 }
 
-// Секции rule Режима (mode не «selective» — «all», как у службы); с set и tag — только этой Категории.
+// Секция — правило Режима (и Категории, если заданы set и tag) так, как его читает служба (conf.uc):
+// без set или tag она пропускается, mode не «selective» — «all».
+function ruleOf(s, mode, set, tag) {
+	return !!(s.set && s.tag) && ((s.mode == 'selective') ? 'selective' : 'all') == mode &&
+		(set == null || ruleKey(s) == set + ':' + String(tag).toLowerCase());
+}
+
 function ruleSections(mode, set, tag) {
-	const k = (set == null) ? null : set + ':' + String(tag).toLowerCase();
-	return uci.sections('truba', 'rule').filter((s) => ((s.mode == 'selective') ? 'selective' : 'all') == mode && (k == null || ruleKey(s) == k));
+	return uci.sections('truba', 'rule').filter((s) => ruleOf(s, mode, set, tag));
 }
 
 // Действия Режима одним проходом: «набор:тег» → Действие. Из секций одного ключа действует последняя
@@ -413,6 +425,14 @@ function catRows(list, actOf, q, f, full) {
 	const hit = list.filter((c) => (!qq || (c.set + ':' + c.tag).toLowerCase().includes(qq)) &&
 		(f == 'all' || (f == 'explicit' ? actOf(c) != 'mode' : actOf(c) == f)));
 	return { rows: full ? hit : hit.slice(0, CAT_LIMIT), total: hit.length };
+}
+
+// Перечитать categories вместе с этим ответом lists: Наборы правил распаковываются или ещё не скачаны,
+// на прошлом опросе шли обновление или применение, или сменились файлы Наборов (обновление по расписанию,
+// откат) — иначе список, счётчики и пропавшие Категории устарели бы до перезагрузки страницы.
+function catsDue(cats, prev, next) {
+	const sha = (l) => [ l?.geoip?.sha256, l?.geosite?.sha256 ].join();
+	return !!(cats?.busy || !(cats?.cats || []).length || prev?.updating || prev?.applying || next?.applying || sha(prev) != sha(next));
 }
 
 // Пора ли спросить lists и sets (spec §5.3): раз в 30 с, а пока идёт обновление или применение
@@ -533,7 +553,7 @@ return baseclass.extend({
 	callStatus, callLists, callCategories, callSets, callCheck, callUpdateLists, callRollbackLists, callRates, callLog,
 	callSchema, loadSchema, schema, get, field, fieldError, handshakeLevel, callDevices, callConnections,
 	ACTIVE_SPAN, devRate, devShare, devActive, deviceSections, deviceSection, devicePolicy, normMac, connLabel,
-	RULE_ACTIONS, ruleKey, ruleSections, ruleActions, ruleAction, catRows, listsDue,
+	RULE_ACTIONS, ruleKey, ruleOf, ruleSections, ruleActions, ruleAction, catRows, catsDue, listsDue, checkErrorText,
 	runNatTest, runTunnelTest,
 	ACTION_LABELS, ACTION_LEVELS, REASON_LABELS, VIA_LABELS, WARNINGS, NAT_ERRORS, CHECK_ERRORS, UPNP_MISSING, NBSP, TABS,
 	fmtBytes, fmtRate, fmtAge, fmtTime, fmtDate, fmtNum, missingText,

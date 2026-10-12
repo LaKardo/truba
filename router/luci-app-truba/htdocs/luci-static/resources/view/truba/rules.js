@@ -27,6 +27,14 @@ function setAction(mode, set, tag, action) {
 			app.remove('truba', s['.name']);
 	if (action == 'mode')
 		return;
+	// Сохранённая секция этого ключа, удалённая в браузере («По режиму»), возвращается: A → «По режиму» → B —
+	// одно изменение, а не удаление и новая секция.
+	if (!sid) {
+		const v = uci.state?.values?.truba || {}, d = uci.state?.deletes?.truba || {};
+		sid = Object.keys(v).find((x) => d[x] === true && v[x]['.type'] == 'rule' && common.ruleOf(v[x], mode, set, tag)) || null;
+		if (sid)
+			app.restore('truba', sid);
+	}
 	if (!sid) {
 		sid = app.add('truba', 'rule');
 		app.set('truba', sid, 'mode', mode);
@@ -50,20 +58,22 @@ function toStarting(mode, starting) {
 }
 
 // Зоны fw4, устройства которых маршрутизируются: все зоны, кроме зоны Трубы, и выбранные, которых в fw4
-// уже нет. Последнюю выбранную снять нельзя: без Зон служба взяла бы умолчание схемы.
+// уже нет. Последнюю выбранную снять нельзя: без Зон служба взяла бы умолчание схемы. Её кнопка — aria-disabled,
+// а не disabled: экранный чтец её объявляет, а нажатие объясняет запрет сообщением (title на телефоне не виден).
 function Zones() {
 	const { html } = app.lib;
 	const own = common.schema().consts.fw_zone;
 	const def = common.schema().sections.main?.zone?.def || [];
 	const sel = common.get('main', 'zone');
 	const fw = uci.sections('firewall', 'zone').map((z) => z.name).filter((n) => n && n != own);
-	const toggle = (z) => app.set('truba', 'main', 'zone', sel.includes(z) ? sel.filter((x) => x != z) : [ ...sel, z ]);
+	const lastText = _('At least one zone is needed: without zones %s is routed by default.').format(def.join(', '));
+	const toggle = (z) => (sel.length == 1 && sel[0] == z) ? app.toast(lastText)
+		: app.set('truba', 'main', 'zone', sel.includes(z) ? sel.filter((x) => x != z) : [ ...sel, z ]);
 	return html`<div class="chips zones" role="group" aria-label=${_('Zones')}>
 		${[ ...new Set([ ...fw, ...sel ]) ].map((z) => {
 			const on = sel.includes(z), last = on && sel.length == 1, gone = !fw.includes(z);
-			return html`<button type="button" class="chip zone" data-zone=${z} aria-pressed=${String(on)} disabled=${last}
-				title=${last ? _('At least one zone is needed: without zones %s is routed by default.').format(def.join(', '))
-					: gone ? _('There is no such zone in the firewall.') : undefined}
+			return html`<button type="button" class="chip zone" data-zone=${z} aria-pressed=${String(on)} aria-disabled=${last ? 'true' : undefined}
+				title=${last ? lastText : gone ? _('There is no such zone in the firewall.') : undefined}
 				onClick=${() => toggle(z)}>${z}${gone ? html` <span class="n">${_('missing')}</span>` : ''}</button>`;
 		})}
 	</div>`;
@@ -147,8 +157,10 @@ function RuleSets({ store, timing }) {
 		</div>
 		<${kit.Fold} title=${_('Versions')}>
 			<div class="vers">
-				<span></span><span class="mu">${_('Current version')}</span><span class="mu">${_('Previous version')}</span>
-				${[ 'geoip', 'geosite' ].map((k) => html`<b>${k}.dat</b><${Version} v=${l[k]} /><${Version} v=${l['prev_' + k]} />`)}
+				<span class="vh"></span><span class="vh mu">${_('Current version')}</span><span class="vh mu">${_('Previous version')}</span>
+				${[ 'geoip', 'geosite' ].map((k) => html`<b>${k}.dat</b>
+					<span><span class="vl mu">${_('Current version')}: </span><${Version} v=${l[k]} /></span>
+					<span><span class="vl mu">${_('Previous version')}: </span><${Version} v=${l['prev_' + k]} /></span>`)}
 			</div>
 			<div class="mu">${last ? _('Last check: %s').format(common.fmtTime(last.time)) : _('not checked yet')}</div>
 		</${kit.Fold}>
@@ -226,7 +238,7 @@ function Categories({ cats, snap }) {
 
 	return html`<${kit.Card} cls="w3 rules-cats" title=${_('Categories')}
 		aside=${html`<span class="mu">${_('%s · with an action %s').format(common.fmtNum(n.all), common.fmtNum(n.explicit))}</span>
-			<${kit.Segmented} label=${_('Mode')} items=${MODES()} value=${mode} onChange=${setShown} />`}>
+			<${kit.Segmented} label=${_('Show actions for mode')} items=${MODES()} value=${mode} onChange=${setShown} />`}>
 		${missing.length ? html`<div class="missing">
 			<span>${common.missingText(missing)}</span>
 			<button type="button" class="btn" data-act="remove-missing" onClick=${removeMissing}>${_('Remove')}</button>
@@ -294,10 +306,12 @@ return view.extend({
 				calls.push(common.callStatus().then((s) => { patch.status = s; }));
 			if (common.listsDue(now, timing.polledAt, timing.kickedAt, st.lists)) {
 				timing.polledAt = now;
-				calls.push(common.callLists().then((l) => { patch.lists = l; }), common.callSets().then((s) => { patch.sets = s; }, () => {}));
-				// Наборы правил распаковываются или ещё не скачаны: список появится без перезагрузки страницы.
-				if (st.cats?.busy || !(st.cats?.cats || []).length)
-					calls.push(common.callCategories().then((c) => { patch.cats = c; }));
+				// Категории — следом за lists, когда Наборы правил распаковываются, ещё не скачаны или сменились.
+				calls.push(common.callLists().then((l) => {
+					patch.lists = l;
+					if (common.catsDue(st.cats, st.lists, l))
+						return common.callCategories().then((c) => { patch.cats = c; });
+				}), common.callSets().then((s) => { patch.sets = s; }, () => {}));
 			}
 			return Promise.all(calls).then(() => patch);
 		}, POLL / 1000);

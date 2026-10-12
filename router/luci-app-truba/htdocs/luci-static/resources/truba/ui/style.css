@@ -448,10 +448,14 @@
 .ap { display: inline-flex; }
 .ap .seg { display: flex; }
 .ap .seg button { padding: 3px 8px; font-size: 11px; white-space: nowrap; }
-/* Выбранное Действие — своим цветом; порядок кнопок — PICK в kit.js: По режиму, Напрямую, Туннель, Блок. */
-.ap .seg button:nth-child(2)[aria-pressed="true"] { background: var(--dir); color: #fff; box-shadow: none; }
-.ap .seg button:nth-child(3)[aria-pressed="true"] { background: var(--tun); color: #fff; box-shadow: none; }
-.ap .seg button:nth-child(4)[aria-pressed="true"] { background: var(--blk); color: #fff; box-shadow: none; }
+/* Выбранное Действие — подложкой и рамкой своего цвета, текст обычный: белый на зелёном и красном не набирал
+   4,5:1 (проверяет static.mjs). Порядок кнопок — PICK в kit.js: По режиму, Напрямую, Туннель, Блок. */
+.ap .seg button:nth-child(2), .ap.a-direct .ap-sel { --a: var(--dir); }
+.ap .seg button:nth-child(3), .ap.a-tunnel .ap-sel { --a: var(--tun); }
+.ap .seg button:nth-child(4), .ap.a-block .ap-sel { --a: var(--blk); }
+.ap .seg button:not(:first-child)[aria-pressed="true"], .ap:not(.a-mode) .ap-sel {
+	background: color-mix(in srgb, var(--a) 22%, var(--card)); color: var(--tx); box-shadow: inset 0 0 0 1px var(--a);
+}
 .ap-sel {
 	display: none;
 	max-width: 100%;
@@ -464,9 +468,6 @@
 	font: inherit;
 	font-size: 12px;
 }
-.ap.a-tunnel .ap-sel { background: color-mix(in srgb, var(--tun) 16%, transparent); color: var(--tun); }
-.ap.a-direct .ap-sel { background: color-mix(in srgb, var(--dir) 16%, transparent); color: var(--dir); }
-.ap.a-block .ap-sel { background: color-mix(in srgb, var(--blk) 16%, transparent); color: var(--blk); }
 .ap-sel option { background: var(--card); color: var(--tx); }
 @container (max-width: 600px) {
 	.ap .seg { display: none; }
@@ -563,7 +564,7 @@
 .note { margin: 8px 0 0; }
 .chip.zone { border: 1px solid var(--bd); background: transparent; color: var(--tx); }
 .chip.zone[aria-pressed="true"] { border-color: var(--tun); color: var(--tun); }
-.chip.zone:disabled { cursor: not-allowed; }
+.chip.zone[aria-disabled="true"] { cursor: not-allowed; }
 .rules-cats .card-h .aside { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
 .cat {
 	display: grid;
@@ -594,9 +595,12 @@
 .vers { display: grid; grid-template-columns: auto minmax(0, 1fr) minmax(0, 1fr); gap: 4px 12px; font-size: 12px; }
 .vers b { font-weight: 500; }
 .vers code { color: var(--mu); }
+.vers .vl { display: none; }
 .sws { display: flex; flex-wrap: wrap; gap: 8px; }
 @container (max-width: 600px) {
-	.vers { grid-template-columns: auto minmax(0, 1fr); }
-	.vers > :nth-child(3n) { grid-column: 2; }
-	.vers > :nth-child(3) { display: none; }
+	/* Одна колонка: у каждой версии — своя подпись вместо заголовков колонок. */
+	.vers { grid-template-columns: minmax(0, 1fr); }
+	.vers .vh { display: none; }
+	.vers .vl { display: inline; }
+	.vers b:not(:first-of-type) { margin-top: 6px; }
 }

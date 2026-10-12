@@ -98,6 +98,18 @@ msgid "the rule sets are being unpacked, try again in a minute"
 msgstr ""
 
 #: htdocs/luci-static/resources/truba/common.js
+msgid "Not checked: %s"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/common.js
+msgid "The check failed: %s"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/common.js
+msgid "The check failed."
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/common.js
 msgid "UPnP is enabled, but miniupnpd is not installed: install luci-app-upnp."
 msgstr ""
 
@@ -263,14 +275,6 @@ msgstr ""
 
 #: htdocs/luci-static/resources/truba/ui/kit.js
 msgid "Cancel"
-msgstr ""
-
-#: htdocs/luci-static/resources/truba/ui/kit.js
-msgid "Not checked: %s"
-msgstr ""
-
-#: htdocs/luci-static/resources/truba/ui/kit.js
-msgid "The check failed."
 msgstr ""
 
 #: htdocs/luci-static/resources/truba/ui/kit.js
@@ -1118,11 +1122,11 @@ msgid "Selective"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/rules.js
-msgid "Zones"
+msgid "At least one zone is needed: without zones %s is routed by default."
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/rules.js
-msgid "At least one zone is needed: without zones %s is routed by default."
+msgid "Zones"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/rules.js
@@ -1299,6 +1303,10 @@ msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/rules.js
 msgid "%s · with an action %s"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/rules.js
+msgid "Show actions for mode"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/rules.js

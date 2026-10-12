@@ -156,6 +156,16 @@ function Field({ sec, name, sid, label, hint, msg, disabled }) {
 	// Выключенное поле не проверяется и показывает то, что в настройках: неверный ввод в нём не держит «Применить».
 	useEffect(() => { if (disabled) setV(saved()); }, [ disabled ]);
 	const err = disabled ? null : common.fieldError(sec, name, v.trim());
+	// Ошибка видна после паузы в наборе (или ухода из поля), а не на каждое нажатие: на «1» из «12:00» экранный
+	// чтец объявлял бы её. «Применить» недоступна сразу — по err.
+	const [ quiet, setQuiet ] = useState(false);
+	const timer = useRef(null);
+	useEffect(() => () => clearTimeout(timer.current), []);
+	const settle = () => {
+		clearTimeout(timer.current);
+		setQuiet(false);
+	};
+	const shown = err && !quiet;
 	useEffect(() => { app.invalid(opt, !!err); }, [ opt, !!err ]);
 	useEffect(() => () => app.invalid(opt, false), [ opt ]);
 	// Неверное поле в свёрнутом блоке (значение из настроек) — блок раскрывается: иначе «Применить»
@@ -164,18 +174,21 @@ function Field({ sec, name, sid, label, hint, msg, disabled }) {
 	const onInput = (ev) => {
 		const x = ev.target.value;
 		setV(x);
+		setQuiet(true);
+		clearTimeout(timer.current);
+		timer.current = setTimeout(settle, 800);
 		if (!common.fieldError(sec, name, x.trim()) && x.trim() !== saved())
 			app.set('truba', s, name, x.trim() === '' ? null : x.trim());
 	};
 	const def = common.schema().sections?.[sec]?.[name]?.def;
 	const changed = uci.state?.changes?.truba?.[s]?.[name] !== undefined;
 	const id = 'f-' + s + '-' + name;
-	return html`<div class=${'field' + (err ? ' bad' : '')} ref=${ref}>
+	return html`<div class=${'field' + (shown ? ' bad' : '')} ref=${ref}>
 		<label for=${id}>${label}${changed ? html` <${Dot} level="warn" label=${_('changed, not applied yet')} />` : ''}</label>
 		<input id=${id} data-opt=${opt} autocomplete="off" value=${v} disabled=${!!disabled}
 			placeholder=${(def != null && typeof def != 'object') ? String(def) : ''}
-			aria-invalid=${err ? 'true' : undefined} aria-describedby=${err ? id + '-e' : undefined} onInput=${onInput} />
-		${err ? html`<div class="err-text" id=${id + '-e'} role="alert">${msg || err}</div>` : ''}
+			aria-invalid=${err ? 'true' : undefined} aria-describedby=${shown ? id + '-e' : undefined} onInput=${onInput} onBlur=${settle} />
+		${shown ? html`<div class="err-text" id=${id + '-e'} role="alert">${msg || err}</div>` : ''}
 		${hint ? html`<div class="mu">${hint}</div>` : ''}
 	</div>`;
 }
@@ -188,9 +201,12 @@ function Fold({ title, open, children }) {
 
 // Подтверждение: родной <dialog> в верхнем слое — не зависит от container-type у .tr, фокус внутри
 // окна и Esc — у браузера. Закрытие любым путём (Esc, «Отмена») — onClose.
+let dialogs = 0;   // для id заголовка: окон на странице может быть несколько
+
 function Dialog({ open, title, confirm, onConfirm, onClose, children }) {
-	const { html, useRef, useEffect } = app.lib;
+	const { html, useRef, useEffect, useState } = app.lib;
 	const ref = useRef(null);
+	const [ id ] = useState(() => 'dlg-' + (++dialogs));
 	useEffect(() => {
 		const d = ref.current;
 		if (!d)
@@ -204,8 +220,8 @@ function Dialog({ open, title, confirm, onConfirm, onClose, children }) {
 		ref.current?.close();
 		onConfirm();
 	};
-	return html`<dialog class="dlg" ref=${ref} onClose=${onClose}>
-		<h3>${title}</h3>
+	return html`<dialog class="dlg" ref=${ref} onClose=${onClose} aria-labelledby=${id}>
+		<h3 id=${id}>${title}</h3>
 		${children ? html`<div class="dlg-b">${children}</div>` : ''}
 		<div class="acts">
 			<button type="button" class="btn" data-act="cancel" onClick=${() => ref.current?.close()}>${_('Cancel')}</button>
@@ -234,8 +250,7 @@ function Toast() {
 function CheckResult({ r, full }) {
 	const { html } = app.lib;
 	if (r.error || !r.action)
-		return html`<div class="check-res err-text">${common.CHECK_ERRORS[r.error]
-			? _('Not checked: %s').format(common.CHECK_ERRORS[r.error]) : _('The check failed.')}</div>`;
+		return html`<div class="check-res err-text">${common.checkErrorText(r)}</div>`;
 	const reason = (v) => (common.REASON_LABELS[v.reason] || v.reason) + (v.device ? ' (%s)'.format(v.device) : '');
 	const hits = r.geosite || [], ips = r.ips || [];
 	return html`<div class="check-res">
@@ -266,7 +281,7 @@ function Check({ mac, full }) {
 		setBusy(true);
 		// Без MAC (для всех устройств, узел mesh-VPN) аргумент mac не передаётся вовсе: rpcd отклоняет null вместо строки.
 		(mac ? common.callCheck(t, mac) : common.callCheck(t))
-			.then((r) => setRes(r), () => setRes({ error: 'rpc' })).finally(() => setBusy(false));
+			.then((r) => setRes(r), (e) => setRes({ error: 'rpc', message: e?.message })).finally(() => setBusy(false));
 	};
 	return html`<form class="check" onSubmit=${run}>
 		<input name="target" autocomplete="off" aria-label=${_('Domain or IP')}
