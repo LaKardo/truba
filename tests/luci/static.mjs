@@ -217,6 +217,38 @@ if (app) {
 	check(app.changeCount() === 3, 'app.changeCount: новая секция, удалённая секция, порядок');
 }
 
+// Стиль A (spec §4.1): цвета Действий и состояний читаются на карточке (контраст не ниже 3:1), текст —
+// не ниже 4,5:1, в светлом и тёмном наборе. Токены — в блоках «.tr {» и «.tr[data-scheme="dark"] {».
+const stylePath = join(root, 'htdocs/luci-static/resources/truba/ui/style.css');
+if (!existsSync(stylePath)) {
+	console.log('FAIL  truba/ui/style.css: нет файла');
+	fails++;
+} else if (app) {
+	const css = readFileSync(stylePath, 'utf8');
+	const hex = (h) => `rgb(${parseInt(h.slice(1, 3), 16)}, ${parseInt(h.slice(3, 5), 16)}, ${parseInt(h.slice(5, 7), 16)})`;
+	for (const [ name, sel ] of [ [ 'светлый', '.tr {' ], [ 'тёмный', '.tr[data-scheme="dark"] {' ] ]) {
+		const at = css.indexOf(sel);
+		const block = at < 0 ? '' : css.slice(at, css.indexOf('}', at));
+		const tok = Object.fromEntries([ ...block.matchAll(/(--[\w-]+):\s*(#[0-9a-fA-F]{6})\b/g) ].map((m) => [ m[1], m[2] ]));
+		const ratio = (a, b) => {
+			const [ x, y ] = [ app.luminance(hex(a)), app.luminance(hex(b)) ].sort((p, q) => q - p);
+			return (x + 0.05) / (y + 0.05);
+		};
+		for (const [ list, min ] of [ [ [ '--tun', '--dir', '--blk', '--inb', '--warn' ], 3 ], [ [ '--tx', '--mu' ], 4.5 ] ])
+			for (const t of list) {
+				if (!tok[t] || !tok['--card']) { console.log(`FAIL  style.css (${name}): нет ${t} или --card`); fails++; continue; }
+				const r = ratio(tok[t], tok['--card']);
+				check(r >= min, `style.css (${name}): контраст ${t} ${tok[t]} к --card ${tok['--card']} = ${r.toFixed(2)}, нужно ≥ ${min}`);
+			}
+	}
+}
+
+// Иконки Lucide: у каждой, что берут компоненты, есть разметка.
+const icons = loadModule('truba/ui/icons.js', { baseclass });
+if (icons)
+	for (const n of [ 'circle-check', 'triangle-alert', 'circle-x', 'arrow-right', 'wifi-off', 'pencil' ])
+		check(typeof icons[n] === 'string' && /<(path|circle|line|polyline|rect)/.test(icons[n]), `icons.js: иконка ${n}`);
+
 const po = readFileSync(join(root, 'po/ru/truba.po'), 'utf8');
 const translated = new Map();
 const blocks = po.split(/\n\s*\n/);

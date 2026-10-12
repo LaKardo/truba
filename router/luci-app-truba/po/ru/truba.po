@@ -1128,3 +1128,12 @@ msgstr "Скорость не записывается: служба Трубы 
 
 msgid "no room for temporary files on the router"
 msgstr "на Роутере нет места для временных файлов"
+
+msgid "Unapplied changes: %d"
+msgstr "Не применено изменений: %d"
+
+msgid "Reset"
+msgstr "Сбросить"
+
+msgid "Apply"
+msgstr "Применить"

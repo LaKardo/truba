@@ -205,6 +205,18 @@ msgstr ""
 msgid "Diagnostics"
 msgstr ""
 
+#: htdocs/luci-static/resources/truba/ui/kit.js
+msgid "Unapplied changes: %d"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/ui/kit.js
+msgid "Reset"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/ui/kit.js
+msgid "Apply"
+msgstr ""
+
 #: htdocs/luci-static/resources/view/truba/diagnostics.js
 msgid "Nothing to show."
 msgstr ""
