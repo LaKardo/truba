@@ -54,6 +54,10 @@ msgid "no category matched — the mode default applies"
 msgstr ""
 
 #: htdocs/luci-static/resources/truba/common.js
+msgid "decided before the settings changed"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/common.js
 msgid "Rule sets are not downloaded yet — only the mode default applies. Download is in progress."
 msgstr ""
 
@@ -189,6 +193,10 @@ msgstr ""
 msgid "working"
 msgstr ""
 
+#: htdocs/luci-static/resources/truba/common.js
+msgid "Devices"
+msgstr ""
+
 #: menu.d
 msgid "Routing"
 msgstr ""
@@ -210,10 +218,6 @@ msgid "Where traffic goes"
 msgstr ""
 
 #: htdocs/luci-static/resources/truba/ui/flow.js
-msgid "Devices"
-msgstr ""
-
-#: htdocs/luci-static/resources/truba/ui/flow.js
 msgid "%d active"
 msgstr ""
 
@@ -223,6 +227,10 @@ msgstr ""
 
 #: htdocs/luci-static/resources/truba/ui/flow.js
 msgid "block: %s"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/ui/kit.js
+msgid "Tunnel %d%%, direct %d%%"
 msgstr ""
 
 #: htdocs/luci-static/resources/truba/ui/kit.js

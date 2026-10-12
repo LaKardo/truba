@@ -160,6 +160,35 @@ function setOpt(config, section, option, value) {
 	changes.set({ n: changeCount() });
 }
 
+// Новая секция (устройство с Политикой) — тоже несохранённое изменение.
+function addSection(config, type) {
+	const sid = uci.add(config, type);
+	changes.set({ n: changeCount() });
+	return sid;
+}
+
+// У секции есть несохранённые изменения: она новая, изменена или удалена (точка «изменено» у строки).
+function pending(config, sid) {
+	const st = uci.state || {};
+	return !!(sid && (st.creates?.[config]?.[sid] || st.changes?.[config]?.[sid] || st.deletes?.[config]?.[sid]));
+}
+
+// Опрос внутри компонента (панель устройства): сразу и раз в ms, пока компонент на странице; смена deps
+// начинает заново. Ошибка оставляет прежние данные и ставит offline.
+function usePoll(fetchFn, ms, deps) {
+	const [ st, setSt ] = lib.useState({ data: null, offline: false });
+	lib.useEffect(() => {
+		let alive = true;
+		setSt({ data: null, offline: false });
+		const run = () => fetchFn().then((data) => { if (alive) setSt({ data, offline: false }); },
+			() => { if (alive) setSt((s) => ({ data: s.data, offline: true })); });
+		run();
+		const id = setInterval(run, ms);
+		return () => { alive = false; clearInterval(id); };
+	}, deps);
+	return st;
+}
+
 // ---- Страница ----
 
 // Корень страницы — свой Shadow DOM: стили темы LuCI не попадают внутрь, наши — наружу.
@@ -194,7 +223,8 @@ function mount(view, Page, props) {
 }
 
 return baseclass.extend({
-	load, lib, luminance, schemeFrom, mount, store, use, scheme, changes, changeCount,
+	load, lib, luminance, schemeFrom, mount, store, use, scheme, changes, changeCount, pending, usePoll,
 	poll: pollStore,
-	set: setOpt
+	set: setOpt,
+	add: addSection
 });

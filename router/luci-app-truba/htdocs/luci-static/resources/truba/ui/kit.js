@@ -48,12 +48,64 @@ function Switch({ label, checked, disabled, opt, onChange }) {
 	</label>`;
 }
 
-// Один вариант из нескольких: items — [ [ значение, подпись ], … ].
-function Segmented({ items, value, onChange, label }) {
+// Вариант по стрелке: → и ↓ — следующий, ← и ↑ — предыдущий, по кругу; другие клавиши — тот же.
+function step(items, value, key) {
+	const d = (key == 'ArrowRight' || key == 'ArrowDown') ? 1 : (key == 'ArrowLeft' || key == 'ArrowUp') ? -1 : 0;
+	const n = items.length;
+	if (!d || !n)
+		return value;
+	const i = items.findIndex(([ v ]) => v == value);
+	return items[(((i < 0) ? (d > 0 ? -1 : 0) : i) + d + n) % n][0];
+}
+
+// Один вариант из нескольких: items — [ [ значение, подпись ], … ]. Стрелки переключают вариант,
+// фокус идёт за ним (spec §4.3).
+function Segmented({ items, value, onChange, label, disabled }) {
 	const { html } = app.lib;
-	return html`<div class="seg" role="group" aria-label=${label}>
-		${items.map(([ v, l ]) => html`<button type="button" aria-pressed=${String(v == value)} onClick=${() => onChange(v)}>${l}</button>`)}
+	const onKey = (ev) => {
+		const v = step(items, value, ev.key);
+		if (disabled || v === value)
+			return;
+		ev.preventDefault();
+		onChange(v);
+		ev.currentTarget.querySelectorAll('button')[items.findIndex(([ x ]) => x == v)]?.focus();
+	};
+	return html`<div class="seg" role="group" aria-label=${label} onKeyDown=${onKey}>
+		${items.map(([ v, l ]) => html`<button type="button" aria-pressed=${String(v == value)} disabled=${!!disabled}
+			onClick=${() => onChange(v)}>${l}</button>`)}
 	</div>`;
+}
+
+// Фильтры-чипы: items — [ [ значение, подпись, число ], … ], нажат один.
+function Chips({ items, value, onChange, label }) {
+	const { html } = app.lib;
+	return html`<div class="chips" role="group" aria-label=${label}>
+		${items.map(([ v, l, n ]) => html`<button type="button" class="chip" aria-pressed=${String(v == value)}
+			onClick=${() => onChange(v)}>${l}${(n != null) ? html` <span class="n">${n}</span>` : ''}</button>`)}
+	</div>`;
+}
+
+// Действие — подписью его цвета (один на всех вкладках, spec §4.1).
+const TAG = { tunnel: 'tun', direct: 'dir', block: 'blk' };
+function ActionTag({ action }) {
+	const { html } = app.lib;
+	return html`<span class=${'tag ' + (TAG[action] || '')}>${common.ACTION_LABELS[action] || action}</span>`;
+}
+
+// Доля Туннеля и Напрямую одной полосой; без трафика — пустая.
+function ShareBar({ tunnel, direct }) {
+	const { html } = app.lib;
+	const all = (tunnel || 0) + (direct || 0);
+	const pct = (x) => all ? Math.round(100 * (x || 0) / all) : 0;
+	return html`<div class="bar" role="img" aria-label=${_('Tunnel %d%%, direct %d%%').format(pct(tunnel), pct(direct))}>
+		<span class="t" style=${{ width: pct(tunnel) + '%' }}></span><span class="d" style=${{ width: pct(direct) + '%' }}></span>
+	</div>`;
+}
+
+// «Название — значение»: rows — [ [ название, значение ], … ].
+function KV({ rows }) {
+	const { html } = app.lib;
+	return html`<dl class="kv">${rows.map(([ k, v ]) => html`<dt>${k}</dt><dd>${v}</dd>`)}</dl>`;
 }
 
 // Идёт загрузка: класс spinning ждёт tests/luci/browser.js.
@@ -88,4 +140,4 @@ function ChangesBar({ view }) {
 	</div>`;
 }
 
-return baseclass.extend({ Card, Stat, Badge, Dot, Icon, Switch, Segmented, Busy, Empty, Go, ChangesBar });
+return baseclass.extend({ Card, Stat, Badge, Dot, Icon, Switch, Segmented, Chips, ActionTag, ShareBar, KV, Busy, Empty, Go, ChangesBar, step });

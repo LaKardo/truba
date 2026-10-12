@@ -1110,3 +1110,9 @@ msgstr "Туннель ↓ %s ↑ %s · Напрямую ↓ %s ↑ %s · Вхо
 
 msgid "Inbound now: ↓ %s ↑ %s"
 msgstr "Входящие сейчас: ↓ %s ↑ %s"
+
+msgid "decided before the settings changed"
+msgstr "решено до смены настроек"
+
+msgid "Tunnel %d%%, direct %d%%"
+msgstr "Туннель %d%%, напрямую %d%%"
