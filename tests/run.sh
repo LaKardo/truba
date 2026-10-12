@@ -22,7 +22,7 @@ ROOT=$(cd "$(dirname "$0")/.." && pwd)
 IMG=immortalwrt/rootfs:x86-64-openwrt-25.12
 # Образ Роутера с зависимостями Трубы. Имя — по базовому образу и списку пакетов: другой
 # список или другая база — другой образ, а не старый из локального кэша.
-TEST_PKGS="mosdns ucode-mod-socket curl ip-full wireguard-tools"
+TEST_PKGS="mosdns ucode-mod-socket curl ip-full wireguard-tools luci-theme-argon"
 TEST_IMG=truba-test:$(printf '%s %s' "$IMG" "$TEST_PKGS" | sha256sum | cut -c1-12)
 # Браузер — по дайджесту: образ не меняется сам.
 BROWSER_IMG=zenika/alpine-chrome@sha256:ee10e24217aa27443e6b58da628f3b09ea9b814459915b8b62fe15a555f9692a

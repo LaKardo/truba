@@ -65,6 +65,9 @@ wait_for 20 wan_up
 sh /etc/uci-defaults/90-truba
 sh /etc/uci-defaults/luci-truba
 uci set truba.watchdog.enabled='0'; uci commit truba
+# Argon в образе стенда — для снимков в другой теме; при установке он делает себя темой по умолчанию.
+# Проверки идут в Bootstrap, другие темы browser.js включает сам.
+uci set luci.main.mediaurlbase='/luci-static/bootstrap'; uci commit luci
 /etc/init.d/firewall reload >/dev/null 2>&1 || true
 /etc/init.d/rpcd restart
 /etc/init.d/truba enable

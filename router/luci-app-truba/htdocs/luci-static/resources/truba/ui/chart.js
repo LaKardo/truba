@@ -67,7 +67,10 @@ function TimeChart({ series, data, from, to, height }) {
 				y: { range: (u, min, max) => [ 0, scaleTop(max || 0) ] }
 			},
 			axes: [
-				{ stroke: mu, font, grid: { show: false }, ticks: { show: false } },
+				// Время — часы и минуты, не чаще чем через 70 точек: подписи uPlot по умолчанию с секундами
+				// и датой для графика на 10 минут слишком часты.
+				{ stroke: mu, font, space: 70, grid: { show: false }, ticks: { show: false },
+					values: (u, vals) => vals.map((v) => new Date(v * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })) },
 				{ stroke: mu, font, size: 76, grid: { stroke: bd, width: 1, dash: [ 2, 4 ] }, ticks: { show: false },
 					values: (u, vals) => vals.map((v) => common.fmtRate(v)) }
 			],

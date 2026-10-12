@@ -382,9 +382,6 @@ msgstr "не работает с"
 msgid "no data"
 msgstr "нет данных"
 
-msgid "Inbound via Truba"
-msgstr "Входящие через Трубу"
-
 msgid "Error while applying rules: %s"
 msgstr "Ошибка при применении правил: %s"
 
@@ -598,26 +595,8 @@ msgstr "Пробросов нет."
 msgid "Replies always go back through the tunnel, even to Russian clients."
 msgstr "Ответы всегда возвращаются через Туннель, даже российским клиентам."
 
-msgid "Traffic of devices in the routed zones since %s. The router's own traffic (DNS, list downloads) is not included."
-msgstr "Трафик устройств из маршрутизируемых зон с %s. Собственный трафик Роутера (DNS, загрузка списков) не входит."
-
-msgid "Traffic of devices in the routed zones. The router's own traffic (DNS, list downloads) is not included."
-msgstr "Трафик устройств из маршрутизируемых зон. Собственный трафик Роутера (DNS, загрузка списков) не входит."
-
-msgid "To devices"
-msgstr "К устройствам"
-
-msgid "From devices"
-msgstr "От устройств"
-
 msgid "since the interface came up, including the router's own traffic"
 msgstr "с подъёма интерфейса, вместе с трафиком самого Роутера"
-
-msgid "New connections"
-msgstr "Новые соединения"
-
-msgid "Device traffic"
-msgstr "Трафик устройств"
 
 msgid "With header protection S1–S4 must be at least 12"
 msgstr "С защитой заголовков S1–S4 должны быть не меньше 12"
@@ -682,9 +661,6 @@ msgstr "Последняя проверка"
 msgid "failed — %s"
 msgstr "ошибка — %s"
 
-msgid "10 min ago"
-msgstr "10 мин назад"
-
 msgid "now"
 msgstr "сейчас"
 
@@ -696,9 +672,6 @@ msgstr "Потери"
 
 msgid "Interface traffic"
 msgstr "Трафик интерфейса"
-
-msgid "No warnings"
-msgstr "Без предупреждений"
 
 msgid "the watchdog is off"
 msgstr "Контроль Туннеля выключен"
@@ -748,9 +721,6 @@ msgstr "ни один STUN-сервер не ответил"
 msgid "Configured but missing from the current rule set (ignored): %s"
 msgstr "Заданы в настройках, но отсутствуют в текущем Наборе правил (пропускаются): %s"
 
-msgid "packets dropped"
-msgstr "пакетов отброшено"
-
 msgid "External address"
 msgstr "Внешний адрес"
 
@@ -787,14 +757,8 @@ msgstr "имя не найдено"
 msgid "no answer"
 msgstr "нет ответа"
 
-msgid "%s per min"
-msgstr "%s в мин"
-
 msgid "No outgoing connections yet."
 msgstr "Исходящих соединений пока нет."
-
-msgid "Outgoing connections: %d%% via tunnel, %d%% direct"
-msgstr "Исходящие соединения: %d%% через Туннель, %d%% напрямую"
 
 msgid "Nothing to show."
 msgstr "Показать нечего."
@@ -913,15 +877,6 @@ msgstr "Последняя проверка NAT нашла проблему."
 msgid "State and settings"
 msgstr "Состояние и настройки"
 
-msgid "Tunnel enabled"
-msgstr "Туннель включён"
-
-msgid "Mode and categories"
-msgstr "Режим и Категории"
-
-msgid "Routing enabled"
-msgstr "Маршрутизация включена"
-
 msgid "DNS and rule sets"
 msgstr "DNS и Наборы правил"
 
@@ -940,26 +895,11 @@ msgstr "крупные пакеты проходят"
 msgid "full-size packets are lost"
 msgstr "крупные пакеты теряются"
 
-msgid "on"
-msgstr "вкл"
-
-msgid "off"
-msgstr "выкл"
-
-msgid "Everything direct"
-msgstr "Всё напрямую"
-
 msgid "Selective"
 msgstr "Выборочный"
 
-msgid "inbound via the Truba IP keeps working"
-msgstr "входящие через IP Трубы работают"
-
 msgid "%d%% of new connections via tunnel"
 msgstr "%d%% новых соединений через Туннель"
-
-msgid "Zones: %s"
-msgstr "Зоны: %s"
 
 msgid "not used"
 msgstr "не используется"
@@ -1114,12 +1054,6 @@ msgstr "1 ч"
 msgid "24 h"
 msgstr "24 ч"
 
-msgid "1 h ago"
-msgstr "1 ч назад"
-
-msgid "24 h ago"
-msgstr "24 ч назад"
-
 msgid "Period"
 msgstr "Период"
 
@@ -1152,3 +1086,27 @@ msgstr "%d активно"
 
 msgid "block: %s"
 msgstr "блок: %s"
+
+msgid "Everything works"
+msgstr "Всё работает"
+
+msgid "Works · warnings: %d"
+msgstr "Работает · предупреждений: %d"
+
+msgid "Truba IP"
+msgstr "IP Трубы"
+
+msgid "No connection to the router"
+msgstr "Нет связи с Роутером"
+
+msgid "Speed"
+msgstr "Скорость"
+
+msgid "Since %s"
+msgstr "С %s"
+
+msgid "Tunnel ↓ %s ↑ %s · Direct ↓ %s ↑ %s · Inbound ↓ %s ↑ %s"
+msgstr "Туннель ↓ %s ↑ %s · Напрямую ↓ %s ↑ %s · Входящие ↓ %s ↑ %s"
+
+msgid "Inbound now: ↓ %s ↑ %s"
+msgstr "Входящие сейчас: ↓ %s ↑ %s"

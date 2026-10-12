@@ -170,6 +170,9 @@
 .card-h h3 { font-size: 14px; font-weight: 500; }
 .card-h .aside { color: var(--mu); font-size: 12px; }
 .card .sub { margin: 14px 0 6px; }
+/* Две части в одной карточке (DNS и входящие); на узком месте — одна под другой. */
+.cols { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px 24px; }
+@container (max-width: 600px) { .cols { grid-template-columns: minmax(0, 1fr); } }
 .lines > * + * { margin-top: 2px; }
 
 .stat { padding: 10px; border-radius: 8px; background: var(--chip); }
@@ -250,6 +253,8 @@
 .tr .uplot { font-family: inherit; }
 .tr .u-legend { margin-top: 4px; color: var(--mu); font-size: 11px; text-align: left; }
 .tr .u-legend .u-marker { width: 10px; height: 2px; border: 0 !important; }
+/* Время точки под курсором видно по оси — в легенде его не повторять. */
+.tr .u-legend .u-series:first-child { display: none; }
 .spark { display: block; }
 
 /* ---- Предупреждения ---- */
