@@ -1,0 +1,306 @@
+/* Труба: стиль A «Спокойный» (spec §4, ADR 0017). Файл грузится в Shadow DOM страницы — стили темы LuCI
+   сюда не попадают, а эти не выходят наружу. Светлый или тёмный набор выбирает app.js по яркости фона
+   темы (атрибут data-scheme). Цвета Действий и состояний — контраст не ниже 3:1 к --card, текст — 4,5:1
+   (проверяет tests/luci/static.mjs). Ширины — контейнерные: колонки зависят от места, которое LuCI
+   отдала странице, а не от ширины окна. */
+
+:host { display: block; }
+
+.tr {
+	--pg: #f4f5f7;
+	--card: #ffffff;
+	--bd: rgba(20, 25, 35, .09);
+	--tx: #1d2330;
+	--mu: #677083;
+	--chip: #eef0f3;
+	--tun: #2f6fcb;
+	--dir: #2a9a5e;
+	--blk: #d24a43;
+	--inb: #7a5fb8;
+	--warn: #b07800;
+}
+
+.tr[data-scheme="dark"] {
+	--pg: #14171c;
+	--card: #1c2027;
+	--bd: rgba(255, 255, 255, .08);
+	--tx: #e6e8ec;
+	--mu: #98a1ae;
+	--chip: #262b33;
+	--tun: #5d9bff;
+	--dir: #3fbf7f;
+	--blk: #f06a62;
+	--inb: #a98be6;
+	--warn: #e0a92a;
+}
+
+.tr {
+	container-type: inline-size;
+	box-sizing: border-box;
+	padding: 14px;
+	border-radius: 10px;
+	background: var(--pg);
+	color: var(--tx);
+	font: 13px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+	font-variant-numeric: tabular-nums;
+	-webkit-text-size-adjust: 100%;
+}
+.tr *, .tr *::before, .tr *::after { box-sizing: border-box; }
+.tr h2, .tr h3, .tr p { margin: 0; }
+.tr a { color: var(--tun); text-decoration: none; }
+.tr a:hover { text-decoration: underline; }
+.tr :focus-visible { outline: 2px solid var(--tun); outline-offset: 2px; border-radius: 4px; }
+
+.mu { color: var(--mu); font-size: 12px; }
+.num { font-variant-numeric: tabular-nums; }
+.big { font-size: 22px; font-weight: 500; line-height: 1.2; overflow-wrap: anywhere; }
+
+/* Уровень состояния: ok — цвет Напрямую, info — Туннель (как ACTION_LEVELS в common.js). */
+.ok { --c: var(--dir); }
+.warn { --c: var(--warn); }
+.err { --c: var(--blk); }
+.info { --c: var(--tun); }
+
+/* ---- Заголовок страницы ---- */
+.head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; margin: 0 0 12px; }
+.head h2 { font-size: 18px; font-weight: 500; }
+.head .mu { flex: 1 1 20em; }
+
+/* ---- Значки ---- */
+.badge {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	padding: 1px 8px;
+	border-radius: 999px;
+	font-size: 12px;
+	white-space: nowrap;
+	background: var(--chip);
+	color: var(--mu);
+}
+.badge.ok, .badge.warn, .badge.err, .badge.info {
+	background: color-mix(in srgb, var(--c) 16%, transparent);
+	color: var(--c);
+}
+.dot { width: 12px; height: 12px; flex: none; border-radius: 50%; background: var(--mu); box-shadow: 0 0 0 4px var(--chip); }
+.dot.ok, .dot.warn, .dot.err, .dot.info { background: var(--c); box-shadow: 0 0 0 4px color-mix(in srgb, var(--c) 18%, transparent); }
+.icon { width: 16px; height: 16px; flex: none; vertical-align: -3px; }
+
+/* ---- Строка состояния ---- */
+.hero {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 12px 20px;
+	margin: 0 0 12px;
+	padding: 14px;
+	border: 1px solid var(--bd);
+	border-radius: 10px;
+	background: var(--card);
+}
+.hero .st { display: flex; align-items: center; gap: 12px; flex: 1 1 260px; min-width: 0; }
+.hero h3 { font-size: 18px; font-weight: 500; }
+.hero h3::first-letter { text-transform: uppercase; }
+.hero .ip b { display: block; font-size: 15px; font-weight: 500; }
+.hero .tg { display: flex; flex-wrap: wrap; gap: 8px; }
+
+/* ---- Переключатель ---- */
+.sw {
+	display: inline-flex;
+	align-items: center;
+	gap: 8px;
+	min-height: 32px;
+	padding: 4px 10px;
+	border-radius: 8px;
+	background: var(--chip);
+	cursor: pointer;
+	white-space: nowrap;
+}
+.sw input {
+	appearance: none;
+	-webkit-appearance: none;
+	position: relative;
+	flex: none;
+	width: 28px;
+	height: 16px;
+	margin: 0;
+	border-radius: 9px;
+	background: color-mix(in srgb, var(--mu) 45%, transparent);
+	cursor: inherit;
+	transition: background .15s;
+}
+.sw input::after {
+	content: "";
+	position: absolute;
+	top: 2px;
+	left: 2px;
+	width: 12px;
+	height: 12px;
+	border-radius: 50%;
+	background: #fff;
+	transition: left .15s;
+}
+.sw input:checked { background: var(--tun); }
+.sw input:checked::after { left: 14px; }
+.sw input:disabled, .sw input:disabled + span { opacity: .5; cursor: not-allowed; }
+
+/* ---- Сетка карточек: 3 колонки, на меньшем месте 2 и 1 ---- */
+.grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.w2 { grid-column: span 2; }
+.w3 { grid-column: 1 / -1; }
+@container (max-width: 1000px) {
+	.grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+	.w2 { grid-column: 1 / -1; }
+}
+@container (max-width: 600px) {
+	.grid { grid-template-columns: minmax(0, 1fr); }
+	.w2, .w3 { grid-column: auto; }
+	.hero .tg { width: 100%; }
+	.hero .sw { flex: 1; }
+}
+
+.card {
+	min-width: 0;
+	/* Строки службы (неверное значение настройки, ошибка применения) бывают одним длинным словом:
+	   переносятся где угодно, а не растягивают страницу вбок на телефоне. */
+	overflow-wrap: anywhere;
+	padding: 14px;
+	border: 1px solid var(--bd);
+	border-radius: 10px;
+	background: var(--card);
+}
+.card-h { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 6px 10px; margin: 0 0 8px; }
+.card-h h3 { font-size: 14px; font-weight: 500; }
+.card-h .aside { color: var(--mu); font-size: 12px; }
+.card .sub { margin: 14px 0 6px; }
+/* Две части в одной карточке (DNS и входящие); на узком месте — одна под другой. */
+.cols { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px 24px; }
+@container (max-width: 600px) { .cols { grid-template-columns: minmax(0, 1fr); } }
+.lines > * + * { margin-top: 2px; }
+
+.stat { padding: 10px; border-radius: 8px; background: var(--chip); }
+.stat .mu { font-size: 11px; }
+.stat b { display: block; font-size: 16px; font-weight: 500; }
+.stat b.ok, .stat b.warn, .stat b.err, .stat b.info { color: var(--c); }
+
+.go { display: inline-flex; align-items: center; gap: 4px; margin-top: 10px; font-size: 12px; white-space: nowrap; }
+.go .icon { width: 14px; height: 14px; vertical-align: 0; }
+
+/* ---- Сегменты (срок графика) ---- */
+.seg { display: inline-flex; padding: 2px; border-radius: 8px; background: var(--chip); }
+.seg button {
+	min-height: 0;
+	margin: 0;
+	padding: 2px 9px;
+	border: 0;
+	border-radius: 6px;
+	background: transparent;
+	color: var(--mu);
+	font: inherit;
+	font-size: 12px;
+	cursor: pointer;
+}
+.seg button[aria-pressed="true"] { background: var(--card); color: var(--tx); box-shadow: 0 0 0 1px var(--bd); }
+
+/* ---- Кнопки ---- */
+.btn {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	min-height: 30px;
+	padding: 4px 12px;
+	border: 1px solid var(--bd);
+	border-radius: 7px;
+	background: transparent;
+	color: inherit;
+	font: inherit;
+	cursor: pointer;
+}
+.btn.p { border-color: var(--tun); background: var(--tun); color: #fff; }
+
+/* ---- Схема потоков ---- */
+.flow { display: block; width: 100%; height: auto; }
+.flow.narrow { display: none; max-width: 360px; margin: 0 auto; }
+@container (max-width: 600px) {
+	.flow.wide { display: none; }
+	.flow.narrow { display: block; }
+}
+.flow-cap { margin-top: 6px; text-align: center; }
+.flow text { font-family: inherit; fill: var(--tx); }
+.flow .t-mu { fill: var(--mu); }
+.flow .t-tun { fill: var(--tun); }
+.flow .t-dir { fill: var(--dir); }
+.flow .t-blk { fill: var(--blk); }
+.flow .node { fill: var(--chip); }
+.flow .router { fill: var(--card); stroke: var(--mu); stroke-opacity: .4; }
+.flow .n-tun { fill: var(--tun); fill-opacity: .14; }
+.flow .n-dir { fill: var(--dir); fill-opacity: .14; }
+.flow path { fill: none; stroke-linecap: round; }
+.flow .base { stroke-opacity: .3; }
+.flow .l-in { stroke: var(--mu); }
+.flow .l-tun { stroke: var(--tun); }
+.flow .l-dir { stroke: var(--dir); }
+.flow .an { stroke-dasharray: 2 16; stroke-width: 3; animation: truba-run 1.2s linear infinite; }
+.flow .an.l-in { stroke: var(--tx); stroke-opacity: .5; }
+@keyframes truba-run { to { stroke-dashoffset: -18; } }
+@media (prefers-reduced-motion: reduce) { .flow .an { animation: none; } }
+
+/* ---- Графики (uPlot) ---- */
+.chart { position: relative; }
+.chart.stale .u-over, .chart.stale canvas { opacity: .3; }
+.chart-note { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; padding: 0 16px; text-align: center; color: var(--mu); }
+.chart-axis { display: flex; justify-content: space-between; gap: 8px; color: var(--mu); font-size: 11px; }
+.legend { display: flex; flex-wrap: wrap; gap: 4px 12px; color: var(--mu); font-size: 11px; }
+.legend i { display: inline-block; width: 14px; margin-right: 5px; vertical-align: middle; border-top: 2px solid var(--c); }
+.legend i.dash { border-top-style: dashed; }
+.tr .uplot { font-family: inherit; }
+.tr .u-legend { margin-top: 4px; color: var(--mu); font-size: 11px; text-align: left; }
+.tr .u-legend .u-marker { width: 10px; height: 2px; border: 0 !important; }
+/* Время точки под курсором видно по оси — в легенде его не повторять. */
+.tr .u-legend .u-series:first-child { display: none; }
+.spark { display: block; }
+
+/* ---- Предупреждения ---- */
+.warns { margin: 0; padding: 0; list-style: none; }
+.warns li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; padding: 7px 0; border-top: 1px solid var(--bd); }
+.warns li:first-child { border-top: 0; padding-top: 0; }
+.warns li > span { flex: 1 1 24em; min-width: 0; }
+.warns .go { margin-top: 0; }
+
+/* ---- Панель несохранённых изменений ----
+   Прилипает к низу окна на любой ширине: переключатель обычно наверху страницы, и без этого
+   панель на ПК оказалась бы под краем экрана — изменение выглядело бы применённым. */
+.changes {
+	position: sticky;
+	bottom: 8px;
+	z-index: 1;
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 8px 10px;
+	margin: 12px 0 0;
+	padding: 10px 14px;
+	border-radius: 10px;
+	background: var(--tx);
+	color: var(--card);
+}
+.changes > span { flex: 1 1 12em; }
+.changes .btn { border-color: color-mix(in srgb, var(--card) 35%, transparent); }
+.changes .btn.p { border-color: var(--tun); }
+
+/* ---- Пусто и загрузка ---- */
+.empty { color: var(--mu); font-style: italic; }
+.spinning { color: var(--mu); font-style: normal; }
+.spinning::before {
+	content: "";
+	display: inline-block;
+	width: 1em;
+	height: 1em;
+	margin-right: .5em;
+	vertical-align: -.15em;
+	border: 2px solid var(--mu);
+	border-top-color: transparent;
+	border-radius: 50%;
+	animation: truba-spin 1s linear infinite;
+}
+@keyframes truba-spin { to { transform: rotate(360deg); } }

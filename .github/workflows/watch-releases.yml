@@ -38,6 +38,24 @@ jobs:
           echo "Нет сборки для: ${missing:-—}"
           echo "missing=$missing" >> "$GITHUB_OUTPUT"
 
+  # Закреплённые библиотеки интерфейса (lib/VERSIONS, ADR 0017): вышла новая версия — предупреждение
+  # в сводке прогона. Обновляет человек: версия в VERSIONS, node tests/luci/vendor.mjs, проверки.
+  libs:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - run: |
+          set -euo pipefail
+          grep -v -e '^#' -e '^[[:space:]]*$' router/luci-app-truba/htdocs/luci-static/resources/truba/lib/VERSIONS \
+            | while read -r file pkg path sum; do
+                name=${pkg%@*} have=${pkg##*@}
+                latest=$(npm view "$name" version)
+                if [ "$latest" != "$have" ]; then
+                  echo "::warning title=Библиотека интерфейса::$name $have → $latest ($file)"
+                  echo "- $name: $have → $latest ($file)" >> "$GITHUB_STEP_SUMMARY"
+                fi
+              done
+
   build:
     needs: check
     if: needs.check.outputs.missing != ''

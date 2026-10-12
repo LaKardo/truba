@@ -2,16 +2,22 @@
 // пакета truba и в ACL, в представлениях нет копий значений службы, зависимость от truba, цвет рукопожатия.
 //   node tests/luci/static.mjs           — проверить
 //   node tests/luci/static.mjs --pot     — напечатать шаблон .pot (po/templates/truba.pot)
-import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { tmpdir } from 'node:os';
 import { join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = fileURLToPath(new URL('../../router/luci-app-truba/', import.meta.url));
+// Закреплённые копии библиотек (ES-модули): не модули LuCI и не наш код — их сверяет блок «lib» ниже.
+const libDir = join(root, 'htdocs/luci-static/resources/truba/lib');
 const files = [];
 const rel = (f) => relative(root, f).split(sep).join('/');
 (function walk(d) {
 	for (const f of readdirSync(d)) {
 		const p = join(d, f);
+		if (p === libDir) continue;
 		if (statSync(p).isDirectory()) walk(p);
 		else if (p.endsWith('.js')) files.push(p);
 	}
@@ -48,6 +54,39 @@ if (process.argv.includes('--pot')) {
 	console.log('msgid ""\nmsgstr "Content-Type: text/plain; charset=UTF-8"\n');
 	for (const [s, f] of strings) console.log(`#: ${f}\nmsgid "${esc(s)}"\nmsgstr ""\n`);
 	process.exit(0);
+}
+
+// Закреплённые библиотеки (ADR 0017): каждый файл lib/ записан в VERSIONS, совпадает с sha256 оттуда и
+// разбирается как ES-модуль; лицензии лежат рядом. Пакет ставит их как есть (LUCI_MINIFY_JS:=0).
+const LICENSES = [ 'htm.txt', 'preact.txt', 'uplot.txt', 'lucide.txt' ];
+const versionsFile = join(libDir, 'VERSIONS');
+if (!existsSync(versionsFile)) {
+	console.log('FAIL  lib/VERSIONS: нет файла');
+	fails++;
+} else {
+	const listed = new Set();
+	for (const line of readFileSync(versionsFile, 'utf8').split('\n')) {
+		if (!line.trim() || line.startsWith('#'))
+			continue;
+		const [ file, pkg, path, sum ] = line.trim().split(/\s+/);
+		listed.add(file);
+		const p = join(libDir, file);
+		if (!existsSync(p)) { console.log(`FAIL  lib/${file}: нет файла (${pkg} ${path})`); fails++; continue; }
+		const got = createHash('sha256').update(readFileSync(p)).digest('hex');
+		if (got !== sum) { console.log(`FAIL  lib/${file}: sha256 ${got}, в VERSIONS ${sum || '—'}`); fails++; }
+		if (file.endsWith('.js')) {
+			// node --check разбирает ES-модуль только по расширению .mjs.
+			const tmp = mkdtempSync(join(tmpdir(), 'truba-'));
+			writeFileSync(join(tmp, 'm.mjs'), readFileSync(p));
+			const r = spawnSync(process.execPath, [ '--check', join(tmp, 'm.mjs') ], { encoding: 'utf8' });
+			rmSync(tmp, { recursive: true, force: true });
+			if (r.status !== 0) { console.log(`FAIL  lib/${file}: не разбирается как ES-модуль: ${r.stderr.split('\n').find((x) => x.trim()) || r.status}`); fails++; }
+		}
+	}
+	for (const f of readdirSync(libDir))
+		if (f !== 'VERSIONS' && f !== 'LICENSES' && !listed.has(f)) { console.log(`FAIL  lib/${f}: нет в VERSIONS`); fails++; }
+	for (const l of LICENSES)
+		if (!existsSync(join(libDir, 'LICENSES', l))) { console.log(`FAIL  lib/LICENSES/${l}: нет файла`); fails++; }
 }
 
 // Вызовы ubus из интерфейса: каждый метод truba есть в rpcd-плагине и в ACL. Иначе LuCI
@@ -125,6 +164,110 @@ for (const [ args, want ] of [
 ]) {
 	const got = common.handshakeLevel?.(...args);
 	if (got !== want) { console.log(`FAIL  handshakeLevel(${JSON.stringify(args)}) = ${got}, ждали ${want}`); fails++; }
+}
+
+// ---- Модули интерфейса (truba/ui, ADR 0017): чистые функции — в Node с заглушками LuCI ----
+
+const check = (ok, name) => { if (!ok) { console.log(`FAIL  ${name}`); fails++; } };
+// Модуль LuCI: строки 'require x as y' — просто выражения, зависимости приходят параметрами функции.
+function loadModule(path, deps) {
+	try {
+		const src = readFileSync(join(root, 'htdocs/luci-static/resources', path), 'utf8');
+		return new Function(...Object.keys(deps), src)(...Object.values(deps));
+	} catch (e) {
+		console.log(`FAIL  ${path} не выполнился с заглушками: ${e.message}`);
+		fails++;
+		return null;
+	}
+}
+const baseclass = { extend: (x) => x };
+
+// app: тема по яркости фона, хранилище, опрос, счёт изменений UCI.
+let pollFn = null;
+const uciStub = { state: {}, set() {}, unset() {} };
+const app = loadModule('truba/ui/app.js', {
+	baseclass, uci: uciStub, poll: { add(fn) { pollFn = fn; } }, L: { resource: (p) => p, env: {} }, _: (s) => s
+});
+if (app) {
+	const near = (a, b) => Math.abs(a - b) < 1e-3;
+	check(near(app.luminance('rgb(255, 255, 255)'), 1), 'app.luminance: белый = 1');
+	check(app.luminance('rgba(0, 0, 0, 0)') === null && app.luminance('transparent') === null, 'app.luminance: прозрачный — null');
+	check(app.schemeFrom([ 'rgba(0, 0, 0, 0)', 'rgb(255, 255, 255)' ], true) === 'light', 'app.schemeFrom: прозрачный предок пропускается');
+	check(app.schemeFrom([ 'rgb(169, 169, 169)' ], false) === 'dark', 'app.schemeFrom: порог 0,4 — 169 тёмный');
+	check(app.schemeFrom([ 'rgb(170, 170, 170)' ], true) === 'light', 'app.schemeFrom: порог 0,4 — 170 светлый');
+	check(app.schemeFrom([ 'rgba(0, 0, 0, 0)' ], true) === 'dark' && app.schemeFrom([], false) === 'light',
+		'app.schemeFrom: без фона — по prefers-color-scheme');
+	const s = app.store({ a: 1 });
+	let seen = null;
+	const off = s.on((st) => seen = st.b);
+	s.set({ b: 2 });
+	check(s.get().a === 1 && seen === 2, 'app.store: set сливает и оповещает');
+	off();
+	s.set({ b: 3 });
+	check(seen === 2, 'app.store: отписка');
+	app.poll(s, () => Promise.resolve({ c: 4 }), 5);
+	await pollFn?.();
+	check(s.get().c === 4 && s.get().offline === false, 'app.poll: успех — данные и offline=false');
+	app.poll(s, () => Promise.reject(new Error('rpc')), 5);
+	await pollFn?.();
+	check(s.get().offline === true && s.get().c === 4, 'app.poll: ошибка — данные остаются, offline=true');
+	uciStub.state = { creates: {}, changes: { truba: { main: { routing: '0' } }, network: { awg0: { disabled: '1' } } }, deletes: {}, reorder: {} };
+	check(app.changeCount() === 2, 'app.changeCount: две изменённые опции');
+	uciStub.state = { creates: { truba: { cfg01: {} } }, changes: {}, deletes: { firewall: { r1: true } }, reorder: { truba: true } };
+	check(app.changeCount() === 3, 'app.changeCount: новая секция, удалённая секция, порядок');
+}
+
+// Стиль A (spec §4.1): цвета Действий и состояний читаются на карточке (контраст не ниже 3:1), текст —
+// не ниже 4,5:1, в светлом и тёмном наборе. Токены — в блоках «.tr {» и «.tr[data-scheme="dark"] {».
+const stylePath = join(root, 'htdocs/luci-static/resources/truba/ui/style.css');
+if (!existsSync(stylePath)) {
+	console.log('FAIL  truba/ui/style.css: нет файла');
+	fails++;
+} else if (app) {
+	const css = readFileSync(stylePath, 'utf8');
+	const hex = (h) => `rgb(${parseInt(h.slice(1, 3), 16)}, ${parseInt(h.slice(3, 5), 16)}, ${parseInt(h.slice(5, 7), 16)})`;
+	for (const [ name, sel ] of [ [ 'светлый', '.tr {' ], [ 'тёмный', '.tr[data-scheme="dark"] {' ] ]) {
+		const at = css.indexOf(sel);
+		const block = at < 0 ? '' : css.slice(at, css.indexOf('}', at));
+		const tok = Object.fromEntries([ ...block.matchAll(/(--[\w-]+):\s*(#[0-9a-fA-F]{6})\b/g) ].map((m) => [ m[1], m[2] ]));
+		const ratio = (a, b) => {
+			const [ x, y ] = [ app.luminance(hex(a)), app.luminance(hex(b)) ].sort((p, q) => q - p);
+			return (x + 0.05) / (y + 0.05);
+		};
+		for (const [ list, min ] of [ [ [ '--tun', '--dir', '--blk', '--inb', '--warn' ], 3 ], [ [ '--tx', '--mu' ], 4.5 ] ])
+			for (const t of list) {
+				if (!tok[t] || !tok['--card']) { console.log(`FAIL  style.css (${name}): нет ${t} или --card`); fails++; continue; }
+				const r = ratio(tok[t], tok['--card']);
+				check(r >= min, `style.css (${name}): контраст ${t} ${tok[t]} к --card ${tok['--card']} = ${r.toFixed(2)}, нужно ≥ ${min}`);
+			}
+	}
+}
+
+// Иконки Lucide: у каждой, что берут компоненты, есть разметка.
+const icons = loadModule('truba/ui/icons.js', { baseclass });
+if (icons)
+	for (const n of [ 'circle-check', 'triangle-alert', 'circle-x', 'arrow-right', 'wifi-off', 'pencil' ])
+		check(typeof icons[n] === 'string' && /<(path|circle|line|polyline|rect)/.test(icons[n]), `icons.js: иконка ${n}`);
+
+// Верх шкалы графика скорости и толщина веток схемы потоков.
+const chart = loadModule('truba/ui/chart.js', { baseclass, app, common });
+if (chart) {
+	check(chart.scaleTop(0) === 125000, 'chart.scaleTop: не меньше 1 Мбит/с');
+	check(chart.scaleTop(130000) === 250000, 'chart.scaleTop: 1,04 Мбит/с → 2');
+	check(chart.scaleTop(600000) === 625000, 'chart.scaleTop: 4,8 Мбит/с → 5');
+	check(chart.scaleTop(1.3e6) === 2.5e6, 'chart.scaleTop: 10,4 Мбит/с → 20');
+	// Перерыв в записи (служба стояла) — разрыв линии, а не прямая через него: в поминутных средних
+	// отметки разрыва нет, есть только пропуск по времени.
+	const g = chart.gaps?.([ [ 0, 1 ], [ 5, 2 ], [ 100, 3 ] ], 5);
+	check(JSON.stringify(g) === '[[0,1],[5,2],[10],[100,3]]', 'chart.gaps: пропуск дольше трёх шагов — строка-разрыв', JSON.stringify(g));
+	check(JSON.stringify(chart.gaps?.([ [ 0, 1 ], [ 5, 2 ], [ 15, 3 ] ], 5)) === '[[0,1],[5,2],[15,3]]', 'chart.gaps: три шага — без разрыва');
+	check(JSON.stringify(chart.gaps?.([], 5)) === '[]', 'chart.gaps: пустая история');
+}
+const flow = loadModule('truba/ui/flow.js', { baseclass, app, common });
+if (flow) {
+	check(flow.width(null, 1) === 0 && flow.width(0, 1) === 0, 'flow.width: нет трафика — 0');
+	check(flow.width(100, 100) === 14 && flow.width(400, 100) === 14, 'flow.width: потолок 14');
+	check(flow.width(25, 100) === 8, 'flow.width: корень доли');
 }
 
 const po = readFileSync(join(root, 'po/ru/truba.po'), 'utf8');

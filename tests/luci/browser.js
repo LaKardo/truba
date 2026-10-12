@@ -18,11 +18,31 @@ const result = (ok, name, detail) => {
 	console.log(`${ok ? 'ok  ' : 'FAIL'}  ${name}${detail ? ' — ' + detail : ''}`);
 };
 
-// Страница построена: данные пришли, индикаторов загрузки нет.
+// Страница построена: данные пришли, индикаторов загрузки нет. Вкладки на новом интерфейсе (ADR 0017)
+// рисуются в Shadow DOM корня .truba-root — там свой .tr и свои индикаторы.
 async function settled(page) {
-	await page.waitForFunction(() => document.querySelector('#maincontent') && !document.querySelector('#maincontent .spinning'),
-		{ timeout: 10000 }).catch(() => {});
+	await page.waitForFunction(() => {
+		const main = document.querySelector('#maincontent');
+		if (!main || main.querySelector('.spinning'))
+			return false;
+		const root = document.querySelector('.truba-root')?.shadowRoot;
+		return !document.querySelector('.truba-root') || (root?.querySelector('.tr') && !root.querySelector('.spinning'));
+	}, { timeout: 10000 }).catch(() => {});
 }
+
+// Текст вкладки вместе с Shadow DOM: innerText хозяина его не включает.
+function pageText(page) {
+	return page.evaluate(() => [
+		(document.querySelector('#view') || document.querySelector('#maincontent'))?.innerText || '',
+		...[ ...document.querySelectorAll('.truba-root') ].map((r) => r.shadowRoot?.querySelector('.tr')?.innerText || '')
+	].join('\n'));
+}
+
+// Элемент внутри Shadow DOM страницы.
+function shadowSel(page, sel) {
+	return page.evaluateHandle((sel) => document.querySelector('.truba-root')?.shadowRoot?.querySelector(sel), sel);
+}
+const shadowHas = (page, sel) => page.evaluate((sel) => !!document.querySelector('.truba-root')?.shadowRoot?.querySelector(sel), sel);
 
 // Вызов ubus от имени сессии LuCI — прямо через /ubus, мимо страницы: она перезагружается
 // после применения, а вторая вкладка в фоне у Chromium не работает.
@@ -54,6 +74,11 @@ async function applied(prevTime, cond) {
 async function saveApply(page) {
 	await page.evaluate(() => [ ...document.querySelectorAll('.cbi-page-actions *') ]
 		.find((x) => x.childElementCount == 0 && x.textContent.trim() == 'Save & Apply').click());
+	await waitApply(page);
+}
+
+// Применение уже запущено (кнопкой LuCI или «Применить» панели изменений) — дождаться его конца.
+async function waitApply(page) {
 	const overlay = () => page.evaluate(() => document.body.classList.contains('modal-overlay-active')).catch(() => true);
 	for (let i = 0; i < 10 && !await overlay(); i++)
 		await sleep(200);
@@ -94,11 +119,20 @@ async function saveApply(page) {
 	await Promise.all([ page.waitForNavigation({ waitUntil: 'networkidle2' }), page.keyboard.press('Enter') ]);
 	session = await page.evaluate(() => ({ sid: L.env.sessionid, path: L.env.ubuspath }));
 
+	// «Обзор» на новом интерфейсе — сразу после старта службы, пока история скорости почти пуста:
+	// пустые и единичные ряды uPlot не должны давать ошибок JS (их собирает page.on выше).
+	await page.goto(url('overview'), { waitUntil: 'networkidle2' });
+	await settled(page);
+	result(await shadowHas(page, '.tr[data-scheme]'), '«Обзор»: страница в Shadow DOM, режим выбран');
+	result(await shadowHas(page, 'svg.flow'), '«Обзор»: схема потоков');
+	result(await shadowHas(page, 'canvas'), '«Обзор»: график uPlot');
+	result(/Where traffic goes/.test(await pageText(page)), '«Обзор»: карточка «Куда идёт трафик»');
+
 	for (const t of tabs) {
 		await page.goto(url(t), { waitUntil: 'networkidle2' });
 		await settled(page);
-		// #view — сама вкладка, без общих баннеров LuCI (например, «No password set»).
-		const text = await page.evaluate(() => (document.querySelector('#view') || document.querySelector('#maincontent')).innerText);
+		// #view — сама вкладка, без общих баннеров LuCI (например, «No password set»), плюс Shadow DOM.
+		const text = await pageText(page);
 		result(!/Unable to load|TypeError|ReferenceError|Error: |Authorization Required/.test(text), `вкладка ${t}`,
 			text.replace(/\s+/g, ' ').slice(0, 100));
 		fs.writeFileSync(`${out}/${t}.txt`, text);
@@ -154,16 +188,109 @@ async function saveApply(page) {
 		(await ubus('truba', 'check', { target: '8.8.8.8', mac: '02:11:22:33:44:55' })).reason == 'device'),
 		'«Сохранить и применить»: Политика устройства → действует');
 
-	// 3. Главный переключатель «Маршрутизация» на «Обзоре» — выкл.
+	// 3. Переключатель «Маршрутизация» в строке состояния «Обзора» — выкл, применение — панелью изменений.
 	t0 = await time();
 	await page.goto(url('overview'), { waitUntil: 'networkidle2' });
 	await settled(page);
-	// Переключатель плитки — по подписи: у него нет id, а порядок плиток может меняться.
-	await page.evaluate(() => [ ...document.querySelectorAll('label.truba-switch') ]
-		.find((l) => l.textContent.trim() == 'Routing enabled').querySelector('input').click());
-	await saveApply(page);
+	await (await shadowSel(page, 'input[data-opt="truba.main.routing"]')).click();
+	const bar = await page.waitForFunction(() => document.querySelector('.truba-root')?.shadowRoot?.querySelector('.changes')?.innerText,
+		{ timeout: 5000 }).then((h) => h.jsonValue()).catch(() => '');
+	result(/Unapplied changes: 1/.test(bar), 'панель изменений: одно несохранённое изменение', bar.replace(/\s+/g, ' '));
+	// Переключатель — в строке состояния наверху: панель должна быть видна сразу, без прокрутки.
+	const inView = await page.evaluate(() => {
+		const r = document.querySelector('.truba-root').shadowRoot.querySelector('.changes').getBoundingClientRect();
+		return r.top >= 0 && r.bottom <= window.innerHeight;
+	});
+	result(inView, 'панель изменений на 1280×900 — в пределах экрана');
+	await (await shadowSel(page, '.changes [data-act="apply"]')).click();
+	await waitApply(page);
 	result(await applied(t0, (st) => st.routing === false && st.mosdns === false),
-		'«Сохранить и применить»: Маршрутизация выкл → mosdns остановлен');
+		'«Применить» панели изменений: Маршрутизация выкл → mosdns остановлен');
+
+	// Темы LuCI: режим страницы — по яркости фона темы; снимки на ПК и телефоне. На 375 точках нет
+	// горизонтальной прокрутки ни у страницы, ни у корня Трубы.
+	const theme = async (path) => {
+		await ubus('uci', 'set', { config: 'luci', section: 'main', values: { mediaurlbase: path } });
+		await ubus('uci', 'commit', { config: 'luci' });
+	};
+	const themes = [
+		[ 'bootstrap-dark', null, 'dark' ],
+		[ 'bootstrap-light', null, 'light' ],
+		[ 'bootstrap', 'dark', 'dark' ]   // «авто»: режим по системной настройке
+	];
+	const installed = Object.values(await ubus('uci', 'get', { config: 'luci', section: 'themes' }).then((r) => r.values).catch(() => ({})));
+	if (installed.includes('/luci-static/argon'))
+		themes.push([ 'argon', null, null ]);
+	for (const [ name, prefers, want ] of themes) {
+		await theme('/luci-static/' + name);
+		await page.emulateMediaFeatures([ { name: 'prefers-color-scheme', value: prefers || 'light' } ]);
+		for (const w of [ 1280, 375 ]) {
+			await page.setViewport({ width: w, height: w > 600 ? 900 : 812 });
+			await page.goto(url('overview'), { waitUntil: 'networkidle2' });
+			await settled(page);
+			await sleep(300);   // режим выбирается после вставки страницы в документ
+			const got = await page.evaluate(() => document.querySelector('.truba-root')?.shadowRoot?.querySelector('.tr')?.dataset.scheme);
+			if (want)
+				result(got === want, `тема ${name} ${w}: режим ${want}`, got);
+			if (w == 375) {
+				const o = await page.evaluate(() => {
+					const tr = document.querySelector('.truba-root')?.shadowRoot?.querySelector('.tr');
+					return { doc: document.documentElement.scrollWidth, win: window.innerWidth, tr: tr ? tr.scrollWidth - tr.clientWidth : 0 };
+				});
+				result(o.doc <= o.win && o.tr <= 0, `тема ${name} 375: без горизонтальной прокрутки`, JSON.stringify(o));
+			}
+			await page.screenshot({ path: `${out}/overview-${name}-${w}.png`, fullPage: true });
+		}
+	}
+	await theme('/luci-static/bootstrap');
+	await page.emulateMediaFeatures([ { name: 'prefers-color-scheme', value: 'light' } ]);
+
+	// Длинное неверное значение настройки попадает в предупреждение как есть — и на телефоне не должно
+	// растягивать страницу вбок. Порт DNS из 79 цифр и буквы служба пропускает как неверный (ADR 0015).
+	t0 = await time();
+	const prevPort = await ubus('uci', 'get', { config: 'truba', section: 'dns', option: 'port' }).then((r) => r.value).catch(() => null);
+	const setPort = async (v) => {
+		if (v == null)
+			await ubus('uci', 'delete', { config: 'truba', section: 'dns', option: 'port' });
+		else
+			await ubus('uci', 'set', { config: 'truba', section: 'dns', values: { port: v } });
+		await ubus('uci', 'commit', { config: 'truba' });
+	};
+	await setPort('9'.repeat(79) + 'x');
+	result(await applied(t0, (st) => (st.applied.invalid || []).some((x) => x.key == 'dns.port')), 'неверный порт DNS — в предупреждениях');
+	await page.setViewport({ width: 375, height: 812 });
+	await page.goto(url('overview'), { waitUntil: 'networkidle2' });
+	await settled(page);
+	const wide = await page.evaluate(() => {
+		const tr = document.querySelector('.truba-root')?.shadowRoot?.querySelector('.tr');
+		return { doc: document.documentElement.scrollWidth, win: window.innerWidth, tr: tr ? tr.scrollWidth - tr.clientWidth : 0 };
+	});
+	result(wide.doc <= wide.win && wide.tr <= 0, 'длинное значение в предупреждении: без горизонтальной прокрутки на 375', JSON.stringify(wide));
+	await page.screenshot({ path: `${out}/overview-long-warning-375.png`, fullPage: true });
+	t0 = await time();
+	await setPort(prevPort);
+	result(await applied(t0, (st) => !(st.applied.invalid || []).length), 'порт DNS восстановлен');
+	await page.setViewport({ width: 1280, height: 900 });
+
+	// Служба остановлена: строка состояния и график говорят об этом, ошибок JS нет. Затем — запуск.
+	await ubus('rc', 'init', { name: 'truba', action: 'stop' });
+	await page.goto(url('overview'), { waitUntil: 'networkidle2' });
+	await settled(page);
+	// Последняя точка истории считается свежей ещё 15 с — «Обзор» опрашивает службу раз в 5 с.
+	const stopped = await page.waitForFunction(() => {
+		const t = document.querySelector('.truba-root')?.shadowRoot?.querySelector('.tr')?.innerText || '';
+		return /service stopped/i.test(t) && /Speed is not being recorded/.test(t);
+	}, { timeout: 40000 }).then(() => true).catch(() => false);
+	result(stopped, '«Обзор»: служба остановлена — строка состояния и график');
+	await page.screenshot({ path: `${out}/overview-stopped.png`, fullPage: true });
+	await ubus('rc', 'init', { name: 'truba', action: 'start' });
+	let up = false;
+	for (let i = 0; i < 60 && !up; i++) {
+		up = (await ubus('truba', 'status').catch(() => ({}))).service === true;
+		if (!up)
+			await sleep(500);
+	}
+	result(up, 'служба снова запущена');
 
 	for (const e of errors) console.log('JSERR ' + e);
 	console.log(errors.length || fails ? `${errors.length} ошибок JS/HTTP, ${fails} провалов` : 'ALL OK');

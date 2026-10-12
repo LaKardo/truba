@@ -205,6 +205,38 @@ msgstr ""
 msgid "Diagnostics"
 msgstr ""
 
+#: htdocs/luci-static/resources/truba/ui/flow.js
+msgid "Where traffic goes"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/ui/flow.js
+msgid "Devices"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/ui/flow.js
+msgid "%d active"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/ui/flow.js
+msgid "Router"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/ui/flow.js
+msgid "block: %s"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/ui/kit.js
+msgid "Unapplied changes: %d"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/ui/kit.js
+msgid "Reset"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/ui/kit.js
+msgid "Apply"
+msgstr ""
+
 #: htdocs/luci-static/resources/view/truba/diagnostics.js
 msgid "Nothing to show."
 msgstr ""
@@ -830,35 +862,11 @@ msgid "10 min"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/overview.js
-msgid "10 min ago"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/overview.js
 msgid "1 h"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/overview.js
-msgid "1 h ago"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/overview.js
 msgid "24 h"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/overview.js
-msgid "24 h ago"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/overview.js
-msgid "Period"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/overview.js
-msgid "now"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/overview.js
-msgid "Speed is not being recorded: the Truba service is not running."
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/overview.js
@@ -906,63 +914,11 @@ msgid "The last rule set check failed: %s"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/overview.js
-msgid "State and settings"
+msgid "Works · warnings: %d"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/overview.js
-msgid "Tunnel enabled"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/overview.js
-msgid "Mode and categories"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/overview.js
-msgid "Routing enabled"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/overview.js
-msgid "DNS and rule sets"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/overview.js
-msgid "NAT and port forwards"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/overview.js
-msgid "packets dropped"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/overview.js
-msgid "Home network through your own VPS: the VPS gives the router its public IP, the router decides what goes through the tunnel."
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/overview.js
-msgid "Warnings"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/overview.js
-msgid "Device traffic"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/overview.js
-msgid "To devices"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/overview.js
-msgid "From devices"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/overview.js
-msgid "New connections"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/overview.js
-msgid "Inbound via Truba"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/overview.js
-msgid "No warnings"
+msgid "Everything works"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/overview.js
@@ -974,35 +930,11 @@ msgid "loss %d%%"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/overview.js
-msgid "full-size packets get through"
+msgid "Truba IP"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/overview.js
-msgid "full-size packets are lost"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/overview.js
-msgid "on"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/overview.js
-msgid "off"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/overview.js
-msgid "Everything direct"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/overview.js
-msgid "Selective"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/overview.js
-msgid "All via tunnel"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/overview.js
-msgid "inbound via the Truba IP keeps working"
+msgid "now"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/overview.js
@@ -1014,7 +946,35 @@ msgid "%d%% of new connections via tunnel"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/overview.js
-msgid "Zones: %s"
+msgid "full-size packets get through"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/overview.js
+msgid "full-size packets are lost"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/overview.js
+msgid "State and settings"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/overview.js
+msgid "Speed"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/overview.js
+msgid "Period"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/overview.js
+msgid "Speed is not being recorded: the Truba service is not running."
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/overview.js
+msgid "Since %s"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/overview.js
+msgid "Tunnel ↓ %s ↑ %s · Direct ↓ %s ↑ %s · Inbound ↓ %s ↑ %s"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/overview.js
@@ -1034,6 +994,14 @@ msgid "in order"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/overview.js
+msgid "NAT not checked"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/overview.js
+msgid "NAT problem"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/overview.js
 msgid "Lists from %s"
 msgstr ""
 
@@ -1050,11 +1018,7 @@ msgid "update in progress"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/overview.js
-msgid "NAT not checked"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/overview.js
-msgid "NAT problem"
+msgid "DNS and rule sets"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/overview.js
@@ -1074,19 +1038,23 @@ msgid "manual forwards: %d"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/overview.js
-msgid "Traffic of devices in the routed zones since %s. The router's own traffic (DNS, list downloads) is not included."
+msgid "Inbound now: ↓ %s ↑ %s"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/overview.js
-msgid "Traffic of devices in the routed zones. The router's own traffic (DNS, list downloads) is not included."
+msgid "NAT and port forwards"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/overview.js
-msgid "%s per min"
+msgid "Warnings"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/overview.js
-msgid "Outgoing connections: %d%% via tunnel, %d%% direct"
+msgid "Home network through your own VPS: the VPS gives the router its public IP, the router decides what goes through the tunnel."
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/overview.js
+msgid "No connection to the router"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/routing.js
@@ -1115,6 +1083,14 @@ msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/routing.js
 msgid "What happens to traffic that no category with an explicit action matched. «All via tunnel» — everything except categories with action Direct (by default, Russian traffic). «Selective» — only categories with action Tunnel go through the tunnel."
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/routing.js
+msgid "All via tunnel"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/routing.js
+msgid "Selective"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/routing.js
