@@ -9,7 +9,7 @@ const fs = require('fs');
 const base = process.argv[2];
 const out = process.argv[3] || '/out';
 const url = (p) => `${base}/cgi-bin/luci/admin/services/truba/${p}`;
-const tabs = [ 'overview', 'devices', 'tunnel', 'routing', 'dns', 'inbound', 'diagnostics' ];
+const tabs = [ 'overview', 'devices', 'rules', 'tunnel', 'dns', 'inbound', 'diagnostics' ];
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 let fails = 0;
@@ -67,17 +67,9 @@ async function applied(prevTime, cond) {
 	return false;
 }
 
-// «Save & Apply» — составная кнопка LuCI (ComboButton): кликаем по её видимому пункту и ждём,
-// пока LuCI доведёт применение до конца. Оно идёт с откатом: окно состояния висит, пока LuCI не
-// подтвердит изменения. Уйти раньше — значит получить откат, а на следующей странице окно
-// ожидания поверх своих окон.
-async function saveApply(page) {
-	await page.evaluate(() => [ ...document.querySelectorAll('.cbi-page-actions *') ]
-		.find((x) => x.childElementCount == 0 && x.textContent.trim() == 'Save & Apply').click());
-	await waitApply(page);
-}
-
-// Применение уже запущено (кнопкой LuCI или «Применить» панели изменений) — дождаться его конца.
+// Применение запущено («Применить» панели изменений) — дождаться его конца. Оно идёт с откатом: окно
+// состояния висит, пока LuCI не подтвердит изменения. Уйти раньше — значит получить откат, а на следующей
+// странице окно ожидания поверх своих окон.
 async function waitApply(page) {
 	const overlay = () => page.evaluate(() => document.body.classList.contains('modal-overlay-active')).catch(() => true);
 	for (let i = 0; i < 10 && !await overlay(); i++)
@@ -156,21 +148,42 @@ async function waitApply(page) {
 		}
 	}
 
-	// «Проверить домен/IP»: IP из geoip:ru.
-	await page.type('input.cbi-input-text', '77.88.8.8');
+	const el = async (sel) => (await shadowSel(page, sel)).asElement();
+	const tap = async (sel) => { const e = await el(sel); if (e) await e.click(); return !!e; };
+	const clickIn = (sel, re) => page.evaluate((sel, re) => [ ...document.querySelector('.truba-root').shadowRoot.querySelectorAll(sel) ]
+		.find((b) => new RegExp(re).test(b.textContent))?.click(), sel, re);
+	// Нажатый вариант группы сегментов.
+	const pressed = (sel) => page.evaluate((sel) => [ ...document.querySelector('.truba-root').shadowRoot.querySelectorAll(sel + ' button') ]
+		.find((b) => b.getAttribute('aria-pressed') == 'true')?.textContent, sel);
+
+	// Старые адреса «Маршрутизации» и списков открывают «Правила» (spec §3.1).
+	for (const old of [ 'routing', 'lists' ]) {
+		await page.goto(url(old), { waitUntil: 'networkidle2' });
+		await settled(page);
+		result(await shadowHas(page, '.card.rules-cats'), `адрес ${old} открывает «Правила»`);
+	}
+
+	// «Куда пойдёт» на «Правилах» (была «Проверить домен/IP» на «Диагностике»): IP из geoip:ru.
+	await page.goto(url('rules'), { waitUntil: 'networkidle2' });
+	await settled(page);
+	await (await el('.where input[name="target"]'))?.type('77.88.8.8');
 	await page.keyboard.press('Enter');
-	const verdict = await page.waitForFunction(() => /77\.88\.8\.8 →[^\n]*/.exec(document.querySelector('#maincontent').innerText)?.[0],
+	const verdict = await page.waitForFunction(() => /77\.88\.8\.8 →[^\n]*/.exec(
+		document.querySelector('.truba-root')?.shadowRoot?.querySelector('.where .check-res')?.innerText || '')?.[0],
 		{ timeout: 20000 }).then((h) => h.jsonValue()).catch(() => null);
-	result(verdict != null, '«Проверить домен/IP»', verdict);
-	await page.screenshot({ path: `${out}/diagnostics-check.png`, fullPage: true });
+	result(verdict != null, '«Правила»: «Куда пойдёт»', verdict);
+	await page.screenshot({ path: `${out}/rules-check.png`, fullPage: true });
+
+	// Последнюю Зону снять нельзя: без Зон служба взяла бы умолчание схемы. На стенде выбрана одна lan.
+	const lastZone = await page.evaluate(() => {
+		const b = document.querySelector('.truba-root').shadowRoot.querySelector('.zones button[data-zone="lan"]');
+		return { on: b?.getAttribute('aria-pressed'), disabled: b?.disabled, title: b?.title || '' };
+	});
+	result(lastZone.on == 'true' && lastZone.disabled && /At least one zone/.test(lastZone.title), '«Правила»: последнюю Зону снять нельзя', JSON.stringify(lastZone));
 
 	// «Устройства» (ADR 0018): на стенде сосед с MAC и узел mesh-VPN без него (stand.sh).
 	const rowSel = (ip) => `button.dev[data-ip="${ip}"]`;
-	const el = async (sel) => (await shadowSel(page, sel)).asElement();
-	const tap = async (sel) => { const e = await el(sel); if (e) await e.click(); return !!e; };
 	const panelText = () => page.evaluate(() => document.querySelector('.truba-root')?.shadowRoot?.querySelector('.panel')?.innerText || '');
-	const clickIn = (sel, re) => page.evaluate((sel, re) => [ ...document.querySelector('.truba-root').shadowRoot.querySelectorAll(sel) ]
-		.find((b) => new RegExp(re).test(b.textContent))?.click(), sel, re);
 	await page.goto(url('devices'), { waitUntil: 'networkidle2' });
 	await settled(page);
 	result(await shadowHas(page, rowSel('192.168.1.50')) && await shadowHas(page, rowSel('100.64.0.9')), '«Устройства»: в списке сосед и узел mesh-VPN');
@@ -206,20 +219,75 @@ async function waitApply(page) {
 
 	const time = async () => (await ubus('truba', 'status')).applied?.time ?? 0;
 
-	// 1. Маршрутизация: youtube → Напрямую в Режиме «Всё в туннель».
+	// 1. «Правила»: youtube → Напрямую в Режиме «Всё в туннель», применение — панелью изменений.
+	const catRow = '.rules-cats [data-cat="geosite:youtube"]';
+	const findCat = async () => {
+		await clickIn('.rules-cats .chips button', '^All');
+		await (await el('.rules-cats input[type="search"]'))?.type('youtube');
+		// Список Категорий может прийти позже страницы (Наборы правил распаковываются) — ждём саму строку.
+		await page.waitForFunction((s) => document.querySelector('.truba-root')?.shadowRoot?.querySelector(s), { timeout: 20000 }, catRow).catch(() => {});
+	};
 	let t0 = await time();
-	await page.goto(url('routing'), { waitUntil: 'networkidle2' });
-	// Таблица Категорий строится после загрузки списков — ждём саму строку.
-	await page.waitForSelector('div[data-tab="all"] tr[data-search="geosite:youtube"] select', { timeout: 20000 });
-	await page.evaluate(() => {
-		const row = [ ...document.querySelectorAll('div[data-tab="all"] tr') ].find((r) => r.getAttribute('data-search') == 'geosite:youtube');
-		const sel = row.querySelector('select');
-		sel.value = 'direct';
-		sel.dispatchEvent(new Event('change', { bubbles: true }));
-	});
-	await saveApply(page);
-	result(await applied(t0, (st) => (st.applied.geosite_order || []).includes('youtube=direct')),
-		'«Сохранить и применить»: Действие Категории → служба перестроила правила');
+	await page.goto(url('rules'), { waitUntil: 'networkidle2' });
+	await settled(page);
+	await findCat();
+	await clickIn(catRow + ' .seg button', '^Direct$');
+	const dotted = await shadowHas(page, catRow + ' .dot.warn[aria-label]');
+	const oneChange = /Unapplied changes: 1/.test(await page.evaluate(() => document.querySelector('.truba-root').shadowRoot.querySelector('.changes')?.innerText || ''));
+	await tap('.changes [data-act="apply"]');
+	await waitApply(page);
+	result(dotted && oneChange && await applied(t0, (st) => (st.applied.geosite_order || []).includes('youtube=direct')),
+		'«Правила»: Действие Категории — точка и одно изменение, «Применить» → служба перестроила правила', JSON.stringify({ dotted, oneChange }));
+
+	// Режим «Выборочный», не применённый: Категории следуют за ним. «Применить» → служба в этом Режиме; затем обратно.
+	t0 = await time();
+	await page.goto(url('rules'), { waitUntil: 'networkidle2' });
+	await settled(page);
+	await clickIn('.card.mode .seg button', '^Selective$');
+	const catMode = await pressed('.rules-cats .card-h .seg');
+	await tap('.changes [data-act="apply"]');
+	await waitApply(page);
+	result(catMode == 'Selective' && await applied(t0, (st) => st.mode == 'selective'), '«Правила»: Режим «Выборочный» — Категории следуют, служба применила', catMode);
+	t0 = await time();
+	await page.goto(url('rules'), { waitUntil: 'networkidle2' });
+	await settled(page);
+	result(await pressed('.rules-cats .card-h .seg') == 'Selective', '«Правила»: после применения Категории — Режима «Выборочный»');
+	await clickIn('.card.mode .seg button', '^All via tunnel$');
+	await tap('.changes [data-act="apply"]');
+	await waitApply(page);
+	result(await applied(t0, (st) => st.mode == 'all'), '«Правила»: Режим «Всё в туннель» снова');
+
+	// «Стартовые настройки» — в UCI браузера, с подтверждением; затем «Сбросить».
+	await page.goto(url('rules'), { waitUntil: 'networkidle2' });
+	await settled(page);
+	await findCat();
+	await clickIn(catRow + ' .seg button', '^Block$');
+	await tap('.rules-cats [data-act="starting"]');
+	// Окно открывается в эффекте Preact — после отрисовки, не сразу после клика.
+	const dlgOpen = await page.waitForFunction(() => document.querySelector('.truba-root')?.shadowRoot?.querySelector('dialog[open]'), { timeout: 5000 })
+		.then(() => true).catch(() => false);
+	await tap('dialog[open] [data-act="confirm"]');
+	const startAct = (await ubus('truba', 'categories')).starting.find((r) => r.mode == 'all' && r.set == 'geosite' && r.tag == 'youtube')?.action || 'mode';
+	const LABEL = { mode: 'By mode', direct: 'Direct', tunnel: 'Tunnel', block: 'Block' };
+	await page.waitForFunction((s, want) => [ ...document.querySelector('.truba-root').shadowRoot.querySelectorAll(s + ' .seg button') ]
+		.find((b) => b.getAttribute('aria-pressed') == 'true')?.textContent == want, { timeout: 5000 }, catRow, LABEL[startAct]).catch(() => {});
+	const afterStart = await pressed(catRow + ' .seg');
+	result(dlgOpen && afterStart == LABEL[startAct] && !await shadowHas(page, 'dialog[open]'),
+		'«Правила»: «Стартовые настройки» — окно подтверждения, Действие как у новой установки', `${dlgOpen} ${afterStart} / ${LABEL[startAct]}`);
+	await Promise.all([ page.waitForNavigation({ waitUntil: 'networkidle2' }).catch(() => {}), tap('.changes [data-act="reset"]') ]);
+
+	// Правило для Категории, которой нет в Наборе: предупреждение с «Remove», после применения секции нет.
+	await ubus('uci', 'add', { config: 'truba', type: 'rule', values: { set: 'geosite', tag: 'zz-gone', action: 'tunnel' } });
+	await ubus('uci', 'commit', { config: 'truba' });
+	await page.goto(url('rules'), { waitUntil: 'networkidle2' });
+	await settled(page);
+	const missText = await page.evaluate(() => document.querySelector('.truba-root').shadowRoot.querySelector('.rules-cats .missing')?.innerText || '');
+	await tap('.rules-cats [data-act="remove-missing"]');
+	await tap('.changes [data-act="apply"]');
+	await waitApply(page);
+	const ruleSecs = Object.values((await ubus('uci', 'get', { config: 'truba', type: 'rule' })).values || {});
+	result(/zz-gone/.test(missText) && !ruleSecs.some((x) => x.tag == 'zz-gone'), '«Правила»: пропавшая Категория — предупреждение и «Remove»',
+		missText.replace(/\s+/g, ' '));
 
 	// 2. Политика устройства «Всё в туннель» — в панели устройства, применение — панелью изменений.
 	t0 = await time();
@@ -415,6 +483,22 @@ async function waitApply(page) {
 	result(overlap.bar != null && overlap.panel <= overlap.bar + 1, '«Устройства» 375: панель изменений не закрывает панель устройства', JSON.stringify(overlap));
 	await Promise.all([ page.waitForNavigation({ waitUntil: 'networkidle2' }).catch(() => {}), tap('.changes [data-act="reset"]') ]);
 	await page.screenshot({ path: `${out}/devices-375.png`, fullPage: true });
+
+	// «Правила» на телефоне: около 1 700 Категорий — не больше 100 строк сразу, Действие — системный выбор,
+	// без горизонтальной прокрутки.
+	await page.goto(url('rules'), { waitUntil: 'networkidle2' });
+	await settled(page);
+	await clickIn('.rules-cats .chips button', '^All');
+	await sleep(300);
+	const phone = await page.evaluate(() => {
+		const r = document.querySelector('.truba-root').shadowRoot, tr = r.querySelector('.tr'), row = r.querySelector('.rules-cats [data-cat]');
+		return { doc: document.documentElement.scrollWidth, win: window.innerWidth, tr: tr.scrollWidth - tr.clientWidth,
+			rows: r.querySelectorAll('.rules-cats [data-cat]').length, more: !!r.querySelector('.rules-cats [data-act="show-all"]'),
+			sel: row && getComputedStyle(row.querySelector('.ap-sel')).display, seg: row && getComputedStyle(row.querySelector('.seg')).display };
+	});
+	result(phone.doc <= phone.win && phone.tr <= 0 && phone.rows > 0 && phone.rows <= 100 && phone.sel != 'none' && phone.seg == 'none',
+		'«Правила» 375: не больше 100 строк, Действие — select, без горизонтальной прокрутки', JSON.stringify(phone));
+	await page.screenshot({ path: `${out}/rules-375.png`, fullPage: true });
 	await page.setViewport({ width: 1280, height: 900 });
 
 	// Длинное неверное значение настройки попадает в предупреждение как есть — и на телефоне не должно

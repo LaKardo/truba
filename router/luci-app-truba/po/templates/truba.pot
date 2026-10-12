@@ -221,11 +221,11 @@ msgstr ""
 msgid "Devices"
 msgstr ""
 
-#: htdocs/luci-static/resources/truba/common.js
+#: menu.d
 msgid "Rules"
 msgstr ""
 
-#: htdocs/luci-static/resources/truba/common.js
+#: menu.d
 msgid "DNS"
 msgstr ""
 
@@ -554,46 +554,6 @@ msgid "Latency"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/diagnostics.js
-msgid "Error: %s"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/diagnostics.js
-msgid "Why: %s"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/diagnostics.js
-msgid "Category"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/diagnostics.js
-msgid "Matching entry"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/diagnostics.js
-msgid "Entries"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/diagnostics.js
-msgid "Action"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/diagnostics.js
-msgid "Addresses"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/diagnostics.js
-msgid "geoip categories"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/diagnostics.js
-msgid "Why"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/diagnostics.js
-msgid "— any device —"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/diagnostics.js
 msgid "Checking… about 5 seconds"
 msgstr ""
 
@@ -606,15 +566,11 @@ msgid "Warnings and errors"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/diagnostics.js
+msgid "Error: %s"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/diagnostics.js
 msgid "Checks and the log. Nothing is configured on this tab."
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/diagnostics.js
-msgid "Check domain / IP"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/diagnostics.js
-msgid "Shows which category and action apply and why. A domain is resolved through the router, the same way a device would."
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/diagnostics.js
@@ -885,7 +841,7 @@ msgstr ""
 msgid "geosite.dat mirror"
 msgstr ""
 
-#: menu.d
+#: htdocs/luci-static/resources/view/truba/dns.js
 msgid "DNS & lists"
 msgstr ""
 
@@ -1141,7 +1097,7 @@ msgstr ""
 msgid "Truba IP"
 msgstr ""
 
-#: menu.d
+#: htdocs/luci-static/resources/view/truba/overview.js
 msgid "Routing"
 msgstr ""
 
@@ -1238,10 +1194,6 @@ msgid "update in progress"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/overview.js
-msgid "DNS and rule sets"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/overview.js
 msgid "NAT checked %s"
 msgstr ""
 
@@ -1273,100 +1225,116 @@ msgstr ""
 msgid "Home network through your own VPS: the VPS gives the router its public IP, the router decides what goes through the tunnel."
 msgstr ""
 
-#: htdocs/luci-static/resources/view/truba/routing.js
-msgid "Rule set"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/routing.js
-msgid "Types"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/routing.js
-msgid "Included in"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/routing.js
-msgid "Reset all category actions of this mode to the starting settings?"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/routing.js
-msgid "Which traffic goes through the tunnel. Categories are taken from geoip.dat and geosite.dat as they are; new categories are never created."
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/routing.js
-msgid "Mode"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/routing.js
-msgid "What happens to traffic that no category with an explicit action matched. «All via tunnel» — everything except categories with action Direct (by default, Russian traffic). «Selective» — only categories with action Tunnel go through the tunnel."
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/routing.js
+#: htdocs/luci-static/resources/view/truba/rules.js
 msgid "Selective"
 msgstr ""
 
-#: htdocs/luci-static/resources/view/truba/routing.js
+#: htdocs/luci-static/resources/view/truba/rules.js
 msgid "Zones"
 msgstr ""
 
-#: htdocs/luci-static/resources/view/truba/routing.js
+#: htdocs/luci-static/resources/view/truba/rules.js
+msgid "At least one zone is needed: without zones %s is routed by default."
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/rules.js
+msgid "There is no such zone in the firewall."
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/rules.js
+msgid "missing"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/rules.js
+msgid "Mode"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/rules.js
+msgid "Traffic without a category goes through the Tunnel; Russian traffic goes Direct by the starting settings."
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/rules.js
+msgid "Only categories with action Tunnel go through the Tunnel; everything else goes Direct."
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/rules.js
 msgid "Firewall zones whose devices are routed. Forwarding from them to zone «truba» is added automatically, and IPv6 internet is closed to them. Other zones go direct."
 msgstr ""
 
-#: htdocs/luci-static/resources/view/truba/routing.js
-msgid "In the sets now"
+#: htdocs/luci-static/resources/view/truba/rules.js
+msgid "geoip · %s subnets"
 msgstr ""
 
-#: htdocs/luci-static/resources/view/truba/routing.js
-msgid "nothing: routing is off"
+#: htdocs/luci-static/resources/view/truba/rules.js
+msgid "geosite · %s entries"
 msgstr ""
 
-#: htdocs/luci-static/resources/view/truba/routing.js
-msgid "geoip subnets: %s"
+#: htdocs/luci-static/resources/view/truba/rules.js
+msgid "in %s"
 msgstr ""
 
-#: htdocs/luci-static/resources/view/truba/routing.js
-msgid "IPs from DNS: %s"
+#: htdocs/luci-static/resources/view/truba/rules.js
+msgid "Action for %s"
 msgstr ""
 
-#: htdocs/luci-static/resources/view/truba/routing.js
-msgid "With an explicit action"
+#: htdocs/luci-static/resources/view/truba/rules.js
+msgid "Categories"
 msgstr ""
 
-#: htdocs/luci-static/resources/view/truba/routing.js
-msgid "Search category…"
+#: htdocs/luci-static/resources/view/truba/rules.js
+msgid "%s · with an action %s"
 msgstr ""
 
-#: htdocs/luci-static/resources/view/truba/routing.js
-msgid "Actions: «All via tunnel»"
+#: htdocs/luci-static/resources/view/truba/rules.js
+msgid "Find a category"
 msgstr ""
 
-#: htdocs/luci-static/resources/view/truba/routing.js
-msgid "Actions: «Selective»"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/routing.js
-msgid "By mode = Tunnel. Narrower categories are checked first; on a tie: Block → Tunnel → Direct. A domain category wins over a geoip category."
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/routing.js
-msgid "By mode = Direct. Only categories with action Tunnel go through the tunnel."
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/routing.js
-msgid "Rule sets are being unpacked — reload the page in a minute."
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/routing.js
-msgid "Rule sets are not downloaded yet — see the DNS & lists tab."
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/routing.js
+#: htdocs/luci-static/resources/view/truba/rules.js
 msgid "Filter by action"
 msgstr ""
 
-#: htdocs/luci-static/resources/view/truba/routing.js
-msgid "Reset to starting settings"
+#: htdocs/luci-static/resources/view/truba/rules.js
+msgid "With an action"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/rules.js
+msgid "Starting settings"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/rules.js
+msgid "Rule sets are being unpacked — the list will appear in a minute."
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/rules.js
+msgid "Rule sets are not downloaded yet — see Rule sets above."
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/rules.js
+msgid "No categories match the filter."
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/rules.js
+msgid "Show all (%d)"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/rules.js
+msgid "Reset all category actions of this mode to the starting settings?"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/rules.js
+msgid "Mode: %s. The change is applied with the Apply button, like the others."
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/rules.js
+msgid "Which traffic goes through the tunnel. Categories are taken from geoip.dat and geosite.dat as they are; new categories are never created."
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/rules.js
+msgid "Where it goes"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/rules.js
+msgid "for all devices"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/tunnel.js

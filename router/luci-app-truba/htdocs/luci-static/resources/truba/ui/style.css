@@ -392,7 +392,7 @@
 .rename { margin: 12px 0 0; }
 .addmac .acts, .check { display: flex; flex-wrap: wrap; gap: 8px; }
 .err-text { color: var(--blk); font-size: 12px; }
-.badmac {
+.badmac, .missing {
 	display: flex;
 	flex-wrap: wrap;
 	align-items: center;
@@ -403,7 +403,7 @@
 	background: color-mix(in srgb, var(--warn) 14%, transparent);
 	font-size: 12px;
 }
-.badmac span { flex: 1 1 14em; }
+.badmac span, .missing span { flex: 1 1 14em; }
 .check-res { margin-top: 6px; }
 @container (max-width: 1000px) {
 	.split { grid-template-columns: minmax(0, 1fr); }
@@ -553,3 +553,28 @@
 	.fold .hit > :last-child { grid-column: 1 / -1; }
 }
 .changes .btn:disabled { opacity: .5; cursor: not-allowed; }
+
+/* ---- «Правила» ---- */
+.grid.g2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+@container (max-width: 600px) { .grid.g2 { grid-template-columns: minmax(0, 1fr); } }
+.wide-seg .seg { display: flex; }
+.wide-seg .seg button { flex: 1; padding: 5px 9px; }
+.note { margin: 8px 0 0; }
+.chip.zone { border: 1px solid var(--bd); background: transparent; color: var(--tx); }
+.chip.zone[aria-pressed="true"] { border-color: var(--tun); color: var(--tun); }
+.chip.zone:disabled { cursor: not-allowed; }
+.rules-cats .card-h .aside { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.cat {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) auto;
+	align-items: center;
+	gap: 10px;
+	padding: 7px 0;
+	border-top: 1px solid var(--bd);
+}
+.cat .n { min-width: 0; }
+.cat .n b { font-weight: 500; overflow-wrap: anywhere; }
+.cat .n .mu { display: block; font-size: 11px; }
+.cat .dot { display: inline-block; width: 8px; height: 8px; box-shadow: none; vertical-align: 1px; }
+.more { margin-top: 10px; }
+.gos { display: flex; flex-wrap: wrap; gap: 0 16px; }

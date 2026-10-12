@@ -387,6 +387,11 @@ if (cdev) {
 	check(RA('all', 'geoip', 'private') === 'block', 'common.ruleAction: незнакомый mode — «all», как у службы');
 	check(JSON.stringify(cdev.ruleSections?.('selective').map((s) => s['.name'])) === '["r4","r5"]' &&
 		JSON.stringify(cdev.ruleSections('all').map((s) => s['.name'])) === '["r1","r2","r3","r6"]', 'common.ruleSections: секции Режима, без mode — «all»');
+	check(cdev.ruleKey?.({ set: 'geoip', tag: 'RU' }) === 'geoip:ru' && cdev.ruleKey({ set: 'odd', tag: 'A' }) === 'geosite:a',
+		'common.ruleKey: «набор:тег» как у службы');
+	const RAS = cdev.ruleActions?.('all');
+	check(RAS instanceof Map && RAS.size === 2 && RAS.get('geosite:youtube') === 'direct' && RAS.get('geoip:private') === 'block',
+		'common.ruleActions: Действия Режима одним проходом — как ruleAction', RAS && JSON.stringify([ ...RAS ]));
 
 	// Поле по схеме: текст ошибки или null — та же проверка, что у службы (conf.uc, check_value).
 	const FE = (...a) => cdev.fieldError?.(...a);

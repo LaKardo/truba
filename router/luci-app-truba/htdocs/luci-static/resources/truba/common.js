@@ -17,7 +17,6 @@ const callRollbackLists = rpc.declare({ object: 'truba', method: 'rollback_lists
 // История скорости с Роутера (её пишет процесс truba stats): точки новее since за span секунд.
 const callRates = rpc.declare({ object: 'truba', method: 'rates', params: [ 'span', 'since' ], expect: { '': {} } });
 const callLog = rpc.declare({ object: 'truba', method: 'log', params: [ 'lines' ], expect: { log: '' } });
-const callLeases = rpc.declare({ object: 'luci-rpc', method: 'getDHCPLeases', expect: { '': {} } });
 const callSchema = rpc.declare({ object: 'truba', method: 'schema', expect: { '': {} } });
 // Устройства с трафиком и Политиками; куда устройство ходит сейчас (ADR 0018).
 const callDevices = rpc.declare({ object: 'truba', method: 'devices', expect: { '': {} } });
@@ -377,19 +376,31 @@ function tunnelIface() {
 // Действия правила, которые служба принимает (const.uc, ACTIONS); остальные она пропускает.
 const RULE_ACTIONS = [ 'direct', 'tunnel', 'block' ];
 
-// Секции rule Режима (и одной Категории, если заданы set и tag) — как их читает служба (conf.uc):
-// mode не «selective» — «all», set не «geoip» — «geosite», тег без учёта регистра.
-function ruleSections(mode, set, tag) {
-	const t = (tag == null) ? null : String(tag).toLowerCase();
-	return uci.sections('truba', 'rule').filter((s) => ((s.mode == 'selective') ? 'selective' : 'all') == mode &&
-		(set == null || ((s.set == 'geoip') ? 'geoip' : 'geosite') == set) && (t == null || String(s.tag || '').toLowerCase() == t));
+// Ключ Категории секции rule «набор:тег» — как его читает служба (conf.uc): set не «geoip» — «geosite»,
+// тег в нижнем регистре.
+function ruleKey(s) {
+	return ((s.set == 'geoip') ? 'geoip' : 'geosite') + ':' + String(s.tag || '').toLowerCase();
 }
 
-// Действие Категории в Режиме: из секций с верным Действием действует последняя — служба
-// перезаписывает Действие ключа по порядку секций. Нет такой — «По режиму».
+// Секции rule Режима (mode не «selective» — «all», как у службы); с set и tag — только этой Категории.
+function ruleSections(mode, set, tag) {
+	const k = (set == null) ? null : set + ':' + String(tag).toLowerCase();
+	return uci.sections('truba', 'rule').filter((s) => ((s.mode == 'selective') ? 'selective' : 'all') == mode && (k == null || ruleKey(s) == k));
+}
+
+// Действия Режима одним проходом: «набор:тег» → Действие. Из секций одного ключа действует последняя
+// с верным Действием — служба перезаписывает Действие ключа по порядку секций.
+function ruleActions(mode) {
+	const m = new Map();
+	for (let s of ruleSections(mode))
+		if (RULE_ACTIONS.includes(s.action))
+			m.set(ruleKey(s), s.action);
+	return m;
+}
+
+// Действие Категории в Режиме; нет правила — «По режиму».
 function ruleAction(mode, set, tag) {
-	const v = ruleSections(mode, set, tag).filter((s) => RULE_ACTIONS.includes(s.action));
-	return v.length ? v[v.length - 1].action : 'mode';
+	return ruleActions(mode).get(set + ':' + String(tag).toLowerCase()) || 'mode';
 }
 
 // Пора ли спросить lists и sets (spec §5.3): раз в 30 с, а пока идёт обновление или применение
@@ -507,10 +518,10 @@ function tabUrl(tab) {
 }
 
 return baseclass.extend({
-	callStatus, callLists, callCategories, callSets, callCheck, callUpdateLists, callRollbackLists, callRates, callLog, callLeases,
+	callStatus, callLists, callCategories, callSets, callCheck, callUpdateLists, callRollbackLists, callRates, callLog,
 	callSchema, loadSchema, schema, get, field, fieldError, handshakeLevel, callDevices, callConnections,
 	ACTIVE_SPAN, devRate, devShare, devActive, deviceSections, deviceSection, devicePolicy, normMac, connLabel,
-	RULE_ACTIONS, ruleSections, ruleAction, listsDue,
+	RULE_ACTIONS, ruleKey, ruleSections, ruleActions, ruleAction, listsDue,
 	runNatTest, runTunnelTest,
 	ACTION_LABELS, ACTION_LEVELS, REASON_LABELS, WARNINGS, NAT_ERRORS, CHECK_ERRORS, UPNP_MISSING, NBSP, TABS,
 	fmtBytes, fmtRate, fmtAge, fmtTime, fmtDate, fmtNum, missingText,
