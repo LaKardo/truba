@@ -145,26 +145,27 @@ function ActionPicker({ value, onChange, label }) {
 
 // Поле опции по схеме (spec §3.6): подсказка — умолчание службы, ошибка — под полем. Верное значение
 // пишется в UCI браузера (пустое — опция удаляется, служба берёт умолчание), неверное — нет: оно только
-// помечает поле неверным, и «Применить» недоступна. sid — для секций без имени.
-function Field({ sec, key, sid, label, hint, msg, disabled }) {
+// помечает поле неверным, и «Применить» недоступна. name — опция (не key: его Preact забирает себе),
+// sid — для секций без имени.
+function Field({ sec, name, sid, label, hint, msg, disabled }) {
 	const { html, useState, useEffect } = app.lib;
-	const s = sid || sec, opt = 'truba.%s.%s'.format(s, key);
-	const saved = () => uci.get('truba', s, key) ?? '';
+	const s = sid || sec, opt = 'truba.%s.%s'.format(s, name);
+	const saved = () => uci.get('truba', s, name) ?? '';
 	const [ v, setV ] = useState(saved);
 	// Выключенное поле не проверяется и показывает то, что в настройках: неверный ввод в нём не держит «Применить».
 	useEffect(() => { if (disabled) setV(saved()); }, [ disabled ]);
-	const err = disabled ? null : common.fieldError(sec, key, v.trim());
+	const err = disabled ? null : common.fieldError(sec, name, v.trim());
 	useEffect(() => { app.invalid(opt, !!err); }, [ opt, !!err ]);
 	useEffect(() => () => app.invalid(opt, false), [ opt ]);
 	const onInput = (ev) => {
 		const x = ev.target.value;
 		setV(x);
-		if (!common.fieldError(sec, key, x.trim()) && x.trim() !== saved())
-			app.set('truba', s, key, x.trim() === '' ? null : x.trim());
+		if (!common.fieldError(sec, name, x.trim()) && x.trim() !== saved())
+			app.set('truba', s, name, x.trim() === '' ? null : x.trim());
 	};
-	const def = common.schema().sections?.[sec]?.[key]?.def;
-	const changed = uci.state?.changes?.truba?.[s]?.[key] !== undefined;
-	const id = 'f-' + s + '-' + key;
+	const def = common.schema().sections?.[sec]?.[name]?.def;
+	const changed = uci.state?.changes?.truba?.[s]?.[name] !== undefined;
+	const id = 'f-' + s + '-' + name;
 	return html`<div class=${'field' + (err ? ' bad' : '')}>
 		<label for=${id}>${label}${changed ? html` <${Dot} level="warn" label=${_('changed, not applied yet')} />` : ''}</label>
 		<input id=${id} data-opt=${opt} autocomplete="off" value=${v} disabled=${!!disabled}

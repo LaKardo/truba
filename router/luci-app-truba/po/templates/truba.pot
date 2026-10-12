@@ -650,46 +650,6 @@ msgid "no data"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/dns.js
-msgid "File"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/dns.js
-msgid "Current version"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/dns.js
-msgid "Previous version"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/dns.js
-msgid "Last check"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/dns.js
-msgid "Update in progress…"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/dns.js
-msgid "Applying settings…"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/dns.js
-msgid "Last check: %s"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/dns.js
-msgid "not checked yet"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/dns.js
-msgid "automatic update is off"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/dns.js
-msgid "Next check: %s"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/dns.js
 msgid "General"
 msgstr ""
 
@@ -755,94 +715,6 @@ msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/dns.js
 msgid "Local port; dnsmasq forwards requests here. The next port is taken by the mosdns statistics API (127.0.0.1 only)."
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/dns.js
-msgid "Rule sets"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/dns.js
-msgid "geoip.dat and geosite.dat from kirilllavrov/geoip-builder and kirilllavrov/geosite-builder. Files are used unchanged; the checksum is verified before every replacement."
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/dns.js
-msgid "Sources"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/dns.js
-msgid "Update started."
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/dns.js
-msgid "Update now"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/dns.js
-msgid "Swap current and previous rule sets?"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/dns.js
-msgid "Rule sets are being updated, try again later."
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/dns.js
-msgid "Rolled back: %s"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/dns.js
-msgid "No previous version."
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/dns.js
-msgid "Roll back"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/dns.js
-msgid "Update automatically"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/dns.js
-msgid "Update time (UTC)"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/dns.js
-msgid "geoip.dat is published every three days around 10–11 UTC, geosite.dat irregularly, usually by 09 UTC; at 12:00 a new release is picked up the same day. Converted to the router time zone for cron."
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/dns.js
-msgid "Format: HH:MM"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/dns.js
-msgid "Download via tunnel"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/dns.js
-msgid "The main source is fetched through the tunnel; the mirror always goes direct."
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/dns.js
-msgid "geoip.dat"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/dns.js
-msgid "geoip.dat mirror"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/dns.js
-msgid "Downloaded directly if the main source failed."
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/dns.js
-msgid "geosite.dat"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/dns.js
-msgid "geosite.dat mirror"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/dns.js
-msgid "DNS & lists"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/dns.js
@@ -1178,6 +1050,10 @@ msgid "NAT problem"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/overview.js
+msgid "DNS & lists"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/overview.js
 msgid "Lists from %s"
 msgstr ""
 
@@ -1191,6 +1067,18 @@ msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/overview.js
 msgid "update in progress"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/overview.js
+msgid "automatic update is off"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/overview.js
+msgid "Next check: %s"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/overview.js
+msgid "Rule sets"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/overview.js
@@ -1262,6 +1150,138 @@ msgid "Firewall zones whose devices are routed. Forwarding from them to zone «t
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/rules.js
+msgid "nothing: routing is off"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/rules.js
+msgid "geoip subnets: %s"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/rules.js
+msgid "IPs from DNS: %s"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/rules.js
+msgid "Update in progress…"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/rules.js
+msgid "Applying settings…"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/rules.js
+msgid "Update started."
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/rules.js
+msgid "Rule sets are being updated, try again later."
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/rules.js
+msgid "Rolled back: %s"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/rules.js
+msgid "No previous version."
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/rules.js
+msgid "Categories"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/rules.js
+msgid "In the sets now"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/rules.js
+msgid "Update now"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/rules.js
+msgid "Roll back"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/rules.js
+msgid "Versions"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/rules.js
+msgid "Current version"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/rules.js
+msgid "Previous version"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/rules.js
+msgid "Last check: %s"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/rules.js
+msgid "not checked yet"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/rules.js
+msgid "Update settings"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/rules.js
+msgid "geoip.dat and geosite.dat from kirilllavrov/geoip-builder and kirilllavrov/geosite-builder. Files are used unchanged; the checksum is verified before every replacement."
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/rules.js
+msgid "Update automatically"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/rules.js
+msgid "Download via tunnel"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/rules.js
+msgid "The main source is fetched through the tunnel; the mirror always goes direct."
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/rules.js
+msgid "Update time (UTC)"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/rules.js
+msgid "Format: HH:MM"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/rules.js
+msgid "geoip.dat is published every three days around 10–11 UTC, geosite.dat irregularly, usually by 09 UTC; at 12:00 a new release is picked up the same day. Converted to the router time zone for cron."
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/rules.js
+msgid "geoip.dat"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/rules.js
+msgid "geoip.dat mirror"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/rules.js
+msgid "Downloaded directly if the main source failed."
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/rules.js
+msgid "geosite.dat"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/rules.js
+msgid "geosite.dat mirror"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/rules.js
+msgid "Swap current and previous rule sets?"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/rules.js
+msgid "The files are swapped at once; the rules are rebuilt in the background."
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/rules.js
 msgid "geoip · %s subnets"
 msgstr ""
 
@@ -1275,10 +1295,6 @@ msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/rules.js
 msgid "Action for %s"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/rules.js
-msgid "Categories"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/rules.js

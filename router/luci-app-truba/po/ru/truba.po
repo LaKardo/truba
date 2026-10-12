@@ -229,9 +229,6 @@ msgstr "IP из ответов для Категорий с Действием �
 msgid "Rule sets are being updated, try again later."
 msgstr "Наборы правил обновляются, попробуйте позже."
 
-msgid "File"
-msgstr "Файл"
-
 msgid "Current version"
 msgstr "Текущая версия"
 
@@ -586,9 +583,6 @@ msgstr "DNS и списки"
 msgid "Local port; dnsmasq forwards requests here. The next port is taken by the mosdns statistics API (127.0.0.1 only)."
 msgstr "Локальный порт; сюда dnsmasq пересылает запросы. Следующий порт занимает API статистики mosdns (только 127.0.0.1)."
 
-msgid "Last check"
-msgstr "Последняя проверка"
-
 msgid "failed — %s"
 msgstr "ошибка — %s"
 
@@ -780,9 +774,6 @@ msgstr "Дополнительно"
 
 msgid "Rule sets"
 msgstr "Наборы правил"
-
-msgid "Sources"
-msgstr "Источники"
 
 msgid "Inbound traffic is on the Overview."
 msgstr "Трафик входящих — на «Обзоре»."
@@ -1212,3 +1203,24 @@ msgstr "Куда пойдёт"
 
 msgid "for all devices"
 msgstr "для всех устройств"
+
+msgid "In the sets now"
+msgstr "В наборах сейчас"
+
+msgid "nothing: routing is off"
+msgstr "пусто: Маршрутизация выключена"
+
+msgid "geoip subnets: %s"
+msgstr "подсетей geoip: %s"
+
+msgid "IPs from DNS: %s"
+msgstr "IP из DNS: %s"
+
+msgid "Versions"
+msgstr "Версии"
+
+msgid "Update settings"
+msgstr "Настройки обновления"
+
+msgid "The files are swapped at once; the rules are rebuilt in the background."
+msgstr "Файлы меняются местами сразу, правила перестраиваются в фоне."

@@ -523,7 +523,7 @@ return baseclass.extend({
 	ACTIVE_SPAN, devRate, devShare, devActive, deviceSections, deviceSection, devicePolicy, normMac, connLabel,
 	RULE_ACTIONS, ruleKey, ruleSections, ruleActions, ruleAction, listsDue,
 	runNatTest, runTunnelTest,
-	ACTION_LABELS, ACTION_LEVELS, REASON_LABELS, WARNINGS, NAT_ERRORS, CHECK_ERRORS, UPNP_MISSING, NBSP, TABS,
+	ACTION_LABELS, ACTION_LEVELS, REASON_LABELS, VIA_LABELS, WARNINGS, NAT_ERRORS, CHECK_ERRORS, UPNP_MISSING, NBSP, TABS,
 	fmtBytes, fmtRate, fmtAge, fmtTime, fmtDate, fmtNum, missingText,
 	pill, busy, empty, span, svgEl, kvTable, table, row, chips,
 	setText, setState, setResult, setError, tunnelIface, tunnelState, tabUrl, invalidTab

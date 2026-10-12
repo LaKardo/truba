@@ -5,8 +5,8 @@
 'require truba.ui.app as app';
 'require truba.ui.kit as kit';
 
-// «Правила» (spec §5.3): куда пойдёт домен или IP, Режим и Зоны, Категории с Действиями. Настройки
-// пишутся в UCI браузера и применяются панелью изменений, как на «Устройствах».
+// «Правила» (spec §5.3): куда пойдёт домен или IP, Режим и Зоны, Наборы правил, Категории с Действиями.
+// Настройки пишутся в UCI браузера и применяются панелью изменений, как на «Устройствах».
 
 const POLL = 5000;   // шаг опроса: status — каждый второй раз (10 с), lists и sets — по common.listsDue
 const LIMIT = 100;   // строк Категорий сразу: около 1 700 строк по четыре кнопки телефон рисовал бы долго
@@ -87,6 +87,90 @@ function ModeCard() {
 	</${kit.Card}>`;
 }
 
+// Наборы правил (spec §5.3): версии geoip и geosite, итог последней проверки, откуда скачан, сколько
+// адресов в наборах сейчас, «Обновить сейчас» и «Откатить», следующая проверка, настройки обновления.
+// lists и sets опрашивает страница (load): раз в 30 с, а пока идёт обновление или применение — раз в 5 с.
+
+// Сколько подсетей и IP сейчас уходит по каждому Действию. Подсети geoip посчитаны при применении;
+// в ядре соседние сливаются, там их меньше.
+function inSets(sets) {
+	const g = sets?.geoip, d = sets?.dns, A = common.ACTION_LABELS;
+	if (!sets?.routing || !g)
+		return _('nothing: routing is off');
+	const parts = (pairs) => pairs.map(([ a, n ]) => '%s %s'.format(A[a], common.fmtNum(n))).join(' · ');
+	return _('geoip subnets: %s').format(parts([ [ 'direct', g.direct ], [ 'tunnel', g.tunnel ], [ 'block', g.block ] ]))
+		+ ' — ' + _('IPs from DNS: %s').format(parts([ [ 'tunnel', d?.tunnel ], [ 'direct', d?.direct ] ]));
+}
+
+// Версия файла: начало контрольной суммы, дата и размер; нет файла — «нет» обычным текстом.
+function Version({ v }) {
+	const { html } = app.lib;
+	return v ? html`<span><code>${(v.sha256 || '').substring(0, 12)}</code> ${common.fmtTime(v.mtime)} · ${common.fmtBytes(v.size)}</span>`
+		: html`<span class="mu">${_('none')}</span>`;
+}
+
+function RuleSets({ store, timing }) {
+	const { html, useState } = app.lib;
+	const { lists, sets, status, cats } = app.use(store);
+	const [ dlg, setDlg ] = useState(false);
+	const l = lists || {}, st = status || {}, last = l.last;
+	const auto = common.get('lists', 'auto_update');
+	const busy = l.updating ? _('Update in progress…') : l.applying ? _('Applying settings…') : null;
+	const count = (set) => (cats?.cats || []).filter((c) => c.set == set).length;
+	const failed = (e) => app.toast(_('Error: %s').format(e?.message || e));
+	// После запуска опрос частый 15 с: замок обновления служба берёт не сразу.
+	const update = () => common.callUpdateLists(false).then(() => {
+		timing.kickedAt = Date.now();
+		app.toast(_('Update started.'));
+	}, failed);
+	// Файлы переставляются сразу, применение — в фоне: его ход видно в карточке.
+	const rollback = () => common.callRollbackLists().then((r) => {
+		timing.kickedAt = Date.now();
+		app.toast(r.error == 'busy' ? _('Rule sets are being updated, try again later.')
+			: (r.swapped || []).length ? _('Rolled back: %s').format(r.swapped.join(', ')) : _('No previous version.'));
+	}, failed);
+	const sw = (key, label) => html`<${kit.Switch} label=${label} opt=${'truba.lists.' + key} checked=${common.get('lists', key)}
+		onChange=${(on) => app.set('truba', 'lists', key, on ? '1' : '0')} />`;
+
+	return html`<${kit.Card} cls="rule-sets" title=${_('Rule sets')}
+		aside=${common.get('lists', 'via_tunnel') ? common.VIA_LABELS.tunnel : common.VIA_LABELS.direct}>
+		${[ 'geoip', 'geosite' ].map((k) => html`<div class="ver" data-set=${k}>
+			<b>${k}</b>
+			<span class="mu">${l[k] ? common.fmtTime(l[k].mtime) : _('none')} · ${common.setResult(last?.sets?.[k])}</span>
+			<span class="r" title=${_('Categories')}>${common.fmtNum(count(k))}</span>
+		</div>`)}
+		<div class="mu sets">${_('In the sets now')}: ${inSets(sets)}</div>
+		${busy ? html`<div><${kit.Busy} text=${busy} /></div>` : ''}
+		<div class="acts">
+			<button type="button" class="btn" data-act="update" disabled=${!!busy} onClick=${update}>${_('Update now')}</button>
+			<button type="button" class="btn" data-act="rollback" disabled=${!!busy} onClick=${() => setDlg(true)}>${_('Roll back')}</button>
+			<span class="mu">${!st.routing ? '' : !auto ? _('automatic update is off') : _('Next check: %s').format(common.fmtTime(st.lists?.next))}</span>
+		</div>
+		<${kit.Fold} title=${_('Versions')}>
+			<div class="vers">
+				<span></span><span class="mu">${_('Current version')}</span><span class="mu">${_('Previous version')}</span>
+				${[ 'geoip', 'geosite' ].map((k) => html`<b>${k}.dat</b><${Version} v=${l[k]} /><${Version} v=${l['prev_' + k]} />`)}
+			</div>
+			<div class="mu">${last ? _('Last check: %s').format(common.fmtTime(last.time)) : _('not checked yet')}</div>
+		</${kit.Fold}>
+		<${kit.Fold} title=${_('Update settings')}>
+			<div class="mu">${_('geoip.dat and geosite.dat from kirilllavrov/geoip-builder and kirilllavrov/geosite-builder. Files are used unchanged; the checksum is verified before every replacement.')}</div>
+			<div class="sws">${sw('auto_update', _('Update automatically'))}${sw('via_tunnel', _('Download via tunnel'))}</div>
+			<div class="mu">${_('The main source is fetched through the tunnel; the mirror always goes direct.')}</div>
+			<${kit.Field} sec="lists" name="update_utc" label=${_('Update time (UTC)')} msg=${_('Format: HH:MM')} disabled=${!auto}
+				hint=${_('geoip.dat is published every three days around 10–11 UTC, geosite.dat irregularly, usually by 09 UTC; at 12:00 a new release is picked up the same day. Converted to the router time zone for cron.')} />
+			<${kit.Field} sec="lists" name="geoip_url" label=${_('geoip.dat')} />
+			<${kit.Field} sec="lists" name="geoip_mirror" label=${_('geoip.dat mirror')} hint=${_('Downloaded directly if the main source failed.')} />
+			<${kit.Field} sec="lists" name="geosite_url" label=${_('geosite.dat')} />
+			<${kit.Field} sec="lists" name="geosite_mirror" label=${_('geosite.dat mirror')} />
+		</${kit.Fold}>
+		<${kit.Dialog} open=${dlg} title=${_('Swap current and previous rule sets?')} confirm=${_('Roll back')}
+			onConfirm=${rollback} onClose=${() => setDlg(false)}>
+			${_('The files are swapped at once; the rules are rebuilt in the background.')}
+		</${kit.Dialog}>
+	</${kit.Card}>`;
+}
+
 function Cat({ c, mode, action, changed }) {
 	const { html } = app.lib;
 	const meta = [ (c.set == 'geoip' ? _('geoip · %s subnets') : _('geosite · %s entries')).format(common.fmtNum(c.count)) ];
@@ -162,7 +246,7 @@ function Categories({ cats, snap }) {
 	</${kit.Card}>`;
 }
 
-function Page({ store, snap, view }) {
+function Page({ store, snap, timing, view }) {
 	const { html } = app.lib;
 	const { cats, offline } = app.use(store);
 	app.use(app.changes);   // карточки читают UCI браузера — перерисовка после app.set
@@ -175,6 +259,7 @@ function Page({ store, snap, view }) {
 		<div class="grid g2">
 			<${kit.Card} cls="w3 where" title=${_('Where it goes')} aside=${_('for all devices')}><${kit.Check} full /></${kit.Card}>
 			<${ModeCard} />
+			<${RuleSets} store=${store} timing=${timing} />
 			<${Categories} cats=${cats} snap=${snap} />
 		</div>
 		<${kit.ChangesBar} view=${view} />

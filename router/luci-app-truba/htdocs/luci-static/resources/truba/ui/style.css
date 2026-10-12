@@ -578,3 +578,24 @@
 .cat .dot { display: inline-block; width: 8px; height: 8px; box-shadow: none; vertical-align: 1px; }
 .more { margin-top: 10px; }
 .gos { display: flex; flex-wrap: wrap; gap: 0 16px; }
+.ver {
+	display: grid;
+	grid-template-columns: 64px minmax(0, 1fr) auto;
+	align-items: baseline;
+	gap: 4px 10px;
+	padding: 6px 0;
+	border-top: 1px solid var(--bd);
+	font-size: 12px;
+}
+.ver b { font-weight: 500; }
+.rule-sets .sets { margin: 8px 0 0; }
+.rule-sets .acts { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 10px 0 0; }
+.vers { display: grid; grid-template-columns: auto minmax(0, 1fr) minmax(0, 1fr); gap: 4px 12px; font-size: 12px; }
+.vers b { font-weight: 500; }
+.vers code { color: var(--mu); }
+.sws { display: flex; flex-wrap: wrap; gap: 8px; }
+@container (max-width: 600px) {
+	.vers { grid-template-columns: auto minmax(0, 1fr); }
+	.vers > :nth-child(3n) { grid-column: 2; }
+	.vers > :nth-child(3) { display: none; }
+}

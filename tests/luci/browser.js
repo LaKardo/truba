@@ -134,7 +134,8 @@ async function waitApply(page) {
 		await settled(page);
 		// #view — сама вкладка, без общих баннеров LuCI (например, «No password set»), плюс Shadow DOM.
 		const text = await pageText(page);
-		result(!/Unable to load|TypeError|ReferenceError|Error: |Authorization Required/.test(text), `вкладка ${t}`,
+		// «Loading view…» после ожидания — представление не отрисовалось: ошибку LuCI показывает над ним, вне #view.
+		result(!/Unable to load|TypeError|ReferenceError|Error: |Authorization Required|Loading view/.test(text), `вкладка ${t}`,
 			text.replace(/\s+/g, ' ').slice(0, 100));
 		fs.writeFileSync(`${out}/${t}.txt`, text);
 		await page.screenshot({ path: `${out}/${t}.png`, fullPage: true });
@@ -288,6 +289,59 @@ async function waitApply(page) {
 	const ruleSecs = Object.values((await ubus('uci', 'get', { config: 'truba', type: 'rule' })).values || {});
 	result(/zz-gone/.test(missText) && !ruleSecs.some((x) => x.tag == 'zz-gone'), '«Правила»: пропавшая Категория — предупреждение и «Remove»',
 		missText.replace(/\s+/g, ' '));
+
+	// Наборы правил — на «Правилах» (были на «DNS и списках»): версии с датой.
+	await page.goto(url('rules'), { waitUntil: 'networkidle2' });
+	await settled(page);
+	const vers = await page.evaluate(() => [ ...document.querySelector('.truba-root').shadowRoot.querySelectorAll('.card.rule-sets .ver') ]
+		.map((r) => [ r.dataset.set, r.innerText.replace(/\s+/g, ' ') ]));
+	result(vers.length == 2 && vers.every(([ k, t ]) => [ 'geoip', 'geosite' ].includes(k) && /20\d\d/.test(t)), '«Правила»: Наборы правил — geoip и geosite с датой',
+		JSON.stringify(vers));
+	// «Откатить» — с подтверждением; на стенде предыдущих версий нет.
+	const openDialog = () => page.waitForFunction(() => document.querySelector('.truba-root')?.shadowRoot?.querySelector('dialog[open]'), { timeout: 5000 })
+		.then(() => true).catch(() => false);
+	await tap('.rule-sets [data-act="rollback"]');
+	const rbOpen = await openDialog();
+	await tap('dialog[open] [data-act="confirm"]');
+	const toast = await page.waitForFunction(() => document.querySelector('.truba-root')?.shadowRoot?.querySelector('.toast')?.innerText, { timeout: 10000 })
+		.then((h) => h.jsonValue()).catch(() => '');
+	result(rbOpen && /No previous version/.test(toast), '«Правила»: «Откатить» — подтверждение и сообщение', `${rbOpen} ${toast}`);
+	// Время обновления по схеме: неверное — ошибка у поля, в UCI не пишется, «Применить» недоступна; верное снимает запрет.
+	await page.evaluate(() => document.querySelector('.truba-root').shadowRoot.querySelectorAll('.rule-sets details.fold').forEach((d) => { d.open = true; }));
+	await tap('input[data-opt="truba.lists.via_tunnel"]');
+	const utc = await el('input[data-opt="truba.lists.update_utc"]');
+	const uciUtc = () => page.evaluate(async () => (await L.require('uci')).get('truba', 'lists', 'update_utc') ?? null);
+	const utcBefore = await uciUtc();
+	// Ввод заново — выделением в самом поле, а не тройным кликом: внизу экрана поле может быть под
+	// прилипшей панелью изменений, и клик пришёлся бы в неё.
+	const retype = async (v) => {
+		await utc?.evaluate((e) => { e.focus(); e.select(); });
+		await page.keyboard.type(v);
+		return utc?.evaluate((e) => e.value);
+	};
+	await retype('25:00');
+	const badUtc = await page.evaluate(() => {
+		const r = document.querySelector('.truba-root').shadowRoot;
+		return { err: r.querySelector('.rule-sets .field.bad [role="alert"]')?.textContent || '', apply: r.querySelector('.changes [data-act="apply"]')?.disabled,
+			bar: r.querySelector('.changes')?.innerText.replace(/\s+/g, ' ') || '' };
+	});
+	badUtc.uci = await uciUtc();
+	const typed = await retype('05:30');
+	// Счёт неверных полей меняет эффект Preact — после отрисовки кадра, не сразу после ввода.
+	await page.waitForFunction(() => document.querySelector('.truba-root').shadowRoot.querySelector('.changes [data-act="apply"]')?.disabled === false,
+		{ timeout: 3000 }).catch(() => {});
+	const goodUtc = { typed, apply: await page.evaluate(() => document.querySelector('.truba-root').shadowRoot.querySelector('.changes [data-act="apply"]')?.disabled),
+		uci: await uciUtc() };
+	result(!!utc && /Unapplied changes: 1/.test(badUtc.bar) && /HH:MM/.test(badUtc.err) && badUtc.apply === true && badUtc.uci === utcBefore &&
+		goodUtc.apply === false && goodUtc.uci == '05:30', '«Правила»: время обновления — неверное не пишется и держит «Применить»', JSON.stringify({ badUtc, goodUtc }));
+	await Promise.all([ page.waitForNavigation({ waitUntil: 'networkidle2' }).catch(() => {}), tap('.changes [data-act="reset"]') ]);
+
+	// «DNS» — только DNS: Наборов правил и полей lists.* там нет.
+	await page.goto(url('dns'), { waitUntil: 'networkidle2' });
+	await settled(page);
+	const dnsPage = await page.evaluate(() => ({ h2: document.querySelector('#view h2')?.textContent, rs: /Rule sets/.test(document.querySelector('#view')?.innerText || ''),
+		lists: !!document.querySelector('#view [id*="cbid.truba.lists."]') }));
+	result(dnsPage.h2 == 'DNS' && !dnsPage.rs && !dnsPage.lists, '«DNS»: без Наборов правил', JSON.stringify(dnsPage));
 
 	// 2. Политика устройства «Всё в туннель» — в панели устройства, применение — панелью изменений.
 	t0 = await time();
