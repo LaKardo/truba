@@ -479,6 +479,26 @@ let iv = K.ip_verdicts([ '5.6.7.8', '192.168.5.5' ], null);
 check('решения для соединений: geoip — только Категории с Действием',
 	same(map(iv ?? [], v => v.geoip), [ [ 'ru' ], [] ]) && iv[0].action == 'direct' && iv[0].reason == 'geoip' &&
 	same(K.check('192.168.5.5').ips[0].geoip, [ 'private' ]), sprintf('%J', iv));
+// Категории geoip адресов: у ru на NC-1812 35 тысяч подсетей, а «Куда ходит сейчас» спрашивает до 20 адресов
+// раз в 5 с — подсеть разбирается, только если в её первом октете есть адрес (было 3,7 с на Роутере).
+// Сеть шире /8 захватывает и другие первые октеты.
+let bigv4 = [];
+for (let i = 0; i < 35000; i++)
+	push(bigv4, sprintf('%d.%d.%d.0/24', 1 + (i % 220), (i / 220) & 255, (i / 56320) & 255));
+push(bigv4, '224.0.0.0/4');
+mkdir(C.DATA_DIR + '/geoip');
+writefile(C.DATA_DIR + '/geoip/zbig.v4', join('\n', bigv4) + '\n');
+let ipn = (s) => { let a = iptoarr(s); return (a[0] << 24) | (a[1] << 16) | (a[2] << 8) | a[3]; };
+// 7.0.0.9 — в 7.0.0.0/24; 231.1.2.3 — только в 224.0.0.0/4; 7.200.0.1 — октет есть, подсети нет; 240…249 — мимо.
+let gaddrs = [ '7.0.0.9', '231.1.2.3', '7.200.0.1' ];
+for (let k = 0; k < 17; k++)
+	push(gaddrs, sprintf('%d.1.1.1', 240 + (k % 10)));
+let gt0 = clock(true);
+let gh = K.geoip_hits?.([ { set: 'geoip', tag: 'zbig' } ], map(gaddrs, ipn));
+let gt1 = clock(true), gms = (gt1[0] - gt0[0]) * 1000 + (gt1[1] - gt0[1]) / 1e6;
+check('Категории geoip: 20 адресов × 35 тысяч подсетей — верно и быстрее 150 мс',
+	gh != null && same(gh[0], [ 'zbig' ]) && same(gh[1], [ 'zbig' ]) && same(gh[2], []) &&
+	length(filter(slice(gh, 3), (h) => length(h))) == 0 && gms < 150, sprintf('%d мс, %J', gms, slice(gh ?? [], 0, 4)));
 
 // ---- История скорости (truba stats) без процесса и файлов ----
 

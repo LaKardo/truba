@@ -44,18 +44,35 @@ function net_mask(cidr) {
 	return [ ((a[0] << 24) | (a[1] << 16) | (a[2] << 8) | a[3]) & mask, mask ];
 }
 
-// Категории geoip каждого адреса: один проход по Категории сразу для всех адресов.
-function geoip_hits(cats, nums) {
-	let hits = map(nums, () => []);
+// Категории geoip каждого адреса: один проход по Категории сразу для всех адресов. Подсеть разбирается,
+// только если в её первом октете есть адрес: у ru 35 тысяч подсетей, а «Куда ходит сейчас» спрашивает до
+// 20 адресов раз в 5 с (сравнение каждой подсети с каждым адресом — 3,7 с на NC-1812, так — 0,3 с).
+export function geoip_hits(cats, nums) {
+	let hits = map(nums, () => []), by = {}, all = [];
+	for (let k = 0; k < length(nums); k++) {
+		let o = nums[k] >> 24;
+		by[o] ??= [];
+		push(by[o], k);
+		push(all, k);
+	}
 	for (let c in cats) {
 		if (c.set != 'geoip')
 			continue;
 		let left = length(nums), found = map(nums, () => false);
 		for (let cidr in D.geoip_cidrs(c.tag)) {
+			// int() читает число до первой точки — первый октет.
+			let ks = by[int(cidr)];
+			if (!ks) {
+				// Сеть шире /8 захватывает и другие первые октеты: «/0»…«/7» — одна цифра меньше 8.
+				let i = index(cidr, '/');
+				if (i < 0 || length(cidr) - i != 2 || ord(cidr, i + 1) >= 56)
+					continue;
+				ks = all;
+			}
 			let nm = net_mask(cidr);
 			if (!nm)
 				continue;
-			for (let k = 0; k < length(nums); k++) {
+			for (let k in ks) {
 				if (!found[k] && (nums[k] & nm[1]) == nm[0]) {
 					found[k] = true;
 					push(hits[k], c.tag);
@@ -67,7 +84,7 @@ function geoip_hits(cats, nums) {
 		}
 	}
 	return hits;
-}
+};
 
 // Набор из ядра как список диапазонов [ от, до ]. Целиком один раз на проверку:
 // «nft get element» на каждый адрес загружает всю таблицу (≈0,2 с на NC-1812).
