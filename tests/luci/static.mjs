@@ -1,5 +1,5 @@
-// Интерфейс LuCI без стенда: синтаксис JS, полнота русского перевода, схемы DNS как у службы, каждый вызов truba.*
-// есть в ubus-API пакета truba и в ACL.
+// Интерфейс LuCI без стенда: синтаксис JS, полнота русского перевода, каждый вызов truba.* есть в ubus-API
+// пакета truba и в ACL, в представлениях нет копий значений службы, зависимость от truba, цвет рукопожатия.
 //   node tests/luci/static.mjs           — проверить
 //   node tests/luci/static.mjs --pot     — напечатать шаблон .pot (po/templates/truba.pot)
 import { readFileSync, readdirSync, statSync } from 'node:fs';
