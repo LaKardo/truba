@@ -378,6 +378,9 @@ uci -q batch >/dev/null <<-'EOF'
 EOF
 reload "Политика устройства"
 check "MAC — в dev_tunnel" in_set dev_tunnel aa:bb:cc:dd:ee:ff
+dp() { ubus call truba devices | jsonfilter -e "@.devices[@.mac='aa:bb:cc:dd:ee:ff'].$1" 2>/dev/null; }
+check "rpcd devices: устройство с Политикой не в сети — без адреса, из настроек" \
+	eval '[ "$(dp policy)" = tunnel ] && [ "$(dp source)" = config ] && [ -z "$(dp ip)" ]'
 check "счётчики и отсчёт пережили применение" eval '[ "$(bytes c_tunnel_up)" -ge "$TUN_UP" ] && [ "$(applied "@.counters_since")" = "$SINCE" ]'
 offload() { uci set firewall.@defaults[0].flow_offloading="$1"; uci commit firewall; truba status | jsonfilter -e '@.neighbours.offload'; }
 check "status: программное ускорение замечено" eval '[ "$(offload 0)" = false ] && [ "$(offload 1)" = true ]'

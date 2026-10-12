@@ -18,6 +18,7 @@ import * as N from 'truba.net';
 import * as K from 'truba.check';
 import * as S from 'truba.stats';
 import * as DV from 'truba.devstats';
+import * as DVC from 'truba.devices';
 
 const check = T.check, same = T.same;
 const GOLDEN = ARGV[0] ?? '/repo/tests/golden';
@@ -591,6 +592,69 @@ let dvback = { last: { t: 5000, m: 0, gen: 1, v: { [A]: z6 } }, devices: {
 DV.add(dvback, DV.snapshot({ [A]: z6 }, 1, 5000, 4900));
 check('устройства: часы ушли назад — точки не раньше нового времени убраны', same(map(dvback.devices[A].minutes, x => x[0]), [ 4800 ]),
 	sprintf("%J", dvback.devices[A].minutes));
+
+// ---- Список устройств (truba.devices) без ubus и ядра ----
+
+config(`
+config device
+	option name 'off'
+	option mac 'AA:BB:CC:DD:EE:01'
+	option policy 'tunnel'
+	option enabled '0'
+
+config device
+	option mac 'aa:bb:cc:dd:ee:02'
+
+config device
+	option mac 'zz'
+	option policy 'direct'
+
+config device
+	option mac 'aa:bb:cc:dd:ee:03'
+	option policy 'weird'
+`);
+let dbad = [];
+let dsecs = F.device_sections(dbad);
+check('секции устройств: выключенная — «по правилам», без Политики — умолчание схемы, незнакомая — «по правилам», MAC в нижнем регистре',
+	same(dsecs, [ { name: 'off', mac: 'aa:bb:cc:dd:ee:01', policy: 'rules' }, { name: '', mac: 'aa:bb:cc:dd:ee:02', policy: 'tunnel' },
+	              { name: '', mac: 'aa:bb:cc:dd:ee:03', policy: 'rules' } ]), sprintf('%J', dsecs));
+check('секции устройств: неверный MAC с Политикой — пропущен и перечислен', same(map(dbad, x => x.key), [ 'device.mac' ]));
+check('настройки: в наборы Политик — только включённые «туннель» и «напрямую»',
+	same(F.load().devices, [ { name: '', mac: 'aa:bb:cc:dd:ee:02', policy: 'tunnel' } ]), sprintf('%J', F.load().devices));
+
+let leases = DVC.parse_leases('1700000000 3C:7C:3F:00:00:9A 192.168.1.20 pc-living *\n1700000000 02:00:00:00:00:21 192.168.1.21 * 01:02\nмусор\n');
+check('аренды: MAC в нижнем регистре, «*» — без имени',
+	same(leases, [ { ip: '192.168.1.20', mac: '3c:7c:3f:00:00:9a', name: 'pc-living' }, { ip: '192.168.1.21', mac: '02:00:00:00:00:21', name: null } ]),
+	sprintf('%J', leases));
+let dhist = { devices: {
+	'192.168.1.20': { seen: 1, last: 900, rate: [ 1, 2, 3, 4, 5, 6 ], minutes: [ [ 960, 1, 1, 1, 1 ] ], hours: [ [ 0, 10, 0, 0, 0, 0, 0 ] ] },
+	'192.168.1.21': { seen: 1, last: 900, rate: null, minutes: [], hours: [] },
+	'100.64.0.9':   { seen: 1, last: 900, rate: null, minutes: [], hours: [] },
+} };
+let dneigh = [ { ip: '192.168.1.30', mac: 'aa:bb:cc:dd:ee:30', dev: 'br-lan' }, { ip: '192.168.1.20', mac: '3c:7c:3f:00:00:9a', dev: 'br-lan' } ];
+let dsec = [ { name: 'TV', mac: '02:00:00:00:00:21', policy: 'rules' }, { name: 'console', mac: 'aa:bb:cc:dd:ee:30', policy: 'tunnel' },
+             { name: 'away', mac: 'aa:bb:cc:dd:ee:99', policy: 'direct' } ];
+let zone_of = (ip, dev) => (dev == 'br-lan' || match(ip, /^192\.168\.1\./)) ? 'lan' : (match(ip, /^100\.64\./) ? 'mesh' : null);
+let dlist = DVC.merge(dhist, leases, dneigh, dsec, zone_of);
+let dby = (k, v) => filter(dlist, d => d[k] == v)[0];
+check('устройства: каждое один раз — из истории, с Политикой по соседу, с Политикой без адреса', length(dlist) == 5,
+	join(' ', map(dlist, d => d.ip ?? d.mac)));
+let d20 = dby('ip', '192.168.1.20');
+check('устройство из истории с арендой: MAC и имя аренды, зона, трафик, сутки — сумма часов',
+	d20?.mac == '3c:7c:3f:00:00:9a' && d20.name == 'pc-living' && d20.source == 'dhcp' && d20.zone == 'lan' && d20.policy == 'rules' &&
+	same(d20.rate, [ 1, 2, 3, 4, 5, 6 ]) && same(d20.minutes, [ [ 960, 1, 1, 1, 1 ] ]) && d20.last == 900 && same(d20.day, [ 10, 0, 0, 0, 0, 0 ]),
+	sprintf('%J', d20));
+check('имя секции устройства важнее имени аренды', dby('ip', '192.168.1.21')?.name == 'TV');
+let d30 = dby('ip', '192.168.1.30');
+check('устройство с Политикой у соседа, без трафика: адрес соседа, источник neigh, трафика нет',
+	d30?.source == 'neigh' && d30.policy == 'tunnel' && d30.name == 'console' && d30.zone == 'lan' && d30.rate == null && d30.day == null &&
+	same(d30.minutes, []), sprintf('%J', d30));
+let daway = dby('mac', 'aa:bb:cc:dd:ee:99');
+check('устройство с Политикой не в сети: без адреса, источник config', daway?.ip == null && daway.source == 'config' && daway.policy == 'direct',
+	sprintf('%J', daway));
+let dmesh = dby('ip', '100.64.0.9');
+check('узел mesh-VPN только по трафику: без MAC и источника, «по правилам», зона по адресу',
+	dmesh?.mac == null && dmesh.source == null && dmesh.policy == 'rules' && dmesh.zone == 'mesh', sprintf('%J', dmesh));
 
 // ---- ubus-API: методы, которые читают файлы, без rpcd ----
 

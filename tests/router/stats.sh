@@ -47,6 +47,12 @@ D=/var/run/truba/devices.json
 dev_f() { jsonfilter -i $D -e "@.devices['192.168.1.50'].$1" 2>/dev/null; }
 dev_seen() { [ -n "$(dev_f last)" ]; }
 check "devices.json: устройство с трафиком, в RAM" wait_for 15 dev_seen
+# rpcd devices: устройство из истории — с MAC соседа, зоной его интерфейса и скоростью.
+ubus call truba devices > /tmp/d.json
+dj() { jsonfilter -i /tmp/d.json -e "@.devices[@.ip='192.168.1.50'].$1" 2>/dev/null; }
+LH_MAC="$(ip -n lanhost link show lh0 | awk '/link\/ether/ { print $2 }')"
+check "rpcd devices: зона lan, MAC соседа, источник neigh, скорость есть" \
+	eval '[ "$(dj zone)" = lan ] && [ "$(dj mac)" = "$LH_MAC" ] && [ "$(dj source)" = neigh ] && [ -n "$(dj rate)" ]'
 ubus call truba rates '{"span":600}' > /tmp/r.json
 check "rpcd rates: время Роутера, точки за 10 минут" eval '[ "$(jsonfilter -i /tmp/r.json -e "@.now")" -ge "$T0" ] && [ "$(rf 4 /tmp/r.json)" -ge 2 ]'
 

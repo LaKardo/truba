@@ -70,6 +70,13 @@ const methods = {
 		}
 	},
 
+	// Устройства: трафик из истории (её пишет процесс truba stats), имена, зоны и Политики.
+	devices: {
+		call: function() {
+			return truba('devices');
+		}
+	},
+
 	check: {
 		args: { target: 'target', mac: 'mac' },
 		call: function(req) {
