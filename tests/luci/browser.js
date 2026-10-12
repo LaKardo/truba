@@ -193,6 +193,15 @@ async function waitApply(page) {
 	const off = await page.evaluate(() => [ ...document.querySelector('.truba-root').shadowRoot.querySelectorAll('.panel .policy button') ]
 		.every((b) => b.disabled));
 	result(/tied to the MAC address/.test(await panelText()) && off, '«Устройства»: без MAC — Политика недоступна, с пояснением');
+	// «Проверить для этого устройства» без MAC — проверка для всех устройств: mac не передаётся вовсе
+	// (rpcd отклоняет null вместо строки).
+	await (await el('.panel form.check input[name="target"]'))?.type('77.88.8.8');
+	await tap('.panel form.check button[type="submit"]');
+	const noMac = await page.waitForFunction(() => {
+		const t = document.querySelector('.truba-root')?.shadowRoot?.querySelector('.panel .check-res')?.innerText || '';
+		return /→|failed/.test(t) && t;
+	}, { timeout: 20000 }).then((h) => h.jsonValue()).catch(() => '');
+	result(/77\.88\.8\.8 →/.test(noMac), '«Устройства»: проверка у устройства без MAC', noMac);
 	await page.screenshot({ path: `${out}/devices-1280.png`, fullPage: true });
 
 	const time = async () => (await ubus('truba', 'status')).applied?.time ?? 0;

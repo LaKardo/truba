@@ -213,7 +213,9 @@ function CheckBox({ mac }) {
 		if (!t)
 			return;
 		setBusy(true);
-		common.callCheck(t, mac || null).then((r) => setRes(r), () => setRes({ error: 'rpc' })).finally(() => setBusy(false));
+		// Без MAC (узел mesh-VPN) аргумент mac не передаётся вовсе: rpcd отклоняет null вместо строки.
+		(mac ? common.callCheck(t, mac) : common.callCheck(t))
+			.then((r) => setRes(r), () => setRes({ error: 'rpc' })).finally(() => setBusy(false));
 	};
 	return html`<form class="check" onSubmit=${run}>
 		<input name="target" autocomplete="off" placeholder=${_('domain or IP')} value=${q} onInput=${(ev) => setQ(ev.target.value)} />
