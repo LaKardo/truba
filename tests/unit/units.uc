@@ -566,10 +566,14 @@ DV.add(h, DV.snapshot({ [A]: [ 5000, 500, 1000, 100, 0, 0 ] }, 7, 10000, 7205));
 check('устройства: минута (7140, 7200] закрыта средним за покрытые секунды',
 	same(h.devices[A].minutes, [ [ 7200, 1000, 100, 200, 20 ] ]), sprintf('%J', h.devices[A].minutes));
 check('устройства: без трафика — скорость 0, время трафика прежнее', same(h.devices[A].rate, z6) && h.devices[A].last == 7200);
+check('устройства: B — минута с трафиком записана', same(h.devices[B].minutes, [ [ 7200, 500, 0, 0, 0 ] ]), sprintf('%J', h.devices[B].minutes));
 check('устройства: нет в наборах — скорости нет, устройство осталось', h.devices[B] != null && h.devices[B].rate == null);
 DV.add(h, DV.snapshot({ [A]: [ 10, 0, 0, 0, 0, 0 ] }, 8, 15000, 7210));
 check('устройства: новое поколение таблицы — пропуск шага, суммы не уменьшились',
 	h.devices[A].rate == null && same(h.devices[A].hours, [ [ 7200, 5000, 500, 1000, 100, 0, 0 ] ]), sprintf('%J', h.devices[A]));
+// Минута без трафика не пишется: у сотен адресов без трафика нет 60 точек нулей в файле и в ответе ubus.
+DV.add(h, DV.snapshot({ [A]: [ 10, 0, 0, 0, 0, 0 ] }, 8, 20000, 7265));
+check('устройства: минута без трафика не пишется', same(map(h.devices[A].minutes, x => x[0]), [ 7200 ]), sprintf('%J', h.devices[A].minutes));
 
 let dv2 = { last: null, devices: {} };
 DV.add(dv2, DV.snapshot({ [A]: [ 100, 100, 0, 0, 0, 0 ] }, 1, 0, 1000));
@@ -626,6 +630,11 @@ check('секции устройств: выключенная — «по пра
 check('секции устройств: неверный MAC с Политикой — пропущен и перечислен', same(map(dbad, x => x.key), [ 'device.mac' ]));
 check('настройки: в наборы Политик — только включённые «туннель» и «напрямую»',
 	same(F.load().devices, [ { name: '', mac: 'aa:bb:cc:dd:ee:02', policy: 'tunnel' } ]), sprintf('%J', F.load().devices));
+// Две секции с одним MAC (прежняя таблица сохраняла заглавными и не проверяла повторы): действует первая —
+// и в наборах ядра, и в списке, и на вкладке. Иначе «напрямую» второй побеждала бы в classify.
+config("config device\n\toption mac 'AA:BB:CC:DD:EE:05'\n\toption policy 'direct'\n\nconfig device\n\toption mac 'aa:bb:cc:dd:ee:05'\n\toption policy 'tunnel'\n");
+check('секции устройств: две с одним MAC — действует первая', same(F.device_sections(), [ { name: '', mac: 'aa:bb:cc:dd:ee:05', policy: 'direct' } ]),
+	sprintf('%J', F.device_sections()));
 
 let leases = DVC.parse_leases('1700000000 3C:7C:3F:00:00:9A 192.168.1.20 pc-living *\n1700000000 02:00:00:00:00:21 192.168.1.21 * 01:02\nмусор\n');
 check('аренды: MAC в нижнем регистре, «*» — без имени',
@@ -638,7 +647,7 @@ let dhist = { devices: {
 } };
 let dneigh = [ { ip: '192.168.1.30', mac: 'aa:bb:cc:dd:ee:30', dev: 'br-lan' }, { ip: '192.168.1.20', mac: '3c:7c:3f:00:00:9a', dev: 'br-lan' } ];
 let dsec = [ { name: 'TV', mac: '02:00:00:00:00:21', policy: 'rules' }, { name: 'console', mac: 'aa:bb:cc:dd:ee:30', policy: 'tunnel' },
-             { name: 'away', mac: 'aa:bb:cc:dd:ee:99', policy: 'direct' } ];
+             { name: 'away', mac: 'aa:bb:cc:dd:ee:99', policy: 'direct' }, { name: 'old', mac: 'aa:bb:cc:dd:ee:98', policy: 'rules' } ];
 let zone_of = (ip, dev) => (dev == 'br-lan' || match(ip, /^192\.168\.1\./)) ? 'lan' : (match(ip, /^100\.64\./) ? 'mesh' : null);
 let dlist = DVC.merge(dhist, leases, dneigh, dsec, zone_of);
 let dby = (k, v) => filter(dlist, d => d[k] == v)[0];
@@ -660,6 +669,28 @@ check('устройство с Политикой не в сети: без ад�
 let dmesh = dby('ip', '100.64.0.9');
 check('узел mesh-VPN только по трафику: без MAC и источника, «по правилам», зона по адресу',
 	dmesh?.mac == null && dmesh.source == null && dmesh.policy == 'rules' && dmesh.zone == 'mesh', sprintf('%J', dmesh));
+check('секция «по правилам» без адреса и трафика — не в списке (spec §6.1: без трафика — только с Политикой)',
+	dby('mac', 'aa:bb:cc:dd:ee:98') == null);
+
+// Список ограничен: в наборах до 1024 адресов, а ответ ubus и вкладка — нет. Остаются самые недавние
+// и все с Политикой.
+let many = { devices: {} };
+for (let i = 0; i < 300; i++)
+	many.devices[sprintf('10.200.%d.%d', i / 256, i % 256)] = { seen: 1, last: 1000 + i, rate: null, minutes: [], hours: [] };
+let capped = DVC.merge(many, [], [ { ip: '10.200.0.0', mac: 'aa:bb:cc:dd:ee:77', dev: 'br-lan' } ],
+	[ { name: 'nas', mac: 'aa:bb:cc:dd:ee:77', policy: 'direct' } ], () => null);
+check('список: не больше DEV_LIST_MAX самых недавних, устройство с Политикой — всегда',
+	length(capped) == C.DEV_LIST_MAX + 1 && filter(capped, d => d.ip == '10.200.1.43')[0] != null &&
+	filter(capped, d => d.ip == '10.200.0.0')[0]?.policy == 'direct' && filter(capped, d => d.ip == '10.200.0.1')[0] == null,
+	sprintf('%d', length(capped)));
+
+// Интерфейс адреса без соседа — по таблицам маршрутов одним вызовом: самый длинный префикс, без default.
+let routes = [ { dst: 'default', gateway: '192.0.2.1', dev: 'eth0' }, { dst: '192.168.1.0/24', dev: 'br-lan' },
+               { dst: '100.64.0.0/10', dev: 'tailscale0', table: '52' }, { dst: '100.64.0.9', dev: 'mesh1' }, { type: 'unreachable', dst: '10.0.0.0/8' } ];
+let rt = DVC.route_table(routes);
+check('маршрут: самый длинный префикс, default и маршруты без интерфейса не в счёт',
+	DVC.route_dev(rt, '100.64.0.9') == 'mesh1' && DVC.route_dev(rt, '100.64.1.1') == 'tailscale0' &&
+	DVC.route_dev(rt, '192.168.1.5') == 'br-lan' && DVC.route_dev(rt, '8.8.8.8') == null && DVC.route_dev(rt, '10.1.1.1') == null);
 
 // ---- Соединения устройства (connections) из образца conntrack ----
 

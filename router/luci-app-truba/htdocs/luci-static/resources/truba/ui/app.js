@@ -167,6 +167,12 @@ function addSection(config, type) {
 	return sid;
 }
 
+// Удалить секцию (устройство «по правилам», секция с неверным MAC) — тоже несохранённое изменение.
+function removeSection(config, sid) {
+	uci.remove(config, sid);
+	changes.set({ n: changeCount() });
+}
+
 // У секции есть несохранённые изменения: она новая, изменена или удалена (точка «изменено» у строки).
 function pending(config, sid) {
 	const st = uci.state || {};
@@ -226,5 +232,6 @@ return baseclass.extend({
 	load, lib, luminance, schemeFrom, mount, store, use, scheme, changes, changeCount, pending, usePoll,
 	poll: pollStore,
 	set: setOpt,
-	add: addSection
+	add: addSection,
+	remove: removeSection
 });

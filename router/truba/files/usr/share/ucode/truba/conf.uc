@@ -145,13 +145,15 @@ export function schema() {
 // с одной из них (нет опции — умолчание схемы), иначе rules. Незнакомая Политика — как «По правилам»,
 // а не как умолчание: устройство не уходит в Туннель по опечатке. Секция без верного MAC пропускается:
 // MAC попадает в набор nftables, с опечаткой не загрузилась бы вся таблица; если секция что-то
-// меняла бы, она — в bad. c — курсор с загруженным truba (иначе свой).
+// меняла бы, она — в bad. Из нескольких секций с одним MAC действует первая: иначе в наборах ядра
+// «напрямую» одной побеждала бы «туннель» другой, а вкладка и проверка показывали бы первую.
+// c — курсор с загруженным truba (иначе свой).
 export function device_sections(bad, c) {
 	if (!c) {
 		c = cursor();
 		c.load('truba');
 	}
-	let out = [];
+	let out = [], seen = {};
 	c.foreach('truba', 'device', (s) => {
 		let policy = s.policy ?? SCHEMA.device.policy.def;
 		if (!(policy in [ 'tunnel', 'direct' ]) || s.enabled == '0')
@@ -162,6 +164,9 @@ export function device_sections(bad, c) {
 				push(bad ?? [], { key: 'device.mac', value: '' + s.mac });
 			return;
 		}
+		if (seen[mac])
+			return;
+		seen[mac] = true;
 		push(out, { name: s.name ?? '', mac, policy });
 	});
 	return out;

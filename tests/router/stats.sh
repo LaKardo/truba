@@ -53,6 +53,14 @@ dj() { jsonfilter -i /tmp/d.json -e "@.devices[@.ip='192.168.1.50'].$1" 2>/dev/n
 LH_MAC="$(ip -n lanhost link show lh0 | awk '/link\/ether/ { print $2 }')"
 check "rpcd devices: зона lan, MAC соседа, источник neigh, скорость есть" \
 	eval '[ "$(dj zone)" = lan ] && [ "$(dj mac)" = "$LH_MAC" ] && [ "$(dj source)" = neigh ] && [ -n "$(dj rate)" ]'
+# Сотни чужих адресов в наборе (подменённые источники, большая mesh-сеть): список ограничен, ответ
+# ubus быстрый — интерфейс адресов без соседа ищется одним вызовом ip, а не процессом на адрес.
+nft add element inet truba dv_tunnel_up "{ $(seq 0 299 | awk '{ printf "%s10.201.%d.%d counter packets 1 bytes 100", (NR > 1 ? "," : ""), int($1 / 256), $1 % 256 }') }"
+many_seen() { [ "$(grep -o '"10\.201\.[0-9]*\.[0-9]*": {"seen' $D | wc -l)" -ge 300 ]; }
+wait_for 15 many_seen
+T0=$(date +%s); ubus -t 20 call truba devices > /tmp/d2.json; T1=$(date +%s)
+check "300 чужих адресов: devices отвечает не дольше 3 с, в списке не больше 256" \
+	eval '[ $((T1 - T0)) -le 3 ] && [ "$(jsonfilter -i /tmp/d2.json -e "@.devices[*].ip" | wc -l)" -le 256 ]'
 ubus call truba rates '{"span":600}' > /tmp/r.json
 check "rpcd rates: время Роутера, точки за 10 минут" eval '[ "$(jsonfilter -i /tmp/r.json -e "@.now")" -ge "$T0" ] && [ "$(rf 4 /tmp/r.json)" -ge 2 ]'
 

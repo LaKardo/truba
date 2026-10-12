@@ -82,6 +82,9 @@ export const DEV_SET_SIZE = 1024;
 // Срок элемента набора и истории устройства без трафика, с.
 export const DEV_SPAN = 86400;
 export const DEVICES_FILE = RUN_DIR + '/devices.json';
+// Сколько устройств отдаёт devices: самые недавние и все с Политикой. В наборах адресов до DEV_SET_SIZE
+// (в том числе подменённых), а ответ ubus и вкладка столько не вынесут.
+export const DEV_LIST_MAX = 256;
 // «Куда ходит сейчас»: таблица соединений ядра и сколько адресов отдавать.
 export const CONNTRACK = '/proc/net/nf_conntrack';
 export const CONN_TOP = 20;

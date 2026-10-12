@@ -1201,3 +1201,6 @@ msgstr "Выберите устройство, чтобы увидеть его 
 
 msgid "tunnel / direct · now"
 msgstr "Туннель / Напрямую · сейчас"
+
+msgid "A device with an invalid MAC address «%s» is ignored."
+msgstr "Устройство с неверным MAC-адресом «%s» пропускается."

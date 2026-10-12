@@ -348,9 +348,10 @@ function devRate(d) {
 }
 
 // Туннель и Напрямую за последнюю минуту (точка [ t, Туннель ↓, ↑, Напрямую ↓, ↑ ]), без неё — сейчас.
-function devShare(d) {
+// Минуты без трафика служба не пишет: точка старше двух минут — уже не последняя минута.
+function devShare(d, now) {
 	const m = d?.minutes?.[d.minutes.length - 1];
-	const v = (m && m.length > 1) ? m.slice(1) : (d?.rate || []);
+	const v = (m && m.length > 1 && now - m[0] <= 120) ? m.slice(1) : (d?.rate || []);
 	return [ (v[0] || 0) + (v[1] || 0), (v[2] || 0) + (v[3] || 0) ];
 }
 
@@ -358,13 +359,17 @@ function devActive(d, now) {
 	return d?.last != null && now - d.last <= ACTIVE_SPAN;
 }
 
-// Секция device с этим MAC — без учёта регистра (прежняя таблица «Маршрутизации» сохраняла его
-// заглавными); из нескольких — первая, как у службы.
-function deviceSection(mac) {
+// Секции device с этим MAC — без учёта регистра (прежняя таблица «Маршрутизации» сохраняла его
+// заглавными и не проверяла повторы). Действует первая, как у службы (conf.uc, device_sections).
+function deviceSections(mac) {
 	if (!mac)
-		return null;
+		return [];
 	const m = String(mac).toLowerCase();
-	return uci.sections('truba', 'device').find((s) => String(s.mac || '').toLowerCase() == m)?.['.name'] || null;
+	return uci.sections('truba', 'device').filter((s) => String(s.mac || '').toLowerCase() == m).map((s) => s['.name']);
+}
+
+function deviceSection(mac) {
+	return deviceSections(mac)[0] || null;
 }
 
 // Политика устройства так, как её поймёт служба (truba.conf, device_sections), — по настройкам
@@ -429,7 +434,7 @@ function tabUrl(tab) {
 return baseclass.extend({
 	callStatus, callLists, callCategories, callSets, callCheck, callUpdateLists, callRollbackLists, callRates, callLog, callLeases,
 	callSchema, loadSchema, schema, get, field, handshakeLevel, callDevices, callConnections,
-	ACTIVE_SPAN, devRate, devShare, devActive, deviceSection, devicePolicy, normMac,
+	ACTIVE_SPAN, devRate, devShare, devActive, deviceSections, deviceSection, devicePolicy, normMac,
 	runNatTest, runTunnelTest,
 	ACTION_LABELS, ACTION_LEVELS, REASON_LABELS, WARNINGS, NAT_ERRORS, UPNP_MISSING, NBSP, TABS,
 	fmtBytes, fmtRate, fmtAge, fmtTime, fmtDate, fmtNum, missingText,

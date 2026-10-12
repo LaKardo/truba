@@ -310,6 +310,14 @@ msgid "Add by MAC"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/devices.js
+msgid "A device with an invalid MAC address «%s» is ignored."
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/devices.js
+msgid "Remove"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/devices.js
 msgid "Name, IP or MAC"
 msgstr ""
 
@@ -1283,10 +1291,6 @@ msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/routing.js
 msgid "Search category…"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/routing.js
-msgid "Remove"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/routing.js

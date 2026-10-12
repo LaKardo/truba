@@ -317,9 +317,13 @@ if (cdev) {
 		'common.normMac: дефисы и регистр, не MAC — null');
 	check(JSON.stringify(cdev.devRate?.({ rate: [ 1, 2, 3, 4, 5, 6 ] })) === '[9,12]' && cdev.devRate({ rate: null }) === null,
 		'common.devRate: к устройству и от него по всем Действиям');
-	check(JSON.stringify(cdev.devShare?.({ minutes: [ [ 60, 9, 9, 9, 9 ], [ 120, 1, 2, 3, 4 ] ], rate: [ 50, 50, 0, 0, 0, 0 ] })) === '[3,7]' &&
-		JSON.stringify(cdev.devShare({ minutes: [], rate: [ 1, 2, 3, 4, 5, 6 ] })) === '[3,7]' && JSON.stringify(cdev.devShare({})) === '[0,0]',
+	check(JSON.stringify(cdev.devShare?.({ minutes: [ [ 60, 9, 9, 9, 9 ], [ 120, 1, 2, 3, 4 ] ], rate: [ 50, 50, 0, 0, 0, 0 ] }, 150)) === '[3,7]' &&
+		JSON.stringify(cdev.devShare({ minutes: [], rate: [ 1, 2, 3, 4, 5, 6 ] }, 150)) === '[3,7]' && JSON.stringify(cdev.devShare({}, 150)) === '[0,0]',
 		'common.devShare: Туннель и Напрямую за последнюю минуту, без неё — сейчас');
+	// Минуты без трафика служба не пишет: последняя точка может быть старой — тогда по скорости сейчас.
+	check(JSON.stringify(cdev.devShare({ minutes: [ [ 120, 1, 2, 3, 4 ] ], rate: [ 50, 50, 0, 0, 0, 0 ] }, 1000)) === '[100,0]',
+		'common.devShare: старая минута — не последняя, доля по скорости сейчас');
+	check(JSON.stringify(cdev.deviceSections?.('aa:bb:cc:dd:ee:01')) === '["d1","d5"]', 'common.deviceSections: все секции MAC, первая — первой');
 	check(cdev.devActive?.({ last: 700 }, 1000) === true && cdev.devActive({ last: 699 }, 1000) === false && cdev.devActive({ last: null }, 1000) === false,
 		'common.devActive: трафик за 5 минут');
 }

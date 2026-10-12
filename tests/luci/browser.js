@@ -218,6 +218,11 @@ async function waitApply(page) {
 	result(await applied(t0, async () =>
 		(await ubus('truba', 'check', { target: '8.8.8.8', mac: '02:11:22:33:44:55' })).reason == 'device'),
 		'«Применить»: Политика устройства → действует');
+	// Имя из IP не пишется: адрес устройства меняется, а имя в настройках осталось бы прежним адресом.
+	const devSecs = async (mac) => Object.values((await ubus('uci', 'get', { config: 'truba', type: 'device' })).values || {})
+		.filter((s) => String(s.mac).toLowerCase() == mac);
+	const s50 = await devSecs('02:11:22:33:44:55');
+	result(s50.length == 1 && !s50[0].name, '«Политика устройства»: без имени у аренды в имя не пишется IP', JSON.stringify(s50));
 
 	// «Добавить по MAC»: Политика заранее — устройству, которого нет в сети.
 	t0 = await time();
@@ -244,6 +249,7 @@ async function waitApply(page) {
 	// Тот же MAC ещё раз — новой секции нет, выбрана его строка.
 	await tap('[data-act="add-mac"]');
 	await (await el('.addmac input[name="mac"]'))?.type('02:aa:bb:cc:dd:01');
+	await clickIn('.addmac .seg button', '^All direct$');   // Политика из формы — его секции
 	await tap('.addmac [data-act="add"]');
 	const same = await page.evaluate(async () => (await L.require('uci')).sections('truba', 'device')
 		.filter((s) => String(s.mac).toLowerCase() == '02:aa:bb:cc:dd:01').length);
@@ -254,6 +260,48 @@ async function waitApply(page) {
 		const d = (await ubus('truba', 'devices')).devices.find((x) => x.mac == '02:aa:bb:cc:dd:01');
 		return d?.policy == 'direct' && d.source == 'config' && d.ip == null;
 	}), '«Добавить по MAC» → служба знает устройство: «напрямую», из настроек');
+
+	// «Добавить по MAC» с MAC устройства в сети, у которого секция уже есть: Политика из формы — его
+	// секции, выбрана его строка. Затем «Сбросить» — изменение не нужно.
+	await page.goto(url('devices'), { waitUntil: 'networkidle2' });
+	await settled(page);
+	await tap('[data-act="add-mac"]');
+	await (await el('.addmac input[name="mac"]'))?.type('02:11:22:33:44:55');
+	await clickIn('.addmac .seg button', '^All direct$');
+	await tap('.addmac [data-act="add"]');
+	await sleep(300);
+	const online = await page.evaluate(() => {
+		const r = document.querySelector('.truba-root').shadowRoot;
+		return { sel: !!r.querySelector('button.dev.sel[data-ip="192.168.1.50"]'),
+			pol: [ ...r.querySelectorAll('.panel .policy button') ].find((b) => b.getAttribute('aria-pressed') == 'true')?.textContent };
+	});
+	result(online.sel && online.pol == 'All direct', '«Добавить по MAC»: устройство в сети — его строка выбрана, Политика из формы', JSON.stringify(online));
+	await Promise.all([ page.waitForNavigation({ waitUntil: 'networkidle2' }).catch(() => {}), tap('.changes [data-act="reset"]') ]);
+	await settled(page);
+
+	// «По правилам» убирает секцию: устройство без Политики и без трафика уходит из списка.
+	t0 = await time();
+	await tap(newRow);
+	await page.waitForFunction(() => document.querySelector('.truba-root')?.shadowRoot?.querySelector('.panel .policy .seg'), { timeout: 5000 }).catch(() => {});
+	await clickIn('.panel .policy button', '^By rules$');
+	const gone = await page.waitForFunction((s) => !document.querySelector('.truba-root').shadowRoot.querySelector(s), { timeout: 5000 }, newRow)
+		.then(() => true).catch(() => false);
+	await tap('.changes [data-act="apply"]');
+	await waitApply(page);
+	result(gone && await applied(t0, async () => !(await ubus('truba', 'devices')).devices.some((x) => x.mac == '02:aa:bb:cc:dd:01')) &&
+		!(await devSecs('02:aa:bb:cc:dd:01')).length, '«По правилам»: секция убрана, устройство ушло из списка');
+
+	// Секция с неверным MAC: служба её пропускает и предупреждает, ссылка ведёт сюда — здесь её видно и можно убрать.
+	await ubus('uci', 'add', { config: 'truba', type: 'device', values: { mac: 'zz:zz', policy: 'direct' } });
+	await ubus('uci', 'commit', { config: 'truba' });
+	await page.goto(url('devices'), { waitUntil: 'networkidle2' });
+	await settled(page);
+	const badText = await page.evaluate(() => document.querySelector('.truba-root').shadowRoot.querySelector('.badmac')?.innerText || '');
+	await tap('.badmac [data-act="remove-bad"]');
+	await tap('.changes [data-act="apply"]');
+	await waitApply(page);
+	result(/zz:zz/.test(badText) && !(await devSecs('zz:zz')).length, '«Устройства»: секция с неверным MAC видна и убирается',
+		badText.replace(/\s+/g, ' '));
 
 	// 3. Переключатель «Маршрутизация» в строке состояния «Обзора» — выкл, применение — панелью изменений.
 	t0 = await time();

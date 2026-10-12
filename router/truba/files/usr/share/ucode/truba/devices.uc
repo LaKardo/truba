@@ -25,32 +25,51 @@ export function parse_leases(text) {
 	return out;
 };
 
-function first(list, key, value) {
+// Указатель списка по полю: первая запись с этим значением. Списки бывают по сотне записей, а
+// поиск нужен для каждого устройства.
+function index_by(list, key) {
+	let out = {};
 	for (let x in list)
-		if (x[key] == value)
-			return x;
-	return null;
+		if (x[key] != null)
+			out[x[key]] ??= x;
+	return out;
 }
 
-// Список устройств: адреса из истории, затем адреса устройств с Политикой (по MAC — аренда, сосед),
-// а секции, чей MAC сейчас не в сети, — без адреса. leases — parse_leases, neigh — [ { ip, mac, dev } ],
-// secs — F.device_sections, zone_of(ip, dev) — зона fw4 или null.
+// Список устройств: адреса из истории — не больше C.DEV_LIST_MAX самых недавних, но все с Политикой;
+// затем адреса устройств с Политикой (по MAC — аренда, сосед), а секции с Политикой, чей MAC сейчас
+// не в сети, — без адреса. Секция «по правилам» без трафика в список не попадает: она ничего не меняет.
+// leases — parse_leases, neigh — [ { ip, mac, dev } ], secs — F.device_sections, zone_of(ip, dev) — зона.
 export function merge(hist, leases, neigh, secs, zone_of) {
 	let devs = (type(hist?.devices) == 'object') ? hist.devices : {};
-	let ips = keys(devs), extra = [];
+	let l_ip = index_by(leases, 'ip'), l_mac = index_by(leases, 'mac');
+	let n_ip = index_by(neigh, 'ip'), n_mac = index_by(neigh, 'mac'), s_mac = index_by(secs, 'mac');
+	let ruled = (ip) => (s_mac[l_ip[ip]?.mac ?? n_ip[ip]?.mac]?.policy ?? 'rules') != 'rules';
+	let recent = (ip) => ((devs[ip].last ?? 0) > (devs[ip].seen ?? 0)) ? devs[ip].last : (devs[ip].seen ?? 0);
+
+	let ips = [], listed = {}, extra = [];
+	for (let ip in sort(keys(devs), (a, b) => recent(b) - recent(a))) {
+		if (length(ips) < C.DEV_LIST_MAX || ruled(ip)) {
+			push(ips, ip);
+			listed[ip] = true;
+		}
+	}
 	for (let s in secs) {
-		let ip = first(leases, 'mac', s.mac)?.ip ?? first(neigh, 'mac', s.mac)?.ip;
+		if (s.policy == 'rules')
+			continue;
+		let ip = l_mac[s.mac]?.ip ?? n_mac[s.mac]?.ip;
 		if (ip == null)
 			push(extra, s);
-		else if (!(ip in ips))
+		else if (!listed[ip]) {
 			push(ips, ip);
+			listed[ip] = true;
+		}
 	}
 
 	let out = [];
 	for (let ip in ips) {
-		let l = first(leases, 'ip', ip), n = first(neigh, 'ip', ip), h = devs[ip];
+		let l = l_ip[ip], n = n_ip[ip], h = devs[ip];
 		let mac = l?.mac ?? n?.mac;
-		let sec = mac ? first(secs, 'mac', mac) : null;
+		let sec = mac ? s_mac[mac] : null;
 		push(out, {
 			ip, mac,
 			name: length(sec?.name) ? sec.name : l?.name,
@@ -92,22 +111,55 @@ function neighbours() {
 	return out;
 }
 
-// Интерфейс, через который Роутер видит адрес (узлы mesh-VPN соседями не бывают).
-function route_dev(ip) {
-	try {
-		return json(U.run('ip -4 -j route get ' + U.shq(ip)).out)?.[0]?.dev;
+// Маршруты всех таблиц (ip -4 -j route show table all) как [ сеть, маска, длина, интерфейс ]: у адресов
+// без соседа (узлы mesh-VPN, их маршруты — в своих таблицах) интерфейс ищется по ним, одним вызовом
+// ip на весь список, а не своим процессом на каждый адрес. default и маршруты без интерфейса не в счёт.
+export function route_table(routes) {
+	let out = [];
+	for (let r in routes ?? []) {
+		if (!r?.dev || r.dst == null || r.dst == 'default' || !((r.type ?? 'unicast') in [ 'unicast', 'local' ]))
+			continue;
+		let m = match(r.dst, /^([0-9.]+)(\/([0-9]+))?$/), net = m ? U.ip2int(m[1]) : null;
+		if (net == null)
+			continue;
+		let len = (m[3] != null) ? int(m[3]) : 32;
+		let mask = len ? ((0xffffffff << (32 - len)) & 0xffffffff) : 0;
+		push(out, [ net & mask, mask, len, r.dev ]);
 	}
-	catch (e) {
+	return out;
+};
+
+// Интерфейс адреса по самому длинному подходящему префиксу; null — не нашёлся.
+export function route_dev(table, ip) {
+	let n = U.ip2int(ip), best = null, len = -1;
+	if (n == null)
 		return null;
-	}
-}
+	for (let r in table)
+		if (r[2] > len && (n & r[1]) == r[0]) {
+			best = r[3];
+			len = r[2];
+		}
+	return best;
+};
 
 // Для rpcd (truba.devices): { now, devices }.
 export function list() {
 	let ub = connect();
 	let zones = F.dev_zones(ub);
 	ub?.disconnect();
-	let zone_of = (ip, dev) => zones[dev ?? route_dev(ip)];
+	let table = null;
+	let zone_of = (ip, dev) => {
+		if (dev == null) {
+			try {
+				table ??= route_table(json(U.run('ip -4 -j route show table all').out));
+			}
+			catch (e) {
+				table = [];
+			}
+			dev = route_dev(table, ip);
+		}
+		return zones[dev];
+	};
 	return { now: time(), devices: merge(U.read_json(C.DEVICES_FILE, null), leases(), neighbours(), F.device_sections(), zone_of) };
 };
 
@@ -171,7 +223,7 @@ function mark_action(mark) {
 
 // MAC адреса — для Политики устройства в решении по правилам.
 function mac_of(ip) {
-	return first(leases(), 'ip', ip)?.mac ?? first(neighbours(), 'ip', ip)?.mac;
+	return index_by(leases(), 'ip')[ip]?.mac ?? index_by(neighbours(), 'ip')[ip]?.mac;
 }
 
 // Для rpcd (truba.connections): CONN_TOP адресов с причиной по нынешним правилам. Если правила

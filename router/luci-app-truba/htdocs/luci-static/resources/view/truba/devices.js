@@ -13,14 +13,15 @@ const POLL = 5000;   // devices, а при открытой панели ещё 
 
 const key = (d) => d.ip || d.mac;
 
-// Устройства службы и секции device из настроек браузера, которых служба ещё не знает (добавлены
-// «по MAC» и не применены): такие — «не в сети», как у службы устройство с Политикой без адреса.
+// Устройства службы и секции device с Политикой из настроек браузера, которых служба ещё не знает
+// (добавлены «по MAC» и не применены): такие — «не в сети», как у службы устройство с Политикой без
+// адреса. Секция «по правилам» ничего не меняет — в список она не попадает, как и у службы.
 function withPending(devices) {
 	const known = new Set(devices.map((d) => d.mac).filter(Boolean));
-	const out = devices.slice();
+	const out = devices.filter((d) => d.ip || common.devicePolicy(d.mac) != 'rules');
 	for (let s of uci.sections('truba', 'device')) {
 		const mac = common.normMac(s.mac);
-		if (!mac || known.has(mac))
+		if (!mac || known.has(mac) || common.devicePolicy(mac) == 'rules')
 			continue;
 		known.add(mac);
 		out.push({ ip: null, mac, name: s.name || null, source: 'config', zone: null, rate: null, day: null, minutes: [], last: null });
@@ -33,17 +34,22 @@ function speed(d) {
 	return r ? r[0] + r[1] : -1;
 }
 
-// Политика в UCI браузера: секция по MAC, а если её нет — новая с именем и MAC. «По правилам» новой
-// секции не заводит: без секции устройство и так идёт по правилам.
-function setPolicy(d, policy) {
-	let sid = common.deviceSection(d.mac);
-	if (!sid) {
-		if (policy == 'rules')
-			return;
-		sid = app.add('truba', 'device');
-		app.set('truba', sid, 'name', d.name || d.ip || d.mac);
-		app.set('truba', sid, 'mac', d.mac);
+// Политика в UCI браузера. «По правилам» — это отсутствие секции: секции этого MAC удаляются, и
+// устройство без трафика уходит из списка. Иначе — первая секция MAC (она и действует у службы), а если
+// её нет — новая с MAC и именем, если оно есть: адрес именем не становится, он меняется.
+function setPolicy(mac, policy, name) {
+	if (policy == 'rules') {
+		for (let sid of common.deviceSections(mac))
+			app.remove('truba', sid);
+		return;
 	}
+	let sid = common.deviceSection(mac);
+	if (!sid) {
+		sid = app.add('truba', 'device');
+		app.set('truba', sid, 'mac', mac);
+	}
+	if (name)
+		app.set('truba', sid, 'name', name);
 	app.set('truba', sid, 'policy', policy);
 	if (uci.get('truba', sid, 'enabled') == '0')
 		app.set('truba', sid, 'enabled', '1');
@@ -56,7 +62,7 @@ const SOURCE = () => ({ dhcp: _('DHCP'), neigh: _('neighbour'), config: _('setti
 function Row({ d, now, sel, onSel }) {
 	const { html } = app.lib;
 	const pol = common.devicePolicy(d.mac);
-	const r = common.devRate(d), [ tun, dir ] = common.devShare(d);
+	const r = common.devRate(d), [ tun, dir ] = common.devShare(d, now);
 	const day = d.day ? d.day.reduce((a, b) => a + b, 0) : null;
 	const sid = common.deviceSection(d.mac);
 	return html`<button type="button" class=${'dev' + (sel ? ' sel' : '')} data-ip=${d.ip || undefined} data-mac=${d.mac || undefined}
@@ -73,7 +79,7 @@ function Row({ d, now, sel, onSel }) {
 }
 
 // Форма «Добавить по MAC»: Политика заранее — устройству, которого сейчас нет в сети. MAC, у которого
-// секция уже есть, новую не заводит: выбирается его строка.
+// секция уже есть, второй не заводит: Политика и имя из формы — его секции, выбирается его строка.
 function AddMac({ onDone }) {
 	const { html, useState } = app.lib;
 	const [ mac, setMac ] = useState(''), [ name, setName ] = useState(''), [ pol, setPol ] = useState('tunnel');
@@ -82,13 +88,7 @@ function AddMac({ onDone }) {
 		ev.preventDefault();
 		if (!m)
 			return;
-		if (!common.deviceSection(m)) {
-			const sid = app.add('truba', 'device');
-			if (name.trim())
-				app.set('truba', sid, 'name', name.trim());
-			app.set('truba', sid, 'mac', m);
-			app.set('truba', sid, 'policy', pol);
-		}
+		setPolicy(m, pol, name.trim());
 		onDone(m);
 	};
 	return html`<form class="addmac" onSubmit=${add}>
@@ -116,17 +116,25 @@ function List({ devices, now, sel, onSel }) {
 		.filter((d) => (f == 'all') || (f == 'active' ? active(d) : ruled(d)))
 		.filter((d) => !qq || [ d.name, d.ip, d.mac ].some((x) => String(x || '').toLowerCase().includes(qq)))
 		.sort((a, b) => (speed(b) - speed(a)) || String(a.name || a.ip || a.mac).localeCompare(String(b.name || b.ip || b.mac)));
+	// Секции с неверным MAC служба пропускает и предупреждает о них на «Обзоре» со ссылкой сюда:
+	// здесь их видно и можно убрать.
+	const bad = uci.sections('truba', 'device').filter((s) => s.mac && !common.normMac(s.mac));
 	const done = (mac) => {
 		setAdding(false);
 		if (mac) {
 			setF('all');
 			setQ('');
-			onSel(mac);
+			const d = devices.find((x) => x.mac == mac);
+			onSel(d ? key(d) : mac);
 		}
 	};
 	return html`<${kit.Card} cls="list" title=""
 		aside=${html`<button type="button" class="btn" data-act="add-mac" onClick=${() => setAdding(true)}>${_('Add by MAC')}</button>`}>
 		${adding ? html`<${AddMac} onDone=${done} />` : ''}
+		${bad.map((s) => html`<div class="badmac">
+			<span>${_('A device with an invalid MAC address «%s» is ignored.').format(s.mac)}</span>
+			<button type="button" class="btn" data-act="remove-bad" onClick=${() => app.remove('truba', s['.name'])}>${_('Remove')}</button>
+		</div>`)}
 		<div class="toolbar">
 			<input type="search" placeholder=${_('Name, IP or MAC')} value=${q} onInput=${(ev) => setQ(ev.target.value)} />
 			<${kit.Chips} label=${_('Filter')} value=${f} onChange=${setF} items=${[
@@ -222,7 +230,7 @@ function Panel({ d, now, onClose }) {
 		<div class="mu">${[ d.ip || _('offline'), d.mac || _('no MAC'), src ].filter(Boolean).join(' · ')}</div>
 		<div class="policy">
 			<${kit.Segmented} label=${_('Policy')} items=${POLICY_ITEMS()} value=${common.devicePolicy(d.mac)} disabled=${!d.mac}
-				onChange=${(p) => setPolicy(d, p)} />
+				onChange=${(p) => setPolicy(d.mac, p, common.deviceSection(d.mac) ? null : d.name)} />
 			<div class="mu">${d.mac ? _('«All via tunnel» is recommended for game consoles: then all their traffic gets the Truba IP and full cone NAT.')
 				: _('The policy is tied to the MAC address; mesh VPN nodes have none.')}</div>
 		</div>

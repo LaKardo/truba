@@ -275,7 +275,7 @@ function DevicesCard({ devices }) {
 	const top = (devices?.devices || []).filter((d) => d.ip).sort((a, b) => (down(b) - down(a)) || ((b.last || 0) - (a.last || 0))).slice(0, 5);
 	return html`<${kit.Card} cls="w2 devs" title=${_('Devices')} aside=${_('tunnel / direct · now')}>
 		${top.length ? top.map((d) => {
-			const [ tun, dir ] = common.devShare(d), r = common.devRate(d);
+			const [ tun, dir ] = common.devShare(d, devices.now), r = common.devRate(d);
 			return html`<div class="devrow">
 				<span class="n">${d.name || d.ip}</span>
 				<${kit.ShareBar} tunnel=${tun} direct=${dir} />
