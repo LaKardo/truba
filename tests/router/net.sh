@@ -345,6 +345,9 @@ IN_DOWN="$(bytes c_inbound_down)"
 ip -n vps addr add 1.2.3.4/32 dev lo
 check "устройство → Туннель: ответ пришёл, посчитан в обе стороны" eval 'lan_tcp 1.2.3.4 48081 && gt0 c_tunnel_up && gt0 c_tunnel_down'
 check "устройство — в dv_tunnel_up и dv_tunnel_down" eval 'in_set dv_tunnel_up 192.168.1.50 && in_set dv_tunnel_down 192.168.1.50'
+# «Куда ходит сейчас»: соединение только что закрыто, conntrack держит его ещё пару минут.
+cj() { ubus call truba connections '{"ip":"192.168.1.50"}' | jsonfilter -e "@.addrs[@.addr='1.2.3.4'].$1" 2>/dev/null; }
+check "connections: 1.2.3.4 — Туннель, по Режиму" eval '[ "$(cj action)" = tunnel ] && [ "$(cj reason)" = mode ]'
 # Ответ из Туннеля на исходящее — «Туннель», хотя ct mark он переписывает на «входящее».
 check "исходящее через Туннель не считается входящим" test "$(bytes c_inbound_down)" = "$IN_DOWN"
 # «Интернет напрямую» стенда — Труба по внешнему адресу через ul0; на время — в зоне wan.

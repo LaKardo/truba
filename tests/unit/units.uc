@@ -474,6 +474,11 @@ let x = K.check('b.a.example.com');
 check('домен: видны все совпавшие Категории', same(sort(map(x.geosite, h => h.tag)), [ 'znarrow', 'zwide' ]), sprintf('%J', x.geosite));
 x = K.check('5.6.7.8');
 check('IP: Категория geoip из распакованного файла', x.action == 'direct' && x.reason == 'geoip' && same(x.ips[0].geoip, [ 'ru' ]), sprintf('%J', x.ips));
+// «Куда ходит сейчас» (connections): только Категории geoip с Действием — у private его нет.
+let iv = K.ip_verdicts([ '5.6.7.8', '192.168.5.5' ], null);
+check('решения для соединений: geoip — только Категории с Действием',
+	same(map(iv ?? [], v => v.geoip), [ [ 'ru' ], [] ]) && iv[0].action == 'direct' && iv[0].reason == 'geoip' &&
+	same(K.check('192.168.5.5').ips[0].geoip, [ 'private' ]), sprintf('%J', iv));
 
 // ---- История скорости (truba stats) без процесса и файлов ----
 
@@ -656,6 +661,33 @@ let dmesh = dby('ip', '100.64.0.9');
 check('узел mesh-VPN только по трафику: без MAC и источника, «по правилам», зона по адресу',
 	dmesh?.mac == null && dmesh.source == null && dmesh.policy == 'rules' && dmesh.zone == 'mesh', sprintf('%J', dmesh));
 
+// ---- Соединения устройства (connections) из образца conntrack ----
+
+let ct_text = join('\n', [
+	'ipv4     2 tcp      6 431999 ESTABLISHED src=192.168.1.50 dst=1.2.3.4 sport=51000 dport=443 packets=10 bytes=1000 src=1.2.3.4 dst=203.0.113.5 sport=443 dport=51000 packets=12 bytes=9000 [ASSURED] mark=16777216 zone=0 use=2',
+	'ipv4     2 udp      17 29 src=192.168.1.50 dst=1.2.3.4 sport=5000 dport=3478 packets=1 bytes=100 [UNREPLIED] src=1.2.3.4 dst=203.0.113.5 sport=3478 dport=5000 packets=0 bytes=0 mark=16777216 zone=0 use=2',
+	'ipv4     2 tcp      6 100 ESTABLISHED src=192.168.1.50 dst=5.6.7.8 sport=51001 dport=80 packets=3 bytes=300 src=5.6.7.8 dst=192.168.1.50 sport=80 dport=51001 packets=3 bytes=400 [ASSURED] mark=33554432 zone=0 use=2',
+	'ipv4     2 tcp      6 100 ESTABLISHED src=192.168.1.60 dst=1.2.3.4 sport=1 dport=443 packets=1 bytes=1 src=1.2.3.4 dst=192.168.1.60 sport=443 dport=1 packets=1 bytes=1 mark=0 zone=0 use=2',
+	'ipv6     10 tcp     6 100 ESTABLISHED src=fd00::50 dst=2001:db8::1 sport=1 dport=443 packets=1 bytes=1 src=2001:db8::1 dst=fd00::50 sport=443 dport=1 packets=1 bytes=1 mark=0 zone=0 use=2',
+	'',
+]);
+let cts = DVC.parse_conntrack(ct_text, '192.168.1.50');
+check('conntrack: только соединения устройства по IPv4, поля первого', length(cts) == 3 &&
+	same(cts[0], { proto: 'tcp', dst: '1.2.3.4', dport: 443, up: 1000, down: 9000, mark: 16777216 }), sprintf('%J', cts));
+let cg = DVC.group(cts);
+check('conntrack: по адресам, крупнейший первым; протокол и порт — самого крупного соединения',
+	cg.total == 3 && cg.acct && length(cg.addrs) == 2 &&
+	same(cg.addrs[0], { addr: '1.2.3.4', proto: 'tcp', port: 443, conns: 2, up: 1100, down: 9000, mark: 16777216 }), sprintf('%J', cg));
+let noacct = DVC.group(DVC.parse_conntrack(replace(ct_text, / packets=[0-9]+ bytes=[0-9]+/g, ''), '192.168.1.50'));
+check('conntrack: без nf_conntrack_acct — байтов нет, порядок по числу соединений',
+	!noacct.acct && noacct.addrs[0].addr == '1.2.3.4' && noacct.addrs[0].up == null && noacct.addrs[1].down == null, sprintf('%J', noacct));
+let big = [];
+for (let i = 0; i < 5000; i++)
+	push(big, sprintf('ipv4     2 tcp      6 100 ESTABLISHED src=192.168.1.50 dst=198.51.100.%d sport=%d dport=443 packets=1 bytes=%d src=198.51.100.%d dst=192.168.1.50 sport=443 dport=%d packets=1 bytes=1 mark=0 zone=0 use=2',
+		i % 25, 10000 + i, i % 25, i % 25, 10000 + i));
+let bg = DVC.group(DVC.parse_conntrack(join('\n', big), '192.168.1.50'));
+check('conntrack: 5000 соединений к 25 адресам — 20 адресов, всего 5000', length(bg.addrs) == 20 && bg.total == 5000 && bg.addrs[0].addr == '198.51.100.24');
+
 // ---- ubus-API: методы, которые читают файлы, без rpcd ----
 
 let api = loadfile(PLUGIN)()?.truba;
@@ -677,5 +709,7 @@ check('API rates: время Роутера', rr.now >= now);
 check('API check: цель с пробелом или «;» не уходит в командную строку',
 	api.check.call({ args: { target: 'a b' } }).error == 'invalid target' && api.check.call({ args: { target: 'x;reboot' } }).error == 'invalid target');
 check('API nat_result: итога ещё нет — пустой ответ', same(api.nat_result.call(), {}));
+check('API connections: не IPv4 не уходит в командную строку',
+	api.connections?.call({ args: { ip: '1.2.3.4; reboot' } })?.error == 'invalid ip' && api.connections.call({ args: {} }).error == 'invalid ip');
 
 T.finish();

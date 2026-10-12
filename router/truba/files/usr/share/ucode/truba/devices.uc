@@ -110,3 +110,89 @@ export function list() {
 	let zone_of = (ip, dev) => zones[dev ?? route_dev(ip)];
 	return { now: time(), devices: merge(U.read_json(C.DEVICES_FILE, null), leases(), neighbours(), F.device_sections(), zone_of) };
 };
+
+// ---- Куда устройство ходит сейчас (truba.connections) ----
+
+// Записи conntrack, где ip — источник исходного направления: { proto, dst, dport, up, down, mark }.
+// up — байты от устройства, down — к нему; без nf_conntrack_acct их нет (null). Строки отбираются
+// подстрокой до разбора: в таблице бывают десятки тысяч записей.
+export function parse_conntrack(text, ip) {
+	let needle = ' src=' + ip + ' ', out = [];
+	for (let l in split(text ?? '', '\n')) {
+		if (substr(l, 0, 4) != 'ipv4' || index(l, needle) < 0 || match(l, / src=([0-9.]+) /)?.[1] != ip)
+			continue;
+		let dport = match(l, / dport=([0-9]+) /), mark = match(l, / mark=([0-9]+) /);
+		let bytes = match(l, / bytes=([0-9]+)/g) ?? [];
+		push(out, {
+			proto: split(trim(l), /[ \t]+/)[2],
+			dst: match(l, / dst=([0-9.]+) /)?.[1],
+			dport: dport ? int(dport[1]) : null,
+			up: length(bytes) ? int(bytes[0][1]) : null,
+			down: (length(bytes) > 1) ? int(bytes[1][1]) : null,
+			mark: mark ? int(mark[1]) : 0,
+		});
+	}
+	return out;
+};
+
+// По адресам назначения: протокол, порт и метка — самого крупного соединения, число соединений,
+// байты в обе стороны. Сортировка по объёму, а без nf_conntrack_acct — по числу соединений.
+export function group(conns) {
+	let by = {}, list = [], acct = false, top = {};
+	for (let c in conns) {
+		acct ||= (c.up != null);
+		let a = by[c.dst];
+		if (!a)
+			push(list, a = by[c.dst] = { addr: c.dst, proto: c.proto, port: c.dport, conns: 0, up: null, down: null, mark: c.mark });
+		a.conns++;
+		if (c.up != null) {
+			a.up = (a.up ?? 0) + c.up;
+			a.down = (a.down ?? 0) + (c.down ?? 0);
+		}
+		let size = (c.up ?? 0) + (c.down ?? 0);
+		if (top[c.dst] == null || size > top[c.dst]) {
+			top[c.dst] = size;
+			a.proto = c.proto;
+			a.port = c.dport;
+			a.mark = c.mark;
+		}
+	}
+	let vol = (a) => acct ? (a.up ?? 0) + (a.down ?? 0) : a.conns;
+	list = sort(list, (x, y) => (vol(y) - vol(x)) || ((x.addr < y.addr) ? -1 : ((x.addr > y.addr) ? 1 : 0)));
+	return { total: length(conns), acct, addrs: slice(list, 0, C.CONN_TOP) };
+};
+
+// Действие соединения — по ct mark (его ставит persist): ответы на входящие уходят в Туннель,
+// без метки соединение идёт по основной таблице, то есть напрямую.
+function mark_action(mark) {
+	let m = mark & C.MARK_MASK;
+	return (m == C.MARK_TUNNEL || m == C.MARK_INBOUND) ? 'tunnel' : 'direct';
+}
+
+// MAC адреса — для Политики устройства в решении по правилам.
+function mac_of(ip) {
+	return first(leases(), 'ip', ip)?.mac ?? first(neighbours(), 'ip', ip)?.mac;
+}
+
+// Для rpcd (truba.connections): CONN_TOP адресов с причиной по нынешним правилам. Если правила
+// решили бы иначе, чем ct mark, соединение началось до смены настроек — причина changed.
+export function connections(ip) {
+	let text = readfile(C.CONNTRACK);
+	if (text == null)
+		return { ip, error: 'no_conntrack' };
+	let g = group(parse_conntrack(text, ip));
+	let vs = null;
+	if (length(g.addrs) && F.load().routing) {
+		// Разбор Наборов правил — только здесь: список устройств опрашивается чаще и без него.
+		let K = loadstring("import * as K from 'truba.check'; return K;")();
+		vs = K.ip_verdicts(map(g.addrs, (a) => a.addr), mac_of(ip));
+	}
+	for (let i, a in g.addrs) {
+		a.action = mark_action(a.mark);
+		let v = vs?.[i];
+		a.reason = v ? ((v.action == a.action) ? v.reason : 'changed') : null;
+		a.geoip = v?.geoip ?? [];
+		delete a.mark;
+	}
+	return { ip, total: g.total, acct: g.acct, addrs: g.addrs };
+};

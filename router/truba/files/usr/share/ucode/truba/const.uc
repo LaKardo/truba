@@ -82,6 +82,9 @@ export const DEV_SET_SIZE = 1024;
 // Срок элемента набора и истории устройства без трафика, с.
 export const DEV_SPAN = 86400;
 export const DEVICES_FILE = RUN_DIR + '/devices.json';
+// «Куда ходит сейчас»: таблица соединений ядра и сколько адресов отдавать.
+export const CONNTRACK = '/proc/net/nf_conntrack';
+export const CONN_TOP = 20;
 
 // Окно последних проверок watchdog для «Обзора»: задержка и потери за ~10 минут при интервале 30 с.
 export const PROBE_WINDOW = 20;

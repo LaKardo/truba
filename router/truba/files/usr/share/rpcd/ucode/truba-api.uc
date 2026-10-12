@@ -77,6 +77,17 @@ const methods = {
 		}
 	},
 
+	// Куда устройство ходит сейчас: адреса из conntrack с Действием и причиной.
+	connections: {
+		args: { ip: 'ip' },
+		call: function(req) {
+			let ip = req.args?.ip;
+			if (!U.is_ipv4(ip))
+				return { error: 'invalid ip' };
+			return truba('connections ' + U.shq(ip));
+		}
+	},
+
 	check: {
 		args: { target: 'target', mac: 'mac' },
 		call: function(req) {

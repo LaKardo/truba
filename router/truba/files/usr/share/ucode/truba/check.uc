@@ -160,6 +160,20 @@ function verdicts(cfg, plan, cats, ips, mac) {
 	return out;
 }
 
+// Решения для адресов, куда устройство ходит сейчас (truba.connections): Категории geoip — только с
+// Действием в плане. Остальные ничего не решают, а проход по всем подсетям geoip при опросе раз в 5 с
+// держал бы rpcd, который обслуживает вызовы по одному. null — списки распаковывает apply.
+export function ip_verdicts(ips, mac) {
+	let cfg = F.load();
+	let dat = D.cached();
+	if (!dat)
+		return null;
+	let cats = dat.cats ?? [];
+	let plan = P.compute(cfg, cats);
+	let ruled = [ ...(plan.geoip.block ?? []), ...(plan.geoip.tunnel ?? []), ...(plan.geoip.direct ?? []) ];
+	return verdicts(cfg, plan, filter(cats, (c) => c.set != 'geoip' || (c.tag in ruled)), ips, mac);
+};
+
 export function check(target, mac) {
 	let cfg = F.load();
 	target = lc(trim(target ?? ''));
