@@ -85,8 +85,12 @@ function updateState(r, st) {
 	const [ level, text ] = common.tunnelState(st);
 	setState(r.state, level, text);
 
+	// Итог выключенного watchdog в health.json устарел: пороги — из настроек, вердикта нет.
 	const age = awg.handshake ? awg.handshake_age : null;
-	setState(r.hs, common.handshakeLevel(age, h, common.get('watchdog', 'handshake_max')), common.fmtAge(age));
+	const wd = wdOn ? h : {};
+	const max = wd.handshake_max || common.get('watchdog', 'handshake_max');
+	const grace = common.get('watchdog', 'fails') * (wd.interval || common.get('watchdog', 'interval'));
+	setState(r.hs, common.handshakeLevel(age, wd.state, max, grace), common.fmtAge(age));
 
 	// Окно пустое — проверок ещё не было (или не с чем: нет адреса для ping): не «нет ответа».
 	// Длина окна во времени (окно — в truba.const) зависит от интервала проверки.

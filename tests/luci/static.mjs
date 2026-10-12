@@ -110,13 +110,18 @@ try {
 	console.log(`FAIL  common.js не выполнился с заглушками: ${e.message}`);
 	fails++;
 }
+// handshakeLevel(возраст, вердикт watchdog или нет его, handshake_max, запас = fails × interval).
 for (const [ args, want ] of [
-	[ [ null, {}, 180 ], 'err' ],
-	[ [ 100, { handshake_max: 600 }, 180 ], 'ok' ],
-	[ [ 300, { handshake_max: 600 }, 180 ], 'ok' ],
-	[ [ 700, { handshake_max: 600, state: 'healthy' }, 180 ], 'warn' ],
-	[ [ 700, { handshake_max: 600, state: 'down' }, 180 ], 'err' ],
-	[ [ 200, {}, 180 ], 'warn' ],
+	[ [ null, 'healthy', 180, 90 ], 'err' ],
+	[ [ 100, 'healthy', 600, 90 ], 'ok' ],
+	[ [ 600, 'down', 600, 90 ], 'ok' ],
+	[ [ 700, 'healthy', 600, 90 ], 'warn' ],
+	[ [ 700, 'down', 600, 90 ], 'err' ],
+	// watchdog выключен (вердикта нет): «внимание» за порогом, ошибка — когда он объявил бы Туннель упавшим
+	[ [ 200, undefined, 180, 90 ], 'warn' ],
+	[ [ 270, undefined, 180, 90 ], 'warn' ],
+	[ [ 271, undefined, 180, 90 ], 'err' ],
+	[ [ 7200, undefined, 180, 90 ], 'err' ],
 ]) {
 	const got = common.handshakeLevel?.(...args);
 	if (got !== want) { console.log(`FAIL  handshakeLevel(${JSON.stringify(args)}) = ${got}, ждали ${want}`); fails++; }

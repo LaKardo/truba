@@ -332,15 +332,18 @@ function tunnelIface() {
 	return get('main', 'iface');
 }
 
-// Возраст рукопожатия Туннеля: норма — пока не старше handshake_max (так судит watchdog), дольше —
+// Возраст рукопожатия Туннеля: норма — пока не старше max (handshake_max, так судит watchdog), дольше —
 // «внимание», пока watchdog не объявил Туннель упавшим; рукопожатия не было или Туннель упал — ошибка.
-// health — итог watchdog (health.json); без него (watchdog выключен) порог — fallbackMax из настроек.
-function handshakeLevel(age, health, fallbackMax) {
+// verdict — состояние из итога watchdog; его нет (watchdog выключен) — ошибка тогда, когда watchdog
+// объявил бы Туннель упавшим: через grace (fails × interval) после порога.
+function handshakeLevel(age, verdict, max, grace) {
 	if (age == null)
 		return 'err';
-	if (age <= (health?.handshake_max ?? fallbackMax))
+	if (age <= max)
 		return 'ok';
-	return health?.state == 'down' ? 'err' : 'warn';
+	if (verdict)
+		return verdict == 'down' ? 'err' : 'warn';
+	return age > max + grace ? 'err' : 'warn';
 }
 
 // Состояние Туннеля по status: [уровень, текст] — для плитки «Обзора» и вкладки «Туннель».

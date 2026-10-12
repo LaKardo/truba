@@ -241,30 +241,42 @@ check('схема: пустая опция — умолчание, а не не�
 	sprintf('%J', dcfg.invalid));
 
 // /etc/config/truba из пакета — полный образец настроек: совпадает со схемой в обе стороны.
-mkdir('/tmp/pkgconf');
-writefile('/tmp/pkgconf/truba', readfile('/repo/router/truba/files/etc/config/truba'));
-let pc = cursor('/tmp/pkgconf');
-pc.load('truba');
-let extra = [], differ = [], absent = [];
-for (let sec in [ 'main', 'dns', 'lists', 'watchdog' ]) {
-	let s = pc.get_all('truba', sec) ?? {};
-	for (let key, raw in s) {
-		if (substr(key, 0, 1) == '.')
-			continue;
-		let o = F.SCHEMA?.[sec]?.[key];
-		if (!o)
-			push(extra, sec + '.' + key);
-		else if (!same(F.check_value(sec, key, raw), o.def))
-			push(differ, sec + '.' + key);
+// Расхождения конфига text со схемой: опции не из схемы, не равные её умолчанию, недостающие.
+const PKG_CONFIG = readfile('/repo/router/truba/files/etc/config/truba');
+function schema_gaps(text) {
+	mkdir('/tmp/pkgconf');
+	writefile('/tmp/pkgconf/truba', text);
+	let pc = cursor('/tmp/pkgconf');
+	pc.load('truba');
+	let g = { extra: [], differ: [], absent: [] };
+	for (let sec in [ 'main', 'dns', 'lists', 'watchdog' ]) {
+		let s = pc.get_all('truba', sec) ?? {};
+		for (let key, raw in s) {
+			if (substr(key, 0, 1) == '.')
+				continue;
+			let o = F.SCHEMA?.[sec]?.[key];
+			if (!o)
+				push(g.extra, sec + '.' + key);
+			else if (!same(F.check_value(sec, key, raw), o.def))
+				push(g.differ, sec + '.' + key);
+		}
+		// Пустых значений UCI не хранит: опции с пустым умолчанием (stun, probe) в файле не видно.
+		// length() у флагов и чисел — null, поэтому «пусто» — только '' и пустой список.
+		for (let key, o in F.SCHEMA?.[sec] ?? {}) {
+			let empty = (o.def === '' || (type(o.def) == 'array' && !length(o.def)));
+			if (s[key] == null && !empty)
+				push(g.absent, sec + '.' + key);
+		}
 	}
-	// Пустых значений UCI не хранит: опции с пустым умолчанием (stun, probe) в файле не видно.
-	for (let key, o in F.SCHEMA?.[sec] ?? {})
-		if (s[key] == null && length(o.def))
-			push(absent, sec + '.' + key);
+	return g;
 }
-check('config/truba: каждая опция — из схемы и равна её умолчанию', !length(extra) && !length(differ),
-	sprintf('нет в схеме: %J, не равны умолчанию: %J', extra, differ));
-check('config/truba: каждая опция схемы есть в файле', length(keys(F.SCHEMA ?? {})) && !length(absent), join(' ', absent));
+let gaps = schema_gaps(PKG_CONFIG);
+check('config/truba: каждая опция — из схемы и равна её умолчанию', !length(gaps.extra) && !length(gaps.differ),
+	sprintf('нет в схеме: %J, не равны умолчанию: %J', gaps.extra, gaps.differ));
+check('config/truba: каждая опция схемы есть в файле', length(keys(F.SCHEMA ?? {})) && !length(gaps.absent), join(' ', gaps.absent));
+gaps = schema_gaps(replace(PKG_CONFIG, /\toption (routing|port|handshake_max) [^\n]*\n/g, ''));
+check('config/truba: пропуск опции заметен — и флага, и числа', same(sort(gaps.absent), [ 'dns.port', 'main.routing', 'watchdog.handshake_max' ]),
+	join(' ', gaps.absent));
 
 // ---- truba env: значения для shell-скриптов пакета (ADR 0015) ----
 
