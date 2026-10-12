@@ -272,8 +272,8 @@ function apply_config(res, prev) {
 	res.table = N.routes(cfg, tinfo);
 	N.cron_set(cfg.routing && cfg.lists.auto_update, cfg.lists.update_utc);
 	N.upnp_set(cfg.upnp, cfg.iface, vps);
-	// И при выключенной Маршрутизации: перенаправления следуют за выбранными зонами.
-	N.forwardings_set(cfg.zones);
+	// И при выключенной Маршрутизации: перенаправления и правила IPv6 следуют за выбранными зонами.
+	N.zones_firewall(cfg.zones);
 
 	// Сбой записи копии не отменяет того, что применено.
 	try {

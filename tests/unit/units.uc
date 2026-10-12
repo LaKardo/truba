@@ -1,6 +1,6 @@
 // Модули Трубы без procd и сети — секунды. Всё, что можно проверить без ядра и служб:
 // план, Приоритет, правила nftables и конфиг mosdns (эталоны в tests/golden + nft -c),
-// чтение настроек и схема настроек, truba env, перенаправления зон в truba, «Проверить домен/IP» на синтетических
+// чтение настроек и схема настроек, truba env, межсетевой экран зон Маршрутизации, «Проверить домен/IP» на синтетических
 // Наборах правил, история скорости,
 // методы ubus-API, которые читают файлы.
 //   ucode -L '/repo/router/truba/files/usr/share/ucode/*.uc' -L '/repo/tests/lib/*.uc' units.uc [каталог эталонов]
@@ -294,6 +294,13 @@ config("config main 'main'\n\toption iface \"x'; touch /tmp/pwned; '\"\n");
 system('rm -f /tmp/pwned');
 eo = sh_env('printf %s \"$TRUBA_IFACE\"');
 check('env: неверное имя интерфейса — умолчание, в shell не исполняется', eo == 'awg0' && system('test -e /tmp/pwned') != 0, eo);
+eo = sh_env('printf %s \"$TRUBA_NO6_SUFFIX\"');
+check('env: окончание имени своих правил IPv6 — как у службы', eo == C.FW_NO6_SUFFIX && length(eo), eo);
+let un = readfile('/repo/router/truba/files/usr/share/truba/uninstall.sh');
+check('uninstall.sh: свои правила IPv6 — по окончанию из env, без литерала',
+	index(un, '$TRUBA_NO6_SUFFIX') >= 0 && index(un, 'no_ipv6') < 0);
+check('90-truba: правило IPv6 заводит не установка, а применение',
+	index(readfile('/repo/router/truba/files/etc/uci-defaults/90-truba'), 'ipv6') < 0);
 // reinstall.sh работает без пакета (после sysupgrade его ещё нет) — свои литералы, сверка здесь.
 let ri = readfile('/repo/router/truba/files/etc/truba/reinstall.sh');
 check('reinstall.sh: путь бэкапа dnsmasq и адрес mosdns — как у службы',
@@ -311,7 +318,7 @@ check('Туннель /31: второй адрес', peer_of('10.0.0.0/31')[0] =
 check('Туннель /24: Роутер .1 — Труба .2, а не он сам', peer_of('10.0.0.1/24')[0] == '10.0.0.2');
 check('подсети адресов Роутера: из адреса и длины префикса', '127.0.0.0/8' in F.local_subnets(), join(' ', F.local_subnets()));
 
-// ---- Перенаправления зон Маршрутизации в truba (ADR 0014) ----
+// ---- Межсетевой экран зон Маршрутизации: перенаправления в truba (ADR 0014), IPv6-интернет (ADR 0016) ----
 
 const FW_BASE = "config zone\n\toption name 'lan'\n\nconfig zone\n\toption name 'mesh'\n\n" +
 	"config zone\n\toption name 'guest-net'\n\nconfig zone 'truba'\n\toption name 'truba'\n\n" +
@@ -328,20 +335,69 @@ function fwds() {
 }
 writefile('/etc/config/firewall', FW_BASE);
 check('перенаправления: заведены для выбранных зон; зоны, которой нет, и самой truba — нет',
-	N.forwardings_set([ 'lan', 'mesh', 'ghost', 'truba' ]) && same(fwds(), [ 'lan_truba:lan', 'mesh_truba:mesh' ]), join(' ', fwds()));
-check('перенаправления: повторное применение ничего не меняет', !N.forwardings_set([ 'lan', 'mesh' ]));
-check('перенаправления: зона больше не выбрана — своё убрано', N.forwardings_set([ 'lan' ]) && same(fwds(), [ 'lan_truba:lan' ]), join(' ', fwds()));
+	N.zones_firewall([ 'lan', 'mesh', 'ghost', 'truba' ]) && same(fwds(), [ 'lan_truba:lan', 'mesh_truba:mesh' ]), join(' ', fwds()));
+check('межсетевой экран зон: повторное применение ничего не меняет', N.zones_firewall && !N.zones_firewall([ 'lan', 'mesh' ]));
+check('перенаправления: зона больше не выбрана — своё убрано', N.zones_firewall([ 'lan' ]) && same(fwds(), [ 'lan_truba:lan' ]), join(' ', fwds()));
 check('перенаправления: имя секции — из имени зоны без недопустимых знаков',
-	N.forwardings_set([ 'guest-net' ]) && same(fwds(), [ 'guest_net_truba:guest-net' ]), join(' ', fwds()));
+	N.zones_firewall([ 'guest-net' ]) && same(fwds(), [ 'guest_net_truba:guest-net' ]), join(' ', fwds()));
 writefile('/etc/config/firewall', FW_BASE + "config forwarding\n\toption src 'mesh'\n\toption dest 'truba'\n\n");
-check('перенаправления: своё владельца засчитано — второе не заводится',
-	N.forwardings_set([ 'mesh' ]) == false && same(fwds(), [ '@:mesh' ]), join(' ', fwds()));
-check('перенаправления: своё владельца остаётся и без зоны', N.forwardings_set([ 'lan' ]) && same(fwds(), [ '@:mesh', 'lan_truba:lan' ]), join(' ', fwds()));
+N.zones_firewall([ 'mesh' ]);
+check('перенаправления: своё владельца засчитано — второе не заводится', same(fwds(), [ '@:mesh' ]), join(' ', fwds()));
+check('перенаправления: своё владельца остаётся и без зоны', N.zones_firewall([ 'lan' ]) && same(fwds(), [ '@:mesh', 'lan_truba:lan' ]), join(' ', fwds()));
 writefile('/etc/config/firewall', FW_BASE + "config rule 'mesh_truba'\n\toption src 'mesh'\n");
+N.zones_firewall([ 'mesh' ]);
 check('перенаправления: имя занято чужой секцией — она не тронута',
-	!N.forwardings_set([ 'mesh' ]) && cursor().get('firewall', 'mesh_truba') == 'rule' && !length(fwds()), join(' ', fwds()));
+	cursor().get('firewall', 'mesh_truba') == 'rule' && !length(fwds()), join(' ', fwds()));
 writefile('/etc/config/firewall', replace(FW_BASE, "config zone 'truba'\n\toption name 'truba'\n\n", ''));
-check('перенаправления: без зоны truba не заводятся', !N.forwardings_set([ 'lan' ]) && !length(fwds()));
+N.zones_firewall([ 'lan' ]);
+check('перенаправления: без зоны truba не заводятся', !length(fwds()));
+
+// Свои правила IPv6: «имя:откуда», выключенное — с «:off».
+function no6s() {
+	let c = cursor(), out = [];
+	c.load('firewall');
+	c.foreach('firewall', 'rule', (r) => {
+		if (substr(r['.name'], -length(C.FW_NO6_SUFFIX)) == C.FW_NO6_SUFFIX)
+			push(out, r['.name'] + ':' + r.src + (r.enabled == '0' ? ':off' : ''));
+	});
+	return sort(out);
+}
+let no6 = (sid) => cursor().get_all('firewall', sid) ?? {};
+let no6_ok = (r, zone) => r['.type'] == 'rule' && r.src == zone && r.dest == '*' && r.family == 'ipv6' &&
+	r.proto == 'all' && r.target == 'REJECT' && same(r.dest_ip, [ '!fc00::/7', '!fe80::/10', '!ff00::/8' ]);
+check('IPv6: правило без окончания имени не опознать', length(C.FW_NO6_SUFFIX ?? '') > 0);
+check('IPv6: без зоны truba правило всё равно заведено', same(no6s(), [ 'lan_truba_no_ipv6:lan' ]), join(' ', no6s()));
+writefile('/etc/config/firewall', FW_BASE);
+N.zones_firewall([ 'lan', 'mesh', 'ghost', 'truba' ]);
+check('IPv6: правило у каждой выбранной зоны; зоны, которой нет, и самой truba — нет',
+	same(no6s(), [ 'lan_truba_no_ipv6:lan', 'mesh_truba_no_ipv6:mesh' ]), join(' ', no6s()));
+check('IPv6: в любую зону, кроме ULA, link-local и multicast, — REJECT', no6_ok(no6('lan_truba_no_ipv6'), 'lan'),
+	sprintf('%J', no6('lan_truba_no_ipv6')));
+check('IPv6: зона больше не выбрана — правило убрано', N.zones_firewall([ 'lan' ]) && same(no6s(), [ 'lan_truba_no_ipv6:lan' ]), join(' ', no6s()));
+check('IPv6: имя секции — из имени зоны без недопустимых знаков',
+	N.zones_firewall([ 'guest-net' ]) && same(no6s(), [ 'guest_net_truba_no_ipv6:guest-net' ]), join(' ', no6s()));
+function fw_edit(sid, k, v) {
+	let c = cursor();
+	c.load('firewall');
+	v == null ? c.delete('firewall', sid, k) : c.set('firewall', sid, k, v);
+	c.commit('firewall');
+}
+writefile('/etc/config/firewall', FW_BASE);
+N.zones_firewall([ 'lan' ]);
+fw_edit('lan_truba_no_ipv6', 'enabled', '0');
+check('IPv6: правило, выключенное владельцем, остаётся выключенным',
+	!N.zones_firewall([ 'lan' ]) && same(no6s(), [ 'lan_truba_no_ipv6:lan:off' ]), join(' ', no6s()));
+fw_edit('lan_truba_no_ipv6', 'target', 'ACCEPT');
+fw_edit('lan_truba_no_ipv6', 'dest_ip', null);
+check('IPv6: изменённое правило применение возвращает', N.zones_firewall([ 'lan' ]) && no6_ok(no6('lan_truba_no_ipv6'), 'lan'),
+	sprintf('%J', no6('lan_truba_no_ipv6')));
+fw_edit('lan_truba_no_ipv6', null, null);
+check('IPv6: удалённое правило применение заводит снова', N.zones_firewall([ 'lan' ]) && no6_ok(no6('lan_truba_no_ipv6'), 'lan'));
+writefile('/etc/config/firewall', FW_BASE + "config redirect 'mesh_truba_no_ipv6'\n\toption src 'mesh'\n\nconfig rule 'lan_truba_no_ipv6'\n\toption src 'wan'\n");
+N.zones_firewall([ 'lan', 'mesh' ]);
+check('IPv6: имя занято чужой секцией — она не тронута, своего правила нет',
+	no6('mesh_truba_no_ipv6')['.type'] == 'redirect' && no6('lan_truba_no_ipv6').src == 'wan' && !no6('lan_truba_no_ipv6').target,
+	sprintf('%J %J', no6('mesh_truba_no_ipv6'), no6('lan_truba_no_ipv6')));
 
 // ---- «Проверить домен/IP»: Приоритет для IP ----
 

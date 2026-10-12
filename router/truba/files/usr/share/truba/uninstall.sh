@@ -1,9 +1,9 @@
 #!/bin/sh
 # Откат всего, что пакет truba поменял в системе (вызывается при удалении пакета).
 
-# Пути и имя зоны — у службы (ADR 0015); пакет ещё на месте. Без них откатывать вслепую нельзя.
+# Пути, имя зоны и окончание имён своих правил — у службы (ADR 0015); пакет ещё на месте. Без них откатывать вслепую нельзя.
 eval "$(/usr/sbin/truba env)"
-[ -n "$TRUBA_FW_ZONE" ] && [ -n "$TRUBA_REINSTALL" ] || exit 1
+[ -n "$TRUBA_FW_ZONE" ] && [ -n "$TRUBA_REINSTALL" ] && [ -n "$TRUBA_NO6_SUFFIX" ] || exit 1
 ZONE="$TRUBA_FW_ZONE"
 
 "$TRUBA_INIT" stop >/dev/null 2>&1
@@ -31,7 +31,10 @@ uci -q delete "firewall.$ZONE"
 for s in $(uci -q -X show firewall | sed -n "s/^firewall\.\([^.]*\)\.dest='$ZONE'\$/\1/p"); do
 	[ "$(uci -q get "firewall.$s")" = forwarding ] && uci -q delete "firewall.$s"
 done
-uci -q delete firewall.truba_no_ipv6_inet
+# Свои правила зон, закрывающие IPv6-интернет (ADR 0016): секции <зона><окончание>.
+for s in $(uci -q -X show firewall | sed -n "s/^firewall\.\([A-Za-z0-9_]*$TRUBA_NO6_SUFFIX\)=rule\$/\1/p"); do
+	uci -q delete "firewall.$s"
+done
 uci -q commit firewall
 /etc/init.d/firewall reload >/dev/null 2>&1
 
