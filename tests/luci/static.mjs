@@ -166,6 +166,57 @@ for (const [ args, want ] of [
 	if (got !== want) { console.log(`FAIL  handshakeLevel(${JSON.stringify(args)}) = ${got}, ждали ${want}`); fails++; }
 }
 
+// ---- Модули интерфейса (truba/ui, ADR 0017): чистые функции — в Node с заглушками LuCI ----
+
+const check = (ok, name) => { if (!ok) { console.log(`FAIL  ${name}`); fails++; } };
+// Модуль LuCI: строки 'require x as y' — просто выражения, зависимости приходят параметрами функции.
+function loadModule(path, deps) {
+	try {
+		const src = readFileSync(join(root, 'htdocs/luci-static/resources', path), 'utf8');
+		return new Function(...Object.keys(deps), src)(...Object.values(deps));
+	} catch (e) {
+		console.log(`FAIL  ${path} не выполнился с заглушками: ${e.message}`);
+		fails++;
+		return null;
+	}
+}
+const baseclass = { extend: (x) => x };
+
+// app: тема по яркости фона, хранилище, опрос, счёт изменений UCI.
+let pollFn = null;
+const uciStub = { state: {}, set() {}, unset() {} };
+const app = loadModule('truba/ui/app.js', {
+	baseclass, uci: uciStub, poll: { add(fn) { pollFn = fn; } }, L: { resource: (p) => p, env: {} }, _: (s) => s
+});
+if (app) {
+	const near = (a, b) => Math.abs(a - b) < 1e-3;
+	check(near(app.luminance('rgb(255, 255, 255)'), 1), 'app.luminance: белый = 1');
+	check(app.luminance('rgba(0, 0, 0, 0)') === null && app.luminance('transparent') === null, 'app.luminance: прозрачный — null');
+	check(app.schemeFrom([ 'rgba(0, 0, 0, 0)', 'rgb(255, 255, 255)' ], true) === 'light', 'app.schemeFrom: прозрачный предок пропускается');
+	check(app.schemeFrom([ 'rgb(169, 169, 169)' ], false) === 'dark', 'app.schemeFrom: порог 0,4 — 169 тёмный');
+	check(app.schemeFrom([ 'rgb(170, 170, 170)' ], true) === 'light', 'app.schemeFrom: порог 0,4 — 170 светлый');
+	check(app.schemeFrom([ 'rgba(0, 0, 0, 0)' ], true) === 'dark' && app.schemeFrom([], false) === 'light',
+		'app.schemeFrom: без фона — по prefers-color-scheme');
+	const s = app.store({ a: 1 });
+	let seen = null;
+	const off = s.on((st) => seen = st.b);
+	s.set({ b: 2 });
+	check(s.get().a === 1 && seen === 2, 'app.store: set сливает и оповещает');
+	off();
+	s.set({ b: 3 });
+	check(seen === 2, 'app.store: отписка');
+	app.poll(s, () => Promise.resolve({ c: 4 }), 5);
+	await pollFn?.();
+	check(s.get().c === 4 && s.get().offline === false, 'app.poll: успех — данные и offline=false');
+	app.poll(s, () => Promise.reject(new Error('rpc')), 5);
+	await pollFn?.();
+	check(s.get().offline === true && s.get().c === 4, 'app.poll: ошибка — данные остаются, offline=true');
+	uciStub.state = { creates: {}, changes: { truba: { main: { routing: '0' } }, network: { awg0: { disabled: '1' } } }, deletes: {}, reorder: {} };
+	check(app.changeCount() === 2, 'app.changeCount: две изменённые опции');
+	uciStub.state = { creates: { truba: { cfg01: {} } }, changes: {}, deletes: { firewall: { r1: true } }, reorder: { truba: true } };
+	check(app.changeCount() === 3, 'app.changeCount: новая секция, удалённая секция, порядок');
+}
+
 const po = readFileSync(join(root, 'po/ru/truba.po'), 'utf8');
 const translated = new Map();
 const blocks = po.split(/\n\s*\n/);
