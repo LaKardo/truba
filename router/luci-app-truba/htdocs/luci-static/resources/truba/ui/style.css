@@ -392,7 +392,7 @@
 .rename { margin: 12px 0 0; }
 .addmac .acts, .check { display: flex; flex-wrap: wrap; gap: 8px; }
 .err-text { color: var(--blk); font-size: 12px; }
-.badmac {
+.badmac, .missing {
 	display: flex;
 	flex-wrap: wrap;
 	align-items: center;
@@ -403,7 +403,7 @@
 	background: color-mix(in srgb, var(--warn) 14%, transparent);
 	font-size: 12px;
 }
-.badmac span { flex: 1 1 14em; }
+.badmac span, .missing span { flex: 1 1 14em; }
 .check-res { margin-top: 6px; }
 @container (max-width: 1000px) {
 	.split { grid-template-columns: minmax(0, 1fr); }
@@ -443,3 +443,164 @@
 	animation: truba-spin 1s linear infinite;
 }
 @keyframes truba-spin { to { transform: rotate(360deg); } }
+
+/* ---- Действие Категории: сегменты, до 600 px — значок-select ---- */
+.ap { display: inline-flex; }
+.ap .seg { display: flex; }
+.ap .seg button { padding: 3px 8px; font-size: 11px; white-space: nowrap; }
+/* Выбранное Действие — подложкой и рамкой своего цвета, текст обычный: белый на зелёном и красном не набирал
+   4,5:1 (проверяет static.mjs). Порядок кнопок — PICK в kit.js: По режиму, Напрямую, Туннель, Блок. */
+.ap .seg button:nth-child(2), .ap.a-direct .ap-sel { --a: var(--dir); }
+.ap .seg button:nth-child(3), .ap.a-tunnel .ap-sel { --a: var(--tun); }
+.ap .seg button:nth-child(4), .ap.a-block .ap-sel { --a: var(--blk); }
+.ap .seg button:not(:first-child)[aria-pressed="true"], .ap:not(.a-mode) .ap-sel {
+	background: color-mix(in srgb, var(--a) 22%, var(--card)); color: var(--tx); box-shadow: inset 0 0 0 1px var(--a);
+}
+.ap-sel {
+	display: none;
+	max-width: 100%;
+	height: 26px;
+	padding: 0 8px;
+	border: 0;
+	border-radius: 999px;
+	background: var(--chip);
+	color: var(--tx);
+	font: inherit;
+	font-size: 12px;
+}
+.ap-sel option { background: var(--card); color: var(--tx); }
+@container (max-width: 600px) {
+	.ap .seg { display: none; }
+	.ap .ap-sel { display: inline-block; }
+}
+
+/* ---- Поле по схеме ---- */
+.field { display: grid; gap: 3px; min-width: 0; }
+.field label { color: var(--mu); font-size: 12px; }
+.field label .dot { display: inline-block; width: 8px; height: 8px; box-shadow: none; vertical-align: 1px; }
+.field input {
+	min-width: 0;
+	height: 30px;
+	padding: 0 10px;
+	border: 1px solid var(--bd);
+	border-radius: 7px;
+	background: var(--pg);
+	color: var(--tx);
+	font: inherit;
+	font-size: 12px;
+}
+.field input:disabled { opacity: .55; }
+.field.bad input { border-color: var(--blk); }
+.field .mu { font-size: 11px; }
+
+/* ---- Сворачиваемый блок ---- */
+.fold { margin: 10px 0 0; }
+.fold summary { color: var(--mu); font-size: 12px; cursor: pointer; }
+.fold summary:hover { color: var(--tx); }
+.fold-b { display: grid; gap: 10px; margin: 8px 0 0; }
+
+/* ---- Окно подтверждения ---- */
+.dlg {
+	max-width: min(420px, calc(100vw - 32px));
+	padding: 16px;
+	border: 1px solid var(--bd);
+	border-radius: 12px;
+	background: var(--card);
+	color: var(--tx);
+	box-shadow: 0 12px 40px rgba(0, 0, 0, .3);
+}
+.dlg::backdrop { background: rgba(0, 0, 0, .4); }
+.dlg h3 { margin: 0 0 8px; font-size: 15px; font-weight: 500; }
+.dlg-b { margin: 0 0 14px; color: var(--mu); font-size: 13px; }
+.dlg .acts { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+
+/* ---- Всплывающее сообщение: над панелью изменений, когда она есть ---- */
+.toasts {
+	position: sticky;
+	bottom: var(--changes-h, 8px);
+	z-index: 2;
+	display: flex;
+	justify-content: center;
+	pointer-events: none;
+}
+.toast {
+	margin: 8px 0 0;
+	padding: 8px 14px;
+	border-radius: 8px;
+	background: var(--tx);
+	color: var(--card);
+	box-shadow: 0 6px 20px rgba(0, 0, 0, .2);
+	pointer-events: auto;
+}
+
+/* ---- Итог проверки домена ---- */
+/* Итог — одной строкой текста, без flex: так он и копируется, и читается экранным чтецом подряд. */
+.check-res .res .mu { margin-left: 6px; }
+.check-res .res .tag { font-size: 12px; }
+.hit {
+	display: grid;
+	grid-template-columns: minmax(0, auto) minmax(0, 1fr) auto;
+	align-items: baseline;
+	gap: 4px 10px;
+	padding: 4px 0;
+	border-top: 1px solid var(--bd);
+	font-size: 12px;
+}
+.hit b { font-weight: 500; }
+.hit code { overflow: hidden; color: var(--mu); text-overflow: ellipsis; white-space: nowrap; }
+.fold .hit { grid-template-columns: minmax(0, auto) minmax(0, 1fr) auto minmax(0, 1.4fr); }
+@container (max-width: 600px) {
+	.fold .hit { grid-template-columns: minmax(0, auto) minmax(0, 1fr) auto; }
+	.fold .hit > :last-child { grid-column: 1 / -1; }
+}
+.changes .btn:disabled { opacity: .5; cursor: not-allowed; }
+.changes .link { margin: 0; padding: 0; border: 0; background: none; color: inherit; font: inherit; font-weight: 600; text-decoration: underline; cursor: pointer; }
+
+/* ---- «Правила» ---- */
+.grid.g2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+@container (max-width: 600px) { .grid.g2 { grid-template-columns: minmax(0, 1fr); } }
+.wide-seg .seg { display: flex; }
+.wide-seg .seg button { flex: 1; padding: 5px 9px; }
+.note { margin: 8px 0 0; }
+.chip.zone { border: 1px solid var(--bd); background: transparent; color: var(--tx); }
+.chip.zone[aria-pressed="true"] { border-color: var(--tun); color: var(--tun); }
+.chip.zone[aria-disabled="true"] { cursor: not-allowed; }
+.rules-cats .card-h .aside { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.cat {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) auto;
+	align-items: center;
+	gap: 10px;
+	padding: 7px 0;
+	border-top: 1px solid var(--bd);
+}
+.cat .n { min-width: 0; }
+.cat .n b { font-weight: 500; overflow-wrap: anywhere; }
+.cat .n .mu { display: block; font-size: 11px; }
+.cat .dot { display: inline-block; width: 8px; height: 8px; box-shadow: none; vertical-align: 1px; }
+.more { margin-top: 10px; }
+.gos { display: flex; flex-wrap: wrap; gap: 0 16px; }
+.ver {
+	display: grid;
+	grid-template-columns: 64px minmax(0, 1fr) auto;
+	align-items: baseline;
+	gap: 4px 10px;
+	padding: 6px 0;
+	border-top: 1px solid var(--bd);
+	font-size: 12px;
+}
+.ver b { font-weight: 500; }
+.rule-sets .sets { margin: 8px 0 0; }
+.rule-sets .acts { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 10px 0 0; }
+.vers { display: grid; grid-template-columns: auto minmax(0, 1fr) minmax(0, 1fr); gap: 4px 12px; font-size: 12px; }
+.vers b { font-weight: 500; }
+.vers code { color: var(--mu); }
+.vers .vl { display: none; }
+.sws { display: flex; flex-wrap: wrap; gap: 8px; }
+@container (max-width: 600px) {
+	/* Одна колонка: у каждой версии — своя подпись вместо заголовков колонок. */
+	.vers { grid-template-columns: minmax(0, 1fr); }
+	.vers .vh { display: none; }
+	.vers .vl { display: inline; }
+	.vers b:not(:first-of-type) { margin-top: 6px; }
+}

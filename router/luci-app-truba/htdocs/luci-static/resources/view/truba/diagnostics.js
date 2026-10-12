@@ -3,10 +3,6 @@
 'require ui';
 'require truba.common as common';
 
-function actionBadge(a) {
-	return common.pill(common.ACTION_LEVELS[a] || '', common.ACTION_LABELS[a] || a);
-}
-
 // ---- Журнал ----
 
 // Строка logread: «Wed Oct  7 22:47:05 2026 daemon.notice truba: текст»; у mosdns текст —
@@ -60,11 +56,6 @@ const TT_ERRORS = {
 	tmp: _('no room for temporary files on the router')
 };
 
-// Почему «Проверить домен/IP» не дала результата.
-const CHECK_ERRORS = {
-	busy: _('the rule sets are being unpacked, try again in a minute')
-};
-
 function renderTunnelTest(r) {
 	if (!r || r.error)
 		return E('p', {}, _('Not checked: %s').format(TT_ERRORS[r?.error] || r?.error || _('no answer')));
@@ -87,67 +78,10 @@ function renderTunnelTest(r) {
 	]);
 }
 
-function renderCheck(r) {
-	if (!r || r.error || !r.action)
-		return E('p', {}, _('Error: %s').format(CHECK_ERRORS[r?.error] || r?.error || _('no answer')));
-
-	const parts = [
-		E('p', { 'class': 'truba-target' }, [ E('strong', {}, r.target), ' → ', actionBadge(r.action) ]),
-		E('p', {}, _('Why: %s').format(common.REASON_LABELS[r.reason] || r.reason))
-	];
-
-	if (r.kind == 'domain') {
-		const hits = r.geosite || [];
-		parts.push(E('h4', {}, _('geosite categories containing the domain')));
-		parts.push(hits.length ? common.table([ _('Category'), _('Matching entry'), _('Entries'), _('Action') ], hits.map((h) => common.row([
-			(r.decisive?.tag == h.tag) ? E('strong', {}, h.tag + ' ✓') : h.tag,
-			E('code', {}, h.entry),
-			common.fmtNum(h.count),
-			common.ACTION_LABELS[h.action] || h.action
-		]))) : E('p', {}, common.empty(_('none'))));
-		if (r.decisive)
-			parts.push(E('p', {}, _('Decisive category (the narrowest one with an explicit action): %s').format(r.decisive.tag)));
-	}
-
-	const ips = r.ips || [];
-	if (ips.length) {
-		parts.push(E('h4', {}, _('Addresses')));
-		parts.push(common.table([ 'IP', _('geoip categories'), _('Action'), _('Why') ], ips.map((v) => common.row([
-			v.ip,
-			(v.geoip || []).join(', ') || '—',
-			actionBadge(v.action),
-			(common.REASON_LABELS[v.reason] || v.reason) + (v.device ? ' (%s)'.format(v.device) : '')
-		]))));
-	}
-	return E('div', {}, parts);
-}
-
 return view.extend({
-	load: function() {
-		return common.callLeases().catch(() => ({}));
-	},
-
-	render: function(leasesData) {
-		const leases = leasesData?.dhcp_leases || [];
-		const input = E('input', { 'type': 'text', 'class': 'cbi-input-text truba-grow',
-			'placeholder': _('domain or IPv4, e.g. gosuslugi.ru') });
-		const dev = E('select', { 'class': 'cbi-input-select' }, [ E('option', { 'value': '' }, _('— any device —')) ].concat(
-			leases.filter((l) => l.macaddr).map((l) => E('option', { 'value': l.macaddr }, '%s (%s)'.format(l.hostname || l.ipaddr || '?', l.macaddr)))));
-		const out = E('div');
+	render: function() {
 		const ttOut = E('div');
 		const logBox = E('pre', { 'class': 'truba-log' });
-
-		const runCheck = () => {
-			const t = input.value.trim();
-			if (!t)
-				return;
-			out.replaceChildren(common.busy(_('Checking…')));
-			// Без устройства аргумент mac не передаётся вовсе: rpcd отклоняет null вместо строки.
-			const call = dev.value ? common.callCheck(t, dev.value) : common.callCheck(t);
-			return call.then((r) => out.replaceChildren(renderCheck(r)))
-				.catch((e) => out.replaceChildren(renderCheck({ error: e.message })));
-		};
-		input.addEventListener('keydown', (ev) => { if (ev.key == 'Enter') runCheck(); });
 
 		const runTunnelTest = () => {
 			ttOut.replaceChildren(common.busy(_('Checking… about 5 seconds')));
@@ -172,16 +106,6 @@ return view.extend({
 		return E('div', {}, [
 			E('h2', { 'name': 'content' }, _('Diagnostics')),
 			E('div', { 'class': 'cbi-map-descr' }, _('Checks and the log. Nothing is configured on this tab.')),
-			E('div', { 'class': 'cbi-section' }, [
-				E('h3', {}, _('Check domain / IP')),
-				E('p', { 'class': 'cbi-section-descr' },
-					_('Shows which category and action apply and why. A domain is resolved through the router, the same way a device would.')),
-				E('div', { 'class': 'truba-toolbar' }, [
-					input, dev,
-					E('button', { 'class': 'btn cbi-button-action', 'click': ui.createHandlerFn(this, runCheck) }, _('Check'))
-				]),
-				out
-			]),
 			E('div', { 'class': 'cbi-section' }, [
 				E('h3', {}, _('Tunnel check')),
 				E('p', { 'class': 'cbi-section-descr' },

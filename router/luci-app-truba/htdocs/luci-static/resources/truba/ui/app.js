@@ -126,9 +126,14 @@ function use(s) {
 const scheme = store({ scheme: 'light' });
 
 // Опрос службы: ошибка не стирает данные — страница показывает последние и значок «нет связи».
+// Пустой ответ (на «Правилах» lists и status приходят не на каждом шаге) ничего не меняет — без
+// оповещения: иначе страница перерисовывалась бы на каждом шаге опроса.
 function pollStore(s, fetchFn, interval) {
 	poll.add(() => fetchFn().then(
-		(patch) => s.set(Object.assign({}, patch, { offline: false })),
+		(patch) => {
+			if (Object.keys(patch || {}).length || s.get().offline !== false)
+				s.set(Object.assign({}, patch, { offline: false }));
+		},
 		() => s.set({ offline: true })), interval);
 }
 
@@ -150,10 +155,45 @@ function changeCount() {
 	return n + Object.keys(st.reorder || {}).length;
 }
 
-const changes = store({ n: 0 });
+// bad — сколько полей страницы сейчас с неверным значением (spec §3.6): в UCI оно не пишется, а
+// «Применить» недоступна, пока такие поля есть, — иначе применилось бы прежнее значение незаметно.
+const changes = store({ n: 0, bad: 0 });
+const badFields = new Set();
+
+// Поле key («конфиг.секция.опция») неверно или снова верно.
+function invalid(key, isBad) {
+	if (isBad)
+		badFields.add(key);
+	else
+		badFields.delete(key);
+	if (changes.get().bad !== badFields.size)
+		changes.set({ bad: badFields.size });
+}
+
+// Всплывающее сообщение (kit.Toast): id растёт и при том же тексте — второе «Обновление запущено» видно.
+const toasts = store({ text: null, id: 0 });
+
+function toast(text) {
+	toasts.set({ text, id: toasts.get().id + 1 });
+}
+
+// Значение как в сохранённых настройках — не изменение: прежняя правка опции снимается, и A → B → A даёт
+// ноль изменений. uci.set записал бы изменение и с тем же значением — панель показала бы его, а точки нет.
+const same = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
 
 function setOpt(config, section, option, value) {
-	if (value == null)
+	const st = uci.state || {};
+	const saved = st.values?.[config]?.[section];
+	if (saved && !st.creates?.[config]?.[section] && st.deletes?.[config]?.[section] !== true && same(saved[option], value)) {
+		for (let pend of [ st.changes?.[config], st.deletes?.[config] ]) {
+			if (!pend?.[section])
+				continue;
+			delete pend[section][option];
+			if (!Object.keys(pend[section]).length)
+				delete pend[section];
+		}
+	}
+	else if (value == null)
 		uci.unset(config, section, option);
 	else
 		uci.set(config, section, option, value);
@@ -170,6 +210,15 @@ function addSection(config, type) {
 // Удалить секцию (устройство «по правилам», секция с неверным MAC) — тоже несохранённое изменение.
 function removeSection(config, sid) {
 	uci.remove(config, sid);
+	changes.set({ n: changeCount() });
+}
+
+// Сохранённая секция, удалённая в браузере, — снова на месте со своими значениями (uci.remove сбросил и её
+// правки). Своего вызова у uci нет: снимается пометка удаления.
+function restoreSection(config, sid) {
+	const d = uci.state?.deletes?.[config];
+	if (d?.[sid] === true)
+		delete d[sid];
 	changes.set({ n: changeCount() });
 }
 
@@ -251,8 +300,10 @@ function mount(view, Page, props) {
 
 return baseclass.extend({
 	load, lib, luminance, schemeFrom, mount, store, use, scheme, changes, changeCount, pending, every, usePoll,
+	invalid, toast, toasts,
 	poll: pollStore,
 	set: setOpt,
 	add: addSection,
-	remove: removeSection
+	remove: removeSection,
+	restore: restoreSection
 });

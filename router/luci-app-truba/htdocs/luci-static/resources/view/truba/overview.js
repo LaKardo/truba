@@ -126,7 +126,7 @@ function warnings(st) {
 	for (let w of (a.warnings || []))
 		add(common.WARNINGS[w]?.text || w, common.WARNINGS[w]?.tab);
 	if ((a.missing || []).length)
-		add(common.missingText(a.missing), 'routing');
+		add(common.missingText(a.missing), 'rules');
 	if ((a.invalid || []).length)
 		add(_('Invalid settings were skipped, defaults are used instead: %s').format(
 			a.invalid.map((x) => '%s = «%s»'.format(x.key, x.value)).join(', ')), common.invalidTab(a.invalid));
@@ -143,9 +143,9 @@ function warnings(st) {
 		add(_('The last NAT check found a problem.'), 'inbound');
 	const failed = failedSets(st.lists?.last);
 	if (listsStale(st))
-		add(_('Rule sets have not been checked for more than 36 hours although auto-update is on: check that cron runs (System → Scheduled Tasks).'), 'dns');
+		add(_('Rule sets have not been checked for more than 36 hours although auto-update is on: check that cron runs (System → Scheduled Tasks).'), 'rules');
 	else if (st.routing && failed.length)
-		add(_('The last rule set check failed: %s').format(failed.join('; ')), 'dns');
+		add(_('The last rule set check failed: %s').format(failed.join('; ')), 'rules');
 	return res;
 }
 
@@ -319,7 +319,7 @@ function InfoCard({ st }) {
 					<div>${!st.routing ? NBSP : l.updating ? _('update in progress')
 						: !auto ? _('automatic update is off') : _('Next check: %s').format(common.fmtTime(l.next))}</div>
 				</div>
-				<${kit.Go} tab="dns" label=${_('DNS and rule sets')} />
+				<div class="gos"><${kit.Go} tab="dns" /><${kit.Go} tab="rules" label=${_('Rule sets')} /></div>
 			</div>
 			<div>
 				<div class="card-h"><h3>${_('Inbound')}</h3><${kit.Badge} level=${nLevel}>${nText}</${kit.Badge}></div>

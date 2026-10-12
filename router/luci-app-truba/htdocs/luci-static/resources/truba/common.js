@@ -17,7 +17,6 @@ const callRollbackLists = rpc.declare({ object: 'truba', method: 'rollback_lists
 // История скорости с Роутера (её пишет процесс truba stats): точки новее since за span секунд.
 const callRates = rpc.declare({ object: 'truba', method: 'rates', params: [ 'span', 'since' ], expect: { '': {} } });
 const callLog = rpc.declare({ object: 'truba', method: 'log', params: [ 'lines' ], expect: { log: '' } });
-const callLeases = rpc.declare({ object: 'luci-rpc', method: 'getDHCPLeases', expect: { '': {} } });
 const callSchema = rpc.declare({ object: 'truba', method: 'schema', expect: { '': {} } });
 // Устройства с трафиком и Политиками; куда устройство ходит сейчас (ADR 0018).
 const callDevices = rpc.declare({ object: 'truba', method: 'devices', expect: { '': {} } });
@@ -55,10 +54,10 @@ const REASON_LABELS = {
 
 // Предупреждения службы (applied.warnings): текст и вкладка, где их исправляют.
 const WARNINGS = {
-	lists_missing: { tab: 'dns', text: _('Rule sets are not downloaded yet — only the mode default applies. Download is in progress.') },
-	zones_without_devices: { tab: 'routing', text: _('The selected firewall zones have no active devices.') },
+	lists_missing: { tab: 'rules', text: _('Rule sets are not downloaded yet — only the mode default applies. Download is in progress.') },
+	zones_without_devices: { tab: 'rules', text: _('The selected firewall zones have no active devices.') },
 	tunnel_not_configured: { tab: 'tunnel', text: _('The tunnel is not configured yet — import the configuration on the Tunnel tab.') },
-	lists_rolled_back: { tab: 'dns', text: _('The current rule sets could not be read, so the previous ones were restored.') }
+	lists_rolled_back: { tab: 'rules', text: _('The current rule sets could not be read, so the previous ones were restored.') }
 };
 
 // Почему «Проверка NAT» не дала результата (поле error итога).
@@ -70,11 +69,26 @@ const NAT_ERRORS = {
 	timeout: _('no result in time')
 };
 
-// Неверные значения настроек, которые служба пропустила (applied.invalid), — вкладка, где их исправить.
-const INVALID_TABS = { device: 'devices', dns: 'dns', lists: 'dns', watchdog: 'tunnel', main: 'tunnel' };
+// Неверные значения настроек, которые служба пропустила (applied.invalid), — вкладка, где их исправить:
+// сначала по опции («main.zone»), затем по секции. Режим, Зоны, Маршрутизация, Наборы правил и правила — «Правила».
+const INVALID_TABS = { 'main.mode': 'rules', 'main.zone': 'rules', 'main.routing': 'rules',
+	device: 'devices', dns: 'dns', lists: 'rules', rule: 'rules', watchdog: 'tunnel', main: 'tunnel' };
 
 function invalidTab(list) {
-	return INVALID_TABS[String(list[0]?.key || '').split('.')[0]] || 'routing';
+	const k = String(list[0]?.key || '');
+	return INVALID_TABS[k] || INVALID_TABS[k.split('.')[0]] || 'rules';
+}
+
+// Почему «Проверить домен/IP» не дала результата (поле error итога check).
+const CHECK_ERRORS = {
+	busy: _('the rule sets are being unpacked, try again in a minute')
+};
+
+// Текст неудачной проверки: причина службы или текст ошибки вызова (rpcd, нет связи).
+function checkErrorText(r) {
+	if (CHECK_ERRORS[r?.error])
+		return _('Not checked: %s').format(CHECK_ERRORS[r.error]);
+	return r?.message ? _('The check failed: %s').format(r.message) : _('The check failed.');
 }
 
 // Долгая проверка (NAT, Туннель): rpcd запускает её в фоне и отвечает сразу, а итог —
@@ -332,8 +346,99 @@ function field(o, sec, key, msg) {
 	return o;
 }
 
+// Текст ошибки поля по схеме или null — та же проверка, что у службы (conf.uc, check_value): неверное
+// значение служба пропустила бы и взяла умолчание. Пустое — умолчание, не ошибка; string не проверяется.
+const IPV4 = /^((25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(25[0-5]|2[0-4]\d|1?\d?\d)$/;
+
+function fieldError(sec, key, v) {
+	const o = schemaOpt(sec, key);
+	v = (v == null) ? '' : String(v);
+	if (!o || v === '')
+		return null;
+	switch (o.type) {
+	case 'int': {
+		const n = /^\d+$/.test(v) ? +v : NaN;
+		if (n >= o.lo && n <= o.hi && !(o.min && n > 0 && n < o.min))
+			return null;
+		return o.min ? _('Enter 0 or a whole number from %d to %d').format(o.min, o.hi)
+			: _('Enter a whole number from %d to %d').format(o.lo, o.hi);
+	}
+	case 'pattern':
+		return new RegExp(o.re).test(v) ? null : _('Invalid value');
+	case 'enum':
+		return o.values.includes(v) ? null : _('Choose one of: %s').format(o.values.join(', '));
+	case 'ipv4':
+		return IPV4.test(v) ? null : _('Enter an IPv4 address');
+	default:
+		return null;
+	}
+}
+
 function tunnelIface() {
 	return get('main', 'iface');
+}
+
+// ---- Правила Категорий ----
+
+// Действия правила, которые служба принимает (const.uc, ACTIONS); остальные она пропускает.
+const RULE_ACTIONS = [ 'direct', 'tunnel', 'block' ];
+
+// Ключ Категории секции rule «набор:тег» — как его читает служба (conf.uc): set не «geoip» — «geosite»,
+// тег в нижнем регистре.
+function ruleKey(s) {
+	return ((s.set == 'geoip') ? 'geoip' : 'geosite') + ':' + String(s.tag || '').toLowerCase();
+}
+
+// Секция — правило Режима (и Категории, если заданы set и tag) так, как его читает служба (conf.uc):
+// без set или tag она пропускается, mode не «selective» — «all».
+function ruleOf(s, mode, set, tag) {
+	return !!(s.set && s.tag) && ((s.mode == 'selective') ? 'selective' : 'all') == mode &&
+		(set == null || ruleKey(s) == set + ':' + String(tag).toLowerCase());
+}
+
+function ruleSections(mode, set, tag) {
+	return uci.sections('truba', 'rule').filter((s) => ruleOf(s, mode, set, tag));
+}
+
+// Действия Режима одним проходом: «набор:тег» → Действие. Из секций одного ключа действует последняя
+// с верным Действием — служба перезаписывает Действие ключа по порядку секций.
+function ruleActions(mode) {
+	const m = new Map();
+	for (let s of ruleSections(mode))
+		if (RULE_ACTIONS.includes(s.action))
+			m.set(ruleKey(s), s.action);
+	return m;
+}
+
+// Действие Категории в Режиме; нет правила — «По режиму».
+function ruleAction(mode, set, tag) {
+	return ruleActions(mode).get(set + ':' + String(tag).toLowerCase()) || 'mode';
+}
+
+// Строки Категорий (spec §5.3): поиск по «набор:тег» без учёта регистра и чип по Действию (actOf —
+// Действие Категории); сразу — не больше CAT_LIMIT: около 1 700 строк по четыре кнопки телефон рисовал
+// бы долго, всё — по «Показать все». total — сколько подошло.
+const CAT_LIMIT = 100;
+
+function catRows(list, actOf, q, f, full) {
+	const qq = String(q || '').trim().toLowerCase();
+	const hit = list.filter((c) => (!qq || (c.set + ':' + c.tag).toLowerCase().includes(qq)) &&
+		(f == 'all' || (f == 'explicit' ? actOf(c) != 'mode' : actOf(c) == f)));
+	return { rows: full ? hit : hit.slice(0, CAT_LIMIT), total: hit.length };
+}
+
+// Перечитать categories вместе с этим ответом lists: Наборы правил распаковываются или ещё не скачаны,
+// на прошлом опросе шли обновление или применение, или сменились файлы Наборов (обновление по расписанию,
+// откат) — иначе список, счётчики и пропавшие Категории устарели бы до перезагрузки страницы.
+function catsDue(cats, prev, next) {
+	const sha = (l) => [ l?.geoip?.sha256, l?.geosite?.sha256 ].join();
+	return !!(cats?.busy || !(cats?.cats || []).length || prev?.updating || prev?.applying || next?.applying || sha(prev) != sha(next));
+}
+
+// Пора ли спросить lists и sets (spec §5.3): раз в 30 с, а пока идёт обновление или применение
+// и 15 с после «Обновить сейчас» (замок обновления берётся не сразу) — каждый опрос. Время — в мс.
+function listsDue(now, polledAt, kickedAt, l) {
+	return !!(l?.updating || l?.applying) || now - kickedAt < 15000 || now - polledAt >= 30000;
 }
 
 // ---- Устройства (truba.devices, ADR 0018) ----
@@ -434,9 +539,9 @@ function tunnelState(st) {
 // Вкладки Трубы: адрес и название — для ссылок из плиток и предупреждений «Обзора».
 const TABS = {
 	devices: _('Devices'),
+	rules: _('Rules'),
 	tunnel: _('Tunnel'),
-	routing: _('Routing'),
-	dns: _('DNS & lists'),
+	dns: _('DNS'),
 	inbound: _('Inbound'),
 	diagnostics: _('Diagnostics')
 };
@@ -445,11 +550,12 @@ function tabUrl(tab) {
 }
 
 return baseclass.extend({
-	callStatus, callLists, callCategories, callSets, callCheck, callUpdateLists, callRollbackLists, callRates, callLog, callLeases,
-	callSchema, loadSchema, schema, get, field, handshakeLevel, callDevices, callConnections,
+	callStatus, callLists, callCategories, callSets, callCheck, callUpdateLists, callRollbackLists, callRates, callLog,
+	callSchema, loadSchema, schema, get, field, fieldError, handshakeLevel, callDevices, callConnections,
 	ACTIVE_SPAN, devRate, devShare, devActive, deviceSections, deviceSection, devicePolicy, normMac, connLabel,
+	RULE_ACTIONS, ruleKey, ruleOf, ruleSections, ruleActions, ruleAction, catRows, catsDue, listsDue, checkErrorText,
 	runNatTest, runTunnelTest,
-	ACTION_LABELS, ACTION_LEVELS, REASON_LABELS, WARNINGS, NAT_ERRORS, UPNP_MISSING, NBSP, TABS,
+	ACTION_LABELS, ACTION_LEVELS, REASON_LABELS, VIA_LABELS, WARNINGS, NAT_ERRORS, CHECK_ERRORS, UPNP_MISSING, NBSP, TABS,
 	fmtBytes, fmtRate, fmtAge, fmtTime, fmtDate, fmtNum, missingText,
 	pill, busy, empty, span, svgEl, kvTable, table, row, chips,
 	setText, setState, setResult, setError, tunnelIface, tunnelState, tabUrl, invalidTab

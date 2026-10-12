@@ -203,28 +203,6 @@ function Conns({ ip }) {
 	</div>`;
 }
 
-// «Проверить для этого устройства»: та же проверка, что на вкладке «Диагностика», с MAC — с Политикой.
-function CheckBox({ mac }) {
-	const { html, useState } = app.lib;
-	const [ q, setQ ] = useState(''), [ res, setRes ] = useState(null), [ busy, setBusy ] = useState(false);
-	const run = (ev) => {
-		ev.preventDefault();
-		const t = q.trim();
-		if (!t)
-			return;
-		setBusy(true);
-		// Без MAC (узел mesh-VPN) аргумент mac не передаётся вовсе: rpcd отклоняет null вместо строки.
-		(mac ? common.callCheck(t, mac) : common.callCheck(t))
-			.then((r) => setRes(r), () => setRes({ error: 'rpc' })).finally(() => setBusy(false));
-	};
-	return html`<form class="check" onSubmit=${run}>
-		<input name="target" autocomplete="off" placeholder=${_('domain or IP')} value=${q} onInput=${(ev) => setQ(ev.target.value)} />
-		<button type="submit" class="btn" disabled=${busy}>${_('Check')}</button>
-	</form>
-	${res ? html`<div class="mu check-res">${(res.error || !res.action) ? _('The check failed.')
-		: html`${res.target} → <${kit.ActionTag} action=${res.action} /> · ${common.REASON_LABELS[res.reason] || res.reason}`}</div>` : ''}`;
-}
-
 // Карточка своей разметкой, а не kit.Card: нужен сам элемент. При выборе устройства панель
 // прокручивается в видимую область: на телефоне она липнет к низу экрана, но выше начала списка
 // подняться не может, и при коротком списке её низ уходил бы за край.
@@ -252,7 +230,7 @@ function Panel({ d, now, onClose }) {
 		<h4 class="sub">${_('Where it goes now')}</h4>
 		${d.ip ? html`<${Conns} key=${d.ip} ip=${d.ip} />` : html`<${kit.Empty} text=${_('The device is offline.')} />`}
 		<h4 class="sub">${_('Check for this device')}</h4>
-		<${CheckBox} key=${key(d)} mac=${d.mac} />
+		<${kit.Check} key=${key(d)} mac=${d.mac} />
 	</section>`;
 }
 

@@ -20,18 +20,18 @@
 		"order": 15,
 		"action": { "type": "view", "path": "truba/devices" }
 	},
+	"admin/services/truba/rules": {
+		"title": "Rules",
+		"order": 17,
+		"action": { "type": "view", "path": "truba/rules" }
+	},
 	"admin/services/truba/tunnel": {
 		"title": "Tunnel",
 		"order": 20,
 		"action": { "type": "view", "path": "truba/tunnel" }
 	},
-	"admin/services/truba/routing": {
-		"title": "Routing",
-		"order": 30,
-		"action": { "type": "view", "path": "truba/routing" }
-	},
 	"admin/services/truba/dns": {
-		"title": "DNS & lists",
+		"title": "DNS",
 		"order": 40,
 		"action": { "type": "view", "path": "truba/dns" }
 	},
@@ -45,7 +45,10 @@
 		"order": 60,
 		"action": { "type": "view", "path": "truba/diagnostics" }
 	},
+	"admin/services/truba/routing": {
+		"action": { "type": "alias", "path": "admin/services/truba/rules" }
+	},
 	"admin/services/truba/lists": {
-		"action": { "type": "alias", "path": "admin/services/truba/dns" }
+		"action": { "type": "alias", "path": "admin/services/truba/rules" }
 	}
 }

@@ -109,23 +109,8 @@ msgstr "Для игровых приставок рекомендуется «В
 msgid "Error: %s"
 msgstr "Ошибка: %s"
 
-msgid "Why: %s"
-msgstr "Почему: %s"
-
 msgid "geosite categories containing the domain"
 msgstr "Категории geosite, в которых есть домен"
-
-msgid "Category"
-msgstr "Категория"
-
-msgid "Matching entry"
-msgstr "Совпавшая запись"
-
-msgid "Entries"
-msgstr "Записей"
-
-msgid "Action"
-msgstr "Действие"
 
 msgid "none"
 msgstr "нет"
@@ -133,29 +118,11 @@ msgstr "нет"
 msgid "Decisive category (the narrowest one with an explicit action): %s"
 msgstr "Решающая Категория (самая узкая с явным Действием): %s"
 
-msgid "Addresses"
-msgstr "Адреса"
-
-msgid "geoip categories"
-msgstr "Категории geoip"
-
-msgid "Why"
-msgstr "Почему"
-
 msgid "domain or IPv4, e.g. gosuslugi.ru"
 msgstr "домен или IPv4, например gosuslugi.ru"
 
-msgid "— any device —"
-msgstr "— любое устройство —"
-
 msgid "Checking…"
 msgstr "Проверка…"
-
-msgid "Check domain / IP"
-msgstr "Проверить домен / IP"
-
-msgid "Shows which category and action apply and why. A domain is resolved through the router, the same way a device would."
-msgstr "Показывает, какая Категория и какое Действие сработают и почему. Домен резолвится через Роутер — так же, как это сделало бы устройство."
 
 msgid "Check"
 msgstr "Проверить"
@@ -261,9 +228,6 @@ msgstr "IP из ответов для Категорий с Действием �
 
 msgid "Rule sets are being updated, try again later."
 msgstr "Наборы правил обновляются, попробуйте позже."
-
-msgid "File"
-msgstr "Файл"
 
 msgid "Current version"
 msgstr "Текущая версия"
@@ -412,15 +376,6 @@ msgstr "Проверка…"
 msgid "Check NAT"
 msgstr "Проверить NAT"
 
-msgid "Rule set"
-msgstr "Набор правил"
-
-msgid "Types"
-msgstr "Типы"
-
-msgid "Included in"
-msgstr "Вложена в"
-
 msgid "Reset all category actions of this mode to the starting settings?"
 msgstr "Сбросить Действия всех Категорий этого Режима к Стартовым настройкам?"
 
@@ -441,24 +396,6 @@ msgstr "Зоны"
 
 msgid "Firewall zones whose devices are routed. Forwarding from them to zone «truba» is added automatically, and IPv6 internet is closed to them. Other zones go direct."
 msgstr "Зоны межсетевого экрана, на устройства которых действует Маршрутизация. Перенаправление из них в зону «truba» заводится само, IPv6-интернет им закрыт. Остальные зоны идут напрямую."
-
-msgid "Search category…"
-msgstr "Поиск Категории…"
-
-msgid "Actions: «All via tunnel»"
-msgstr "Действия: «Всё в туннель»"
-
-msgid "Actions: «Selective»"
-msgstr "Действия: «Выборочный»"
-
-msgid "By mode = Tunnel. Narrower categories are checked first; on a tie: Block → Tunnel → Direct. A domain category wins over a geoip category."
-msgstr "«По режиму» = Туннель. Узкие Категории проверяются раньше широких; при равенстве — Блок → Туннель → Напрямую. Доменная Категория побеждает Категорию geoip."
-
-msgid "By mode = Direct. Only categories with action Tunnel go through the tunnel."
-msgstr "«По режиму» = Напрямую. Через Туннель идут только Категории с Действием «Туннель»."
-
-msgid "Reset to starting settings"
-msgstr "Сбросить к Стартовым настройкам"
 
 msgid "No PrivateKey in the [Interface] section"
 msgstr "В секции [Interface] нет PrivateKey"
@@ -646,12 +583,6 @@ msgstr "DNS и списки"
 msgid "Local port; dnsmasq forwards requests here. The next port is taken by the mosdns statistics API (127.0.0.1 only)."
 msgstr "Локальный порт; сюда dnsmasq пересылает запросы. Следующий порт занимает API статистики mosdns (только 127.0.0.1)."
 
-msgid "Rule sets are not downloaded yet — see the DNS & lists tab."
-msgstr "Наборы правил ещё не скачаны — см. вкладку «DNS и списки»."
-
-msgid "Last check"
-msgstr "Последняя проверка"
-
 msgid "failed — %s"
 msgstr "ошибка — %s"
 
@@ -693,12 +624,6 @@ msgstr "запросов ещё не было"
 
 msgid "automatic update is off"
 msgstr "автообновление выключено"
-
-msgid "geoip subnets: %s"
-msgstr "подсетей geoip: %s"
-
-msgid "IPs from DNS: %s"
-msgstr "IP из DNS: %s"
 
 msgid "the tunnel is not configured"
 msgstr "Туннель не настроен"
@@ -850,9 +775,6 @@ msgstr "Дополнительно"
 msgid "Rule sets"
 msgstr "Наборы правил"
 
-msgid "Sources"
-msgstr "Источники"
-
 msgid "Inbound traffic is on the Overview."
 msgstr "Трафик входящих — на «Обзоре»."
 
@@ -870,9 +792,6 @@ msgstr "Последняя проверка NAT нашла проблему."
 
 msgid "State and settings"
 msgstr "Состояние и настройки"
-
-msgid "DNS and rule sets"
-msgstr "DNS и Наборы правил"
 
 msgid "NAT and port forwards"
 msgstr "NAT и пробросы"
@@ -933,18 +852,6 @@ msgstr "UPnP выкл"
 
 msgid "manual forwards: %d"
 msgstr "вручную: %d"
-
-msgid "What happens to traffic that no category with an explicit action matched. «All via tunnel» — everything except categories with action Direct (by default, Russian traffic). «Selective» — only categories with action Tunnel go through the tunnel."
-msgstr "Что делать с трафиком, которому ни одна Категория не задала явное Действие. «Всё в туннель» — всё, кроме Категорий с Действием «Напрямую» (по умолчанию — российский трафик). «Выборочный» — через Туннель идут только Категории с Действием «Туннель»."
-
-msgid "In the sets now"
-msgstr "В наборах сейчас"
-
-msgid "nothing: routing is off"
-msgstr "пусто: Маршрутизация выключена"
-
-msgid "With an explicit action"
-msgstr "С явным Действием"
 
 msgid "Remove"
 msgstr "Убрать"
@@ -1030,9 +937,6 @@ msgstr "Неверные настройки пропущены, вместо н�
 msgid "Expected https://…, tls://…, quic://…, h3://…, tcp://… or udp://… (optionally «@IP»)"
 msgstr "Нужен адрес https://…, tls://…, quic://…, h3://…, tcp://… или udp://… (можно с «@IP»)"
 
-msgid "Rule sets are being unpacked — reload the page in a minute."
-msgstr "Наборы правил распаковываются — обновите страницу через минуту."
-
 msgid "10 min"
 msgstr "10 мин"
 
@@ -1104,7 +1008,6 @@ msgstr "решено до смены настроек"
 
 msgid "Tunnel %d%%, direct %d%%"
 msgstr "Туннель %d%%, напрямую %d%%"
-
 
 msgid "all via tunnel"
 msgstr "всё в туннель"
@@ -1210,3 +1113,120 @@ msgstr "изменено, ещё не применено"
 
 msgid "No device data: the router did not answer."
 msgstr "Данных об устройствах нет: Роутер не ответил."
+
+msgid "Rules"
+msgstr "Правила"
+
+msgid "Enter 0 or a whole number from %d to %d"
+msgstr "Введите 0 или целое число от %d до %d"
+
+msgid "Enter a whole number from %d to %d"
+msgstr "Введите целое число от %d до %d"
+
+msgid "Invalid value"
+msgstr "Неверное значение"
+
+msgid "Choose one of: %s"
+msgstr "Выберите одно из: %s"
+
+msgid "Enter an IPv4 address"
+msgstr "Введите адрес IPv4"
+
+msgid "Addresses (%d)"
+msgstr "Адреса (%d)"
+
+msgid "Domain or IP"
+msgstr "Домен или IP"
+
+msgid "Fix the highlighted fields"
+msgstr "Исправьте отмеченные поля"
+
+msgid "At least one zone is needed: without zones %s is routed by default."
+msgstr "Нужна хотя бы одна Зона: без Зон по умолчанию маршрутизируется %s."
+
+msgid "There is no such zone in the firewall."
+msgstr "Такой зоны нет в настройках межсетевого экрана."
+
+msgid "missing"
+msgstr "пропала"
+
+msgid "Traffic without a category goes through the Tunnel; Russian traffic goes Direct by the starting settings."
+msgstr "Без Категории — в Туннель; российское по стартовым настройкам — Напрямую."
+
+msgid "Only categories with action Tunnel go through the Tunnel; everything else goes Direct."
+msgstr "В Туннель — только Категории с Действием «Туннель», остальное — Напрямую."
+
+msgid "geoip · %s subnets"
+msgstr "geoip · подсетей: %s"
+
+msgid "geosite · %s entries"
+msgstr "geosite · записей: %s"
+
+msgid "in %s"
+msgstr "входит в %s"
+
+msgid "Action for %s"
+msgstr "Действие для %s"
+
+msgid "Categories"
+msgstr "Категории"
+
+msgid "%s · with an action %s"
+msgstr "%s · с Действием %s"
+
+msgid "Find a category"
+msgstr "Найти Категорию"
+
+msgid "With an action"
+msgstr "С Действием"
+
+msgid "Starting settings"
+msgstr "Стартовые настройки"
+
+msgid "Rule sets are being unpacked — the list will appear in a minute."
+msgstr "Наборы правил распаковываются — список появится через минуту."
+
+msgid "Rule sets are not downloaded yet — see Rule sets above."
+msgstr "Наборы правил ещё не скачаны — см. «Наборы правил» выше."
+
+msgid "No categories match the filter."
+msgstr "Под фильтр не подходит ни одна Категория."
+
+msgid "Show all (%d)"
+msgstr "Показать все (%d)"
+
+msgid "Mode: %s. The change is applied with the Apply button, like the others."
+msgstr "Режим: %s. Изменение применяется кнопкой «Применить», как и остальные."
+
+msgid "Where it goes"
+msgstr "Куда пойдёт"
+
+msgid "for all devices"
+msgstr "для всех устройств"
+
+msgid "In the sets now"
+msgstr "В наборах сейчас"
+
+msgid "nothing: routing is off"
+msgstr "пусто: Маршрутизация выключена"
+
+msgid "geoip subnets: %s"
+msgstr "подсетей geoip: %s"
+
+msgid "IPs from DNS: %s"
+msgstr "IP из DNS: %s"
+
+msgid "Versions"
+msgstr "Версии"
+
+msgid "Update settings"
+msgstr "Настройки обновления"
+
+msgid "The files are swapped at once; the rules are rebuilt in the background."
+msgstr "Файлы меняются местами сразу, правила перестраиваются в фоне."
+
+msgid "The check failed: %s"
+msgstr "Проверить не удалось: %s"
+
+msgid "Show actions for mode"
+msgstr "Показать Действия Режима"
