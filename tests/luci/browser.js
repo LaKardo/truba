@@ -174,6 +174,12 @@ async function waitApply(page) {
 	await page.goto(url('devices'), { waitUntil: 'networkidle2' });
 	await settled(page);
 	result(await shadowHas(page, rowSel('192.168.1.50')) && await shadowHas(page, rowSel('100.64.0.9')), '«Устройства»: в списке сосед и узел mesh-VPN');
+	// Разметка строки: в кнопке — только фразовые элементы; у карточки списка нет пустого заголовка.
+	const markup = await page.evaluate(() => {
+		const r = document.querySelector('.truba-root').shadowRoot;
+		return { divs: r.querySelectorAll('button.dev div').length, h3: r.querySelectorAll('.card.list .card-h h3').length };
+	});
+	result(markup.divs == 0 && markup.h3 == 0, '«Устройства»: в строке-кнопке нет div, у списка нет пустого заголовка', JSON.stringify(markup));
 	const chips = await page.evaluate(() => document.querySelector('.truba-root').shadowRoot.querySelector('.chips')?.innerText || '');
 	result(/Active\s*2/.test(chips), '«Устройства»: у обоих трафик за 5 минут — активны', chips.replace(/\s+/g, ' '));
 	await tap(rowSel('192.168.1.50'));
@@ -244,7 +250,7 @@ async function waitApply(page) {
 	const newRow = 'button.dev[data-mac="02:aa:bb:cc:dd:01"]';
 	const rowText = await page.waitForFunction((s) => document.querySelector('.truba-root')?.shadowRoot?.querySelector(s)?.innerText, { timeout: 5000 }, newRow)
 		.then((h) => h.jsonValue()).catch(() => '');
-	result(/console/.test(rowText) && /offline/.test(rowText) && await shadowHas(page, newRow + ' .dot.warn'),
+	result(/console/.test(rowText) && /offline/.test(rowText) && await shadowHas(page, newRow + ' .dot.warn[aria-label]'),
 		'«Добавить по MAC»: строка «offline» с точкой изменения', rowText.replace(/\s+/g, ' '));
 	// Тот же MAC ещё раз — новой секции нет, выбрана его строка.
 	await tap('[data-act="add-mac"]');
@@ -276,6 +282,17 @@ async function waitApply(page) {
 			pol: [ ...r.querySelectorAll('.panel .policy button') ].find((b) => b.getAttribute('aria-pressed') == 'true')?.textContent };
 	});
 	result(online.sel && online.pol == 'All direct', '«Добавить по MAC»: устройство в сети — его строка выбрана, Политика из формы', JSON.stringify(online));
+	// Имя устройства с секцией меняется в панели.
+	const nameIn = await el('.panel input[name="devname"]');
+	await nameIn?.click({ clickCount: 3 });
+	await nameIn?.type('tv-box');
+	await page.keyboard.press('Tab');
+	await sleep(300);
+	const renamed = await page.evaluate(async () => ({
+		row: document.querySelector('.truba-root').shadowRoot.querySelector('button.dev[data-ip="192.168.1.50"]')?.innerText || '',
+		uci: (await L.require('uci')).sections('truba', 'device').find((s) => String(s.mac).toLowerCase() == '02:11:22:33:44:55')?.name
+	}));
+	result(!!nameIn && renamed.uci == 'tv-box' && /tv-box/.test(renamed.row), '«Устройства»: имя меняется в панели', JSON.stringify(renamed));
 	await Promise.all([ page.waitForNavigation({ waitUntil: 'networkidle2' }).catch(() => {}), tap('.changes [data-act="reset"]') ]);
 	await settled(page);
 
@@ -377,6 +394,17 @@ async function waitApply(page) {
 	await sleep(300);
 	const sheet = await page.evaluate(measure);
 	result(sheet.ok && sheet.doc <= sheet.win, '«Устройства» 375: панель в пределах экрана, без горизонтальной прокрутки', JSON.stringify(sheet));
+	// Несохранённое изменение: панель изменений не закрывает низ панели устройства.
+	await clickIn('.panel .policy button', '^All direct$');
+	await page.waitForFunction(() => document.querySelector('.truba-root')?.shadowRoot?.querySelector('.changes'), { timeout: 5000 }).catch(() => {});
+	await sleep(300);
+	const overlap = await page.evaluate(() => {
+		const r = document.querySelector('.truba-root').shadowRoot;
+		const p = r.querySelector('.panel')?.getBoundingClientRect(), b = r.querySelector('.changes')?.getBoundingClientRect();
+		return { panel: p && Math.round(p.bottom), bar: b && Math.round(b.top) };
+	});
+	result(overlap.bar != null && overlap.panel <= overlap.bar + 1, '«Устройства» 375: панель изменений не закрывает панель устройства', JSON.stringify(overlap));
+	await Promise.all([ page.waitForNavigation({ waitUntil: 'networkidle2' }).catch(() => {}), tap('.changes [data-act="reset"]') ]);
 	await page.screenshot({ path: `${out}/devices-375.png`, fullPage: true });
 	await page.setViewport({ width: 1280, height: 900 });
 

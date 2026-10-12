@@ -81,6 +81,8 @@ export const DEV_SETS = [ 'dv_tunnel_down', 'dv_tunnel_up', 'dv_direct_down', 'd
 export const DEV_SET_SIZE = 1024;
 // Срок элемента набора и истории устройства без трафика, с.
 export const DEV_SPAN = 86400;
+// Поминутные средние устройства (мини-график вкладки «Устройства»): шаг и сколько хранится, с.
+export const DEV_HISTORY = { step: 60, span: 3600 };
 export const DEVICES_FILE = RUN_DIR + '/devices.json';
 // Сколько устройств отдаёт devices: самые недавние и все с Политикой. В наборах адресов до DEV_SET_SIZE
 // (в том числе подменённых), а ответ ubus и вкладка столько не вынесут.

@@ -635,6 +635,9 @@ check('настройки: в наборы Политик — только вк�
 config("config device\n\toption mac 'AA:BB:CC:DD:EE:05'\n\toption policy 'direct'\n\nconfig device\n\toption mac 'aa:bb:cc:dd:ee:05'\n\toption policy 'tunnel'\n");
 check('секции устройств: две с одним MAC — действует первая', same(F.device_sections(), [ { name: '', mac: 'aa:bb:cc:dd:ee:05', policy: 'direct' } ]),
 	sprintf('%J', F.device_sections()));
+// enabled — флаг схемы, как у интерфейса: «off», «no», «false» выключают, а не только «0».
+config("config device\n\toption mac 'aa:bb:cc:dd:ee:06'\n\toption policy 'direct'\n\toption enabled 'off'\n\nconfig device\n\toption mac 'aa:bb:cc:dd:ee:07'\n\toption policy 'direct'\n\toption enabled 'yes'\n");
+check('секции устройств: enabled — флаг схемы', same(map(F.device_sections(), d => d.policy), [ 'rules', 'direct' ]), sprintf('%J', F.device_sections()));
 
 let leases = DVC.parse_leases('1700000000 3C:7C:3F:00:00:9A 192.168.1.20 pc-living *\n1700000000 02:00:00:00:00:21 192.168.1.21 * 01:02\nмусор\n');
 check('аренды: MAC в нижнем регистре, «*» — без имени',
@@ -672,6 +675,17 @@ check('узел mesh-VPN только по трафику: без MAC и ист�
 check('секция «по правилам» без адреса и трафика — не в списке (spec §6.1: без трафика — только с Политикой)',
 	dby('mac', 'aa:bb:cc:dd:ee:98') == null);
 
+// Аренда устарела (адрес уже у другого устройства): MAC — у соседа, имя чужой аренды не берётся.
+let stale = DVC.merge({ devices: { '192.168.1.40': { seen: 1, last: 900, rate: null, minutes: [], hours: [] } } },
+	[ { ip: '192.168.1.40', mac: 'aa:bb:cc:dd:ee:40', name: 'old-phone' } ], [ { ip: '192.168.1.40', mac: 'aa:bb:cc:dd:ee:41', dev: 'br-lan' } ],
+	[], () => 'lan')[0];
+check('устройство: сосед важнее устаревшей аренды — MAC соседа, без чужого имени, источник neigh',
+	stale?.mac == 'aa:bb:cc:dd:ee:41' && stale.name == null && stale.source == 'neigh', sprintf('%J', stale));
+// Процесс stats не пишет (служба остановлена): скорость в файле — старая, её не показывают как текущую.
+let shist = { last: { t: 1000 }, devices: { '192.168.1.40': { seen: 1, last: 990, rate: [ 1, 2, 3, 4, 5, 6 ], minutes: [], hours: [] } } };
+check('устройство: скорость старше трёх шагов — не текущая',
+	DVC.merge(shist, [], [], [], () => null, 2000)[0].rate == null && same(DVC.merge(shist, [], [], [], () => null, 1010)[0].rate, [ 1, 2, 3, 4, 5, 6 ]));
+
 // Список ограничен: в наборах до 1024 адресов, а ответ ubus и вкладка — нет. Остаются самые недавние
 // и все с Политикой.
 let many = { devices: {} };
@@ -705,6 +719,11 @@ let ct_text = join('\n', [
 let cts = DVC.parse_conntrack(ct_text, '192.168.1.50');
 check('conntrack: только соединения устройства по IPv4, поля первого', length(cts) == 3 &&
 	same(cts[0], { proto: 'tcp', dst: '1.2.3.4', dport: 443, up: 1000, down: 9000, mark: 16777216 }), sprintf('%J', cts));
+// Из файла — построчно (функция-источник строк): большую таблицу не держать в памяти дважды.
+let ct_lines = split(ct_text, '\n'), ct_i = 0;
+check('conntrack: построчный источник — то же, что текст', same(DVC.parse_conntrack(() => ct_lines[ct_i++], '192.168.1.50'), cts));
+// Сроки истории по устройствам — у службы, интерфейс берёт их из схемы (ADR 0015).
+check('схема: шаг и срок поминутной истории устройств', same(F.schema().consts.devices, { step: 60, span: 3600 }), sprintf('%J', F.schema().consts.devices));
 let cg = DVC.group(cts);
 check('conntrack: по адресам, крупнейший первым; протокол и порт — самого крупного соединения',
 	cg.total == 3 && cg.acct && length(cg.addrs) == 2 &&

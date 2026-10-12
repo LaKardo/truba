@@ -10,7 +10,8 @@ import * as U from 'truba.util';
 const STEP = C.HISTORY.fine.step;
 const MINUTE = 60;        // с: перерыв дольше минуты — пропуск, а не скачок
 const HOUR = 3600;
-const MIN_SPAN = HOUR;    // поминутные средние — за последний час
+const MIN_STEP = C.DEV_HISTORY.step;   // поминутные средние —
+const MIN_SPAN = C.DEV_HISTORY.span;   // за последний час
 const MIN_VALUES = 4;     // в поминутных — Туннель и Напрямую, к устройству и от него: их рисует график
 const VALUES = length(C.DEV_SETS);
 
@@ -23,7 +24,7 @@ export function snapshot(raw, gen, m, t) {
 
 // Конец минуты, в которую попадает t: точка описывает шаг до t, минута — 60 с до конца.
 function minute_end(t) {
-	return int((t + MINUTE - 1) / MINUTE) * MINUTE;
+	return int((t + MIN_STEP - 1) / MIN_STEP) * MIN_STEP;
 }
 
 // Байты за шаг по устройствам: { dt, d: { ip: [ байты ] } }; null — снимки не сравнить. Адреса не было

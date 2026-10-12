@@ -3,7 +3,7 @@
 // который виден адрес. Политика — как её понимает служба (F.device_sections).
 'use strict';
 
-import { readfile } from 'fs';
+import { readfile, open } from 'fs';
 import { cursor } from 'uci';
 import { connect } from 'ubus';
 import * as C from 'truba.const';
@@ -36,14 +36,19 @@ function index_by(list, key) {
 }
 
 // Список устройств: адреса из истории — не больше C.DEV_LIST_MAX самых недавних, но все с Политикой;
-// затем адреса устройств с Политикой (по MAC — аренда, сосед), а секции с Политикой, чей MAC сейчас
+// затем адреса устройств с Политикой (по MAC — сосед, аренда), а секции с Политикой, чей MAC сейчас
 // не в сети, — без адреса. Секция «по правилам» без трафика в список не попадает: она ничего не меняет.
+// MAC адреса — у соседа (кто держит адрес сейчас), без него — из аренды; имя аренды — только если она
+// того же MAC: устаревшая аренда принадлежит другому устройству. now — время Роутера: скорость, записанная
+// раньше трёх шагов (процесс stats не пишет — служба остановлена), за текущую не выдаётся.
 // leases — parse_leases, neigh — [ { ip, mac, dev } ], secs — F.device_sections, zone_of(ip, dev) — зона.
-export function merge(hist, leases, neigh, secs, zone_of) {
+export function merge(hist, leases, neigh, secs, zone_of, now) {
 	let devs = (type(hist?.devices) == 'object') ? hist.devices : {};
+	let fresh = (now == null) || ((hist?.last?.t ?? 0) >= now - 3 * C.HISTORY.fine.step);
 	let l_ip = index_by(leases, 'ip'), l_mac = index_by(leases, 'mac');
 	let n_ip = index_by(neigh, 'ip'), n_mac = index_by(neigh, 'mac'), s_mac = index_by(secs, 'mac');
-	let ruled = (ip) => (s_mac[l_ip[ip]?.mac ?? n_ip[ip]?.mac]?.policy ?? 'rules') != 'rules';
+	let mac_at = (ip) => n_ip[ip]?.mac ?? l_ip[ip]?.mac;
+	let ruled = (ip) => (s_mac[mac_at(ip)]?.policy ?? 'rules') != 'rules';
 	let recent = (ip) => ((devs[ip].last ?? 0) > (devs[ip].seen ?? 0)) ? devs[ip].last : (devs[ip].seen ?? 0);
 
 	let ips = [], listed = {}, extra = [];
@@ -56,7 +61,7 @@ export function merge(hist, leases, neigh, secs, zone_of) {
 	for (let s in secs) {
 		if (s.policy == 'rules')
 			continue;
-		let ip = l_mac[s.mac]?.ip ?? n_mac[s.mac]?.ip;
+		let ip = n_mac[s.mac]?.ip ?? l_mac[s.mac]?.ip;
 		if (ip == null)
 			push(extra, s);
 		else if (!listed[ip]) {
@@ -67,8 +72,8 @@ export function merge(hist, leases, neigh, secs, zone_of) {
 
 	let out = [];
 	for (let ip in ips) {
-		let l = l_ip[ip], n = n_ip[ip], h = devs[ip];
-		let mac = l?.mac ?? n?.mac;
+		let n = n_ip[ip], h = devs[ip], mac = mac_at(ip);
+		let l = (l_ip[ip]?.mac == mac) ? l_ip[ip] : null;
 		let sec = mac ? s_mac[mac] : null;
 		push(out, {
 			ip, mac,
@@ -76,7 +81,7 @@ export function merge(hist, leases, neigh, secs, zone_of) {
 			source: l ? 'dhcp' : (n ? 'neigh' : null),
 			zone: zone_of(ip, n?.dev),
 			policy: sec?.policy ?? 'rules',
-			rate: h?.rate, day: h ? DV.day(h) : null, minutes: h?.minutes ?? [], last: h?.last,
+			rate: fresh ? h?.rate : null, day: h ? DV.day(h) : null, minutes: h?.minutes ?? [], last: h?.last,
 		});
 	}
 	for (let s in extra)
@@ -160,17 +165,24 @@ export function list() {
 		}
 		return zones[dev];
 	};
-	return { now: time(), devices: merge(U.read_json(C.DEVICES_FILE, null), leases(), neighbours(), F.device_sections(), zone_of) };
+	let now = time();
+	return { now, devices: merge(U.read_json(C.DEVICES_FILE, null), leases(), neighbours(), F.device_sections(), zone_of, now) };
 };
 
 // ---- Куда устройство ходит сейчас (truba.connections) ----
 
 // Записи conntrack, где ip — источник исходного направления: { proto, dst, dport, up, down, mark }.
-// up — байты от устройства, down — к нему; без nf_conntrack_acct их нет (null). Строки отбираются
-// подстрокой до разбора: в таблице бывают десятки тысяч записей.
-export function parse_conntrack(text, ip) {
+// up — байты от устройства, down — к нему; без nf_conntrack_acct их нет (null). src — текст или функция,
+// отдающая по строке (null — конец): таблицу в десятки тысяч записей незачем держать в памяти целиком.
+// Строки отбираются подстрокой до разбора.
+export function parse_conntrack(src, ip) {
+	let next = src;
+	if (type(src) != 'function') {
+		let lines = split(src ?? '', '\n'), i = 0;
+		next = () => lines[i++];
+	}
 	let needle = ' src=' + ip + ' ', out = [];
-	for (let l in split(text ?? '', '\n')) {
+	for (let l = next(); l != null; l = next()) {
 		if (substr(l, 0, 4) != 'ipv4' || index(l, needle) < 0 || match(l, / src=([0-9.]+) /)?.[1] != ip)
 			continue;
 		let dport = match(l, / dport=([0-9]+) /), mark = match(l, / mark=([0-9]+) /);
@@ -221,23 +233,28 @@ function mark_action(mark) {
 	return (m == C.MARK_TUNNEL || m == C.MARK_INBOUND) ? 'tunnel' : 'direct';
 }
 
-// MAC адреса — для Политики устройства в решении по правилам.
+// MAC адреса — для Политики устройства в решении по правилам: у соседа (кто держит адрес сейчас), без него — из аренды.
 function mac_of(ip) {
-	return index_by(leases(), 'ip')[ip]?.mac ?? index_by(neighbours(), 'ip')[ip]?.mac;
+	return index_by(neighbours(), 'ip')[ip]?.mac ?? index_by(leases(), 'ip')[ip]?.mac;
 }
 
 // Для rpcd (truba.connections): CONN_TOP адресов с причиной по нынешним правилам. Если правила
 // решили бы иначе, чем ct mark, соединение началось до смены настроек — причина changed.
 export function connections(ip) {
-	let text = readfile(C.CONNTRACK);
-	if (text == null)
+	let f = open(C.CONNTRACK, 'r');
+	if (!f)
 		return { ip, error: 'no_conntrack' };
-	let g = group(parse_conntrack(text, ip));
-	let vs = null;
-	if (length(g.addrs) && F.load().routing) {
+	// По строке: в конце файла read даёт пустую строку.
+	let g = group(parse_conntrack(() => {
+		let l = f.read('line');
+		return length(l) ? l : null;
+	}, ip));
+	f.close();
+	let cfg = F.load(), vs = null;
+	if (length(g.addrs) && cfg.routing) {
 		// Разбор Наборов правил — только здесь: список устройств опрашивается чаще и без него.
 		let K = loadstring("import * as K from 'truba.check'; return K;")();
-		vs = K.ip_verdicts(map(g.addrs, (a) => a.addr), mac_of(ip));
+		vs = K.ip_verdicts(map(g.addrs, (a) => a.addr), mac_of(ip), cfg);
 	}
 	for (let i, a in g.addrs) {
 		a.action = mark_action(a.mark);

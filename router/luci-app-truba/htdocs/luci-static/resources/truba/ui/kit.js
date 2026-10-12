@@ -11,7 +11,7 @@
 function Card({ title, aside, cls, children }) {
 	const { html } = app.lib;
 	return html`<section class=${'card ' + (cls || '')}>
-		${(title || aside) ? html`<div class="card-h"><h3>${title}</h3>${aside ? html`<span class="aside">${aside}</span>` : ''}</div>` : ''}
+		${(title || aside) ? html`<div class="card-h">${title ? html`<h3>${title}</h3>` : ''}${aside ? html`<span class="aside">${aside}</span>` : ''}</div>` : ''}
 		${children}
 	</section>`;
 }
@@ -27,9 +27,11 @@ function Badge({ level, children }) {
 	return html`<span class=${'badge ' + (level || '')}>${children}</span>`;
 }
 
-function Dot({ level }) {
+// Точка уровня; label — когда она сама что-то сообщает («изменено»), иначе экранному чтецу она не нужна.
+function Dot({ level, label }) {
 	const { html } = app.lib;
-	return html`<span class=${'dot ' + (level || '')} aria-hidden="true"></span>`;
+	return label ? html`<span class=${'dot ' + (level || '')} role="img" aria-label=${label} title=${label}></span>`
+		: html`<span class=${'dot ' + (level || '')} aria-hidden="true"></span>`;
 }
 
 function Icon({ name }) {
@@ -92,14 +94,14 @@ function ActionTag({ action }) {
 	return html`<span class=${'tag ' + (TAG[action] || '')}>${common.ACTION_LABELS[action] || action}</span>`;
 }
 
-// Доля Туннеля и Напрямую одной полосой; без трафика — пустая.
+// Доля Туннеля и Напрямую одной полосой; без трафика — пустая. span: полоса бывает внутри кнопки строки.
 function ShareBar({ tunnel, direct }) {
 	const { html } = app.lib;
 	const all = (tunnel || 0) + (direct || 0);
 	const pct = (x) => all ? Math.round(100 * (x || 0) / all) : 0;
-	return html`<div class="bar" role="img" aria-label=${_('Tunnel %d%%, direct %d%%').format(pct(tunnel), pct(direct))}>
+	return html`<span class="bar" role="img" aria-label=${_('Tunnel %d%%, direct %d%%').format(pct(tunnel), pct(direct))}>
 		<span class="t" style=${{ width: pct(tunnel) + '%' }}></span><span class="d" style=${{ width: pct(direct) + '%' }}></span>
-	</div>`;
+	</span>`;
 }
 
 // «Название — значение»: rows — [ [ название, значение ], … ].
@@ -127,12 +129,22 @@ function Go({ tab, href, label }) {
 
 // Несохранённые изменения страницы: «Применить» — то же, что «Сохранить и применить» LuCI (с откатом),
 // «Сбросить» — перечитать страницу. Без изменений панели нет.
+// Высота панели — в --changes-h у корня страницы: на телефоне панель устройства, тоже прилипшая к низу
+// экрана, поднимается над ней, а не прячется под ней.
 function ChangesBar({ view }) {
-	const { html } = app.lib;
+	const { html, useRef, useLayoutEffect } = app.lib;
 	const { n } = app.use(app.changes);
+	const ref = useRef(null);
+	useLayoutEffect(() => {
+		const el = ref.current, root = el?.parentElement;
+		if (!el || !root)
+			return;
+		root.style.setProperty('--changes-h', (el.offsetHeight + 16) + 'px');
+		return () => root.style.removeProperty('--changes-h');
+	}, [ n ]);
 	if (!n)
 		return null;
-	return html`<div class="changes" role="status">
+	return html`<div class="changes" role="status" ref=${ref}>
 		<${Icon} name="pencil" />
 		<span>${_('Unapplied changes: %d').format(n)}</span>
 		<button type="button" class="btn" data-act="reset" onClick=${() => view.handleReset()}>${_('Reset')}</button>

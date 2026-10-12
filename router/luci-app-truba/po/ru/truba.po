@@ -1193,8 +1193,8 @@ msgstr "Устройство не в сети."
 msgid "Check for this device"
 msgstr "Проверить для этого устройства"
 
-msgid "Who in the home network uses how much and through what; a device policy overrides the categories."
-msgstr "Кто в домашней сети сколько качает и через что; Политика устройства сильнее Категорий."
+msgid "Who in the home network uses how much and through what. A device policy overrides the categories, except Block."
+msgstr "Кто в домашней сети сколько качает и через что. Политика устройства сильнее Категорий, кроме Блока."
 
 msgid "Select a device to see its traffic and policy."
 msgstr "Выберите устройство, чтобы увидеть его трафик и Политику."
@@ -1204,3 +1204,9 @@ msgstr "Туннель / Напрямую · сейчас"
 
 msgid "A device with an invalid MAC address «%s» is ignored."
 msgstr "Устройство с неверным MAC-адресом «%s» пропускается."
+
+msgid "changed, not applied yet"
+msgstr "изменено, ещё не применено"
+
+msgid "No device data: the router did not answer."
+msgstr "Данных об устройствах нет: Роутер не ответил."

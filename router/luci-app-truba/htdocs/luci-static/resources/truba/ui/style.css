@@ -171,7 +171,7 @@
 }
 .card-h { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 6px 10px; margin: 0 0 8px; }
 .card-h h3 { font-size: 14px; font-weight: 500; }
-.card-h .aside { color: var(--mu); font-size: 12px; }
+.card-h .aside { margin-left: auto; color: var(--mu); font-size: 12px; }
 .card .sub { margin: 14px 0 6px; }
 /* Две части в одной карточке (DNS и входящие); на узком месте — одна под другой. */
 .cols { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px 24px; }
@@ -333,7 +333,7 @@
 .split { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); gap: 12px; align-items: start; }
 .split .panel { position: sticky; top: 8px; }
 .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 10px; }
-.toolbar input, .addmac input, .check input {
+.toolbar input, .addmac input, .check input, .rename input {
 	flex: 1 1 140px;
 	min-width: 0;
 	height: 30px;
@@ -388,7 +388,8 @@
 .conn .n b { font-weight: 500; }
 .conn .n .mu { display: block; font-size: 11px; }
 .addmac { display: grid; gap: 8px; margin: 0 0 12px; padding: 10px; border-radius: 8px; background: var(--chip); }
-.addmac label { display: grid; gap: 2px; }
+.addmac label, .rename { display: grid; gap: 2px; }
+.rename { margin: 12px 0 0; }
 .addmac .acts, .check { display: flex; flex-wrap: wrap; gap: 8px; }
 .err-text { color: var(--blk); font-size: 12px; }
 .badmac {
@@ -417,7 +418,7 @@
 	   у него layout containment, и fixed отсчитывался бы от него, а не от окна. */
 	.split .panel {
 		position: sticky;
-		bottom: 0;
+		bottom: var(--changes-h, 0px);   /* над панелью изменений, когда она есть */
 		z-index: 1;
 		max-height: 75vh;
 		overflow: auto;

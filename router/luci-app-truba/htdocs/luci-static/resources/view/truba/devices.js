@@ -13,6 +13,12 @@ const POLL = 5000;   // devices, а при открытой панели ещё 
 
 const key = (d) => d.ip || d.mac;
 
+// Имя: из секции устройства в настройках браузера (с несохранённым переименованием), иначе от службы.
+function nameOf(d) {
+	const sid = common.deviceSection(d.mac);
+	return (sid && uci.get('truba', sid, 'name')) || d.name || d.ip || d.mac;
+}
+
 // Устройства службы и секции device с Политикой из настроек браузера, которых служба ещё не знает
 // (добавлены «по MAC» и не применены): такие — «не в сети», как у службы устройство с Политикой без
 // адреса. Секция «по правилам» ничего не меняет — в список она не попадает, как и у службы.
@@ -68,7 +74,7 @@ function Row({ d, now, sel, onSel }) {
 	return html`<button type="button" class=${'dev' + (sel ? ' sel' : '')} data-ip=${d.ip || undefined} data-mac=${d.mac || undefined}
 		aria-pressed=${String(!!sel)} onClick=${() => onSel(key(d))}>
 		<span class="n">
-			<b>${d.name || d.ip || d.mac}${app.pending('truba', sid) ? html` <${kit.Dot} level="warn" />` : ''}</b>
+			<b>${nameOf(d)}${app.pending('truba', sid) ? html` <${kit.Dot} level="warn" label=${_('changed, not applied yet')} />` : ''}</b>
 			<span class="mu">${(d.ip || _('offline')) + (d.zone ? ' · ' + d.zone : '')}</span>
 			${(pol != 'rules') ? html`<span class=${'pol ' + pol}>${POLICY_SHORT()[pol]}</span>` : ''}
 		</span>
@@ -149,15 +155,17 @@ function List({ devices, now, sel, onSel }) {
 	</${kit.Card}>`;
 }
 
-// Мини-график за час по поминутным средним: Туннель и Напрямую, к устройству и от него вместе.
+// Мини-график по поминутным средним: Туннель и Напрямую, к устройству и от него вместе. Шаг и срок —
+// у службы (truba.schema, consts.devices). Минут без трафика служба не пишет: их место — пропуск.
 function HourChart({ d, now }) {
 	const { html } = app.lib;
-	const pts = chart.gaps((d.minutes || []).map((m) => [ m[0], (m[1] || 0) + (m[2] || 0), (m[3] || 0) + (m[4] || 0) ]), 60);
+	const h = common.schema().consts.devices || {};
+	const pts = chart.gaps((d.minutes || []).map((m) => [ m[0], (m[1] || 0) + (m[2] || 0), (m[3] || 0) + (m[4] || 0) ]), h.step);
 	if (!pts.length)
 		return html`<${kit.Empty} text=${_('No traffic in the last hour.')} />`;
 	const series = [ { label: _('Tunnel'), color: 'tun' }, { label: _('Direct'), color: 'dir', dash: true } ];
 	const data = [ pts.map((p) => p[0]), pts.map((p) => p[1] ?? null), pts.map((p) => p[2] ?? null) ];
-	return html`<${chart.TimeChart} series=${series} data=${data} from=${now - 3600} to=${now} height=${90} />`;
+	return html`<${chart.TimeChart} series=${series} data=${data} from=${now - h.span} to=${now} height=${90} />`;
 }
 
 // «Куда ходит сейчас»: адреса из conntrack. Скорость адреса — по разнице байт двух опросов: служба
@@ -187,8 +195,7 @@ function Conns({ ip }) {
 		return html`<${kit.Empty} text=${_('No connections right now.')} />`;
 	return html`<div class="conns">
 		${data.addrs.map((a) => html`<div class="conn">
-			<span class="n"><b>${a.addr}</b><span class="mu">${(a.geoip || []).length
-				? 'geoip ' + a.geoip.join(', ') : (common.REASON_LABELS[a.reason] || (a.port ? '%s/%d'.format(a.proto, a.port) : a.proto))}</span></span>
+			<span class="n"><b>${a.addr}</b><span class="mu">${common.connLabel(a)}</span></span>
 			<${kit.ActionTag} action=${a.action} />
 			<span class="r">${(speeds[a.addr] != null) ? common.fmtRate(speeds[a.addr]) : '—'}</span>
 		</div>`)}
@@ -224,16 +231,20 @@ function Panel({ d, now, onClose }) {
 	const ref = useRef(null);
 	useEffect(() => { ref.current?.scrollIntoView?.({ block: 'nearest' }); }, [ key(d) ]);
 	const src = SOURCE()[d.source];
+	const sid = common.deviceSection(d.mac);
 	return html`<section class="card panel" ref=${ref}>
-		<div class="card-h"><h3>${d.name || d.ip || d.mac}</h3>
+		<div class="card-h"><h3>${nameOf(d)}</h3>
 			<span class="aside"><button type="button" class="btn" data-act="close" onClick=${onClose}>${_('Close')}</button></span></div>
 		<div class="mu">${[ d.ip || _('offline'), d.mac || _('no MAC'), src ].filter(Boolean).join(' · ')}</div>
 		<div class="policy">
 			<${kit.Segmented} label=${_('Policy')} items=${POLICY_ITEMS()} value=${common.devicePolicy(d.mac)} disabled=${!d.mac}
-				onChange=${(p) => setPolicy(d.mac, p, common.deviceSection(d.mac) ? null : d.name)} />
+				onChange=${(p) => setPolicy(d.mac, p, sid ? null : d.name)} />
 			<div class="mu">${d.mac ? _('«All via tunnel» is recommended for game consoles: then all their traffic gets the Truba IP and full cone NAT.')
 				: _('The policy is tied to the MAC address; mesh VPN nodes have none.')}</div>
 		</div>
+		${sid ? html`<label class="rename"><span class="mu">${_('Name')}</span>
+			<input name="devname" autocomplete="off" value=${uci.get('truba', sid, 'name') || ''}
+				onChange=${(ev) => app.set('truba', sid, 'name', ev.target.value.trim() || null)} /></label>` : ''}
 		<h4 class="sub">${_('Last hour')}</h4>
 		<${HourChart} d=${d} now=${now} />
 		<h4 class="sub">${_('Where it goes now')}</h4>
@@ -254,7 +265,7 @@ function Page({ store, view }) {
 	return html`
 		<div class="head">
 			<h2>${_('Devices')}</h2>
-			<span class="mu">${_('Who in the home network uses how much and through what; a device policy overrides the categories.')}</span>
+			<span class="mu">${_('Who in the home network uses how much and through what. A device policy overrides the categories, except Block.')}</span>
 			${offline ? html`<${kit.Badge} level="err"><${kit.Icon} name="wifi-off" />${_('No connection to the router')}</${kit.Badge}>` : ''}
 		</div>
 		<div class="split">

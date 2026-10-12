@@ -278,6 +278,10 @@ msgid "settings"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/devices.js
+msgid "changed, not applied yet"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/devices.js
 msgid "offline"
 msgstr ""
 
@@ -414,7 +418,7 @@ msgid "Check for this device"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/devices.js
-msgid "Who in the home network uses how much and through what; a device policy overrides the categories."
+msgid "Who in the home network uses how much and through what. A device policy overrides the categories, except Block."
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/devices.js
@@ -1151,6 +1155,10 @@ msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/overview.js
 msgid "tunnel / direct · now"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/overview.js
+msgid "No device data: the router did not answer."
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/overview.js

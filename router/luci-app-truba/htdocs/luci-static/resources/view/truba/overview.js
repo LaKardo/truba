@@ -80,13 +80,13 @@ function fetchHistory() {
 	return Promise.all([ fetchRates(hist.fine), minDue ? fetchRates(hist.min) : null ]);
 }
 
-// Последняя точка, если она свежая: значит, история пишется. null — процесс stats не работает.
 // Устройства (ADR 0018) — число активных на схеме и карточка «Устройства»; если служба не ответила,
 // остальной «Обзор» работает без них.
 function fetchDevices() {
 	return common.callDevices().catch(() => null);
 }
 
+// Последняя точка, если она свежая: значит, история пишется. null — процесс stats не работает.
 function latest() {
 	const p = hist.fine.points[hist.fine.points.length - 1];
 	return (p && hist.now != null && hist.now - p[0] <= 3 * hist.fine.step) ? p : null;
@@ -281,7 +281,7 @@ function DevicesCard({ devices }) {
 				<${kit.ShareBar} tunnel=${tun} direct=${dir} />
 				<span class="r">${r ? '↓ ' + common.fmtRate(r[0]) : '—'}</span>
 			</div>`;
-		}) : html`<${kit.Empty} text=${_('No devices with traffic in the last 24 hours yet.')} />`}
+		}) : html`<${kit.Empty} text=${devices ? _('No devices with traffic in the last 24 hours yet.') : _('No device data: the router did not answer.')} />`}
 		<${kit.Go} tab="devices" />
 	</${kit.Card}>`;
 }

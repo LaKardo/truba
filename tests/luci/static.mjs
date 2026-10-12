@@ -123,6 +123,13 @@ for (const f of files.filter((f) => rel(f).includes('/view/truba/'))) {
 	});
 }
 
+// Шаг и срок поминутной истории устройств — из схемы (consts.devices), а не числами в представлении.
+const devView = join(root, 'htdocs/luci-static/resources/view/truba/devices.js');
+if (existsSync(devView) && /\b3600\b|, 60\)/.test(readFileSync(devView, 'utf8'))) {
+	console.log('FAIL  view/truba/devices.js: копия сроков истории устройств (3600, 60) — они в truba.schema consts.devices');
+	fails++;
+}
+
 // Интерфейс вызывает truba.schema, которой нет в службе до 1.1.0-r7: с более старой truba страницы не строятся.
 // Нижняя граница зависимости — не ниже неё и не выше версии truba из этого же репозитория.
 const SCHEMA_SINCE = '1.1.0-r7';
@@ -221,6 +228,20 @@ if (app) {
 		!app.pending('truba', 'cfg04') && !app.pending('truba', null), 'app.pending: новая, изменённая, удалённая секция');
 	uciStub.add = (c, t) => { uciStub.state.creates[c].cfg05 = { '.type': t }; return 'cfg05'; };
 	check(app.add?.('truba', 'device') === 'cfg05' && app.changes.get().n === app.changeCount(), 'app.add: секция и пересчёт изменений');
+	// Опрос внутри компонента: следующий вызов — после ответа на прошлый (медленный connections не копится
+	// в rpcd), ошибка не останавливает, stop — останавливает.
+	let active = 0, most = 0, calls = 0;
+	const stop = app.every?.(() => {
+		calls++;
+		active++;
+		most = Math.max(most, active);
+		return new Promise((ok, fail) => setTimeout(() => { active--; (calls % 2 ? ok : fail)(new Error('rpc')); }, 30));
+	}, 5);
+	await new Promise((r) => setTimeout(r, 150));
+	stop?.();
+	const after = calls;
+	await new Promise((r) => setTimeout(r, 80));
+	check(stop && most === 1 && calls >= 3 && calls === after, `app.every: вызовы не накладываются, ошибка не останавливает, stop — останавливает (${calls}, ${most})`);
 }
 
 // kit: стрелки в группе сегментов — по кругу.
@@ -324,6 +345,13 @@ if (cdev) {
 	check(JSON.stringify(cdev.devShare({ minutes: [ [ 120, 1, 2, 3, 4 ] ], rate: [ 50, 50, 0, 0, 0, 0 ] }, 1000)) === '[100,0]',
 		'common.devShare: старая минута — не последняя, доля по скорости сейчас');
 	check(JSON.stringify(cdev.deviceSections?.('aa:bb:cc:dd:ee:01')) === '["d1","d5"]', 'common.deviceSections: все секции MAC, первая — первой');
+	// «Куда ходит сейчас»: причина «решено до смены настроек» и Политика устройства важнее тега geoip —
+	// иначе «geoip ru · Туннель» противоречил бы Действию Категории ru.
+	const CL = (a) => cdev.connLabel?.(a);
+	check(CL({ reason: 'changed', geoip: [ 'ru' ] }) === cdev.REASON_LABELS.changed && CL({ reason: 'device', geoip: [ 'ru' ] }) === cdev.REASON_LABELS.device &&
+		CL({ reason: 'geoip', geoip: [ 'ru', 'private' ] }) === 'geoip ru, private' && CL({ reason: 'mode', geoip: [] }) === cdev.REASON_LABELS.mode &&
+		CL({ reason: null, geoip: [], proto: 'tcp', port: 443 }) === 'tcp/443' && CL({ reason: null, geoip: [], proto: 'icmp', port: null }) === 'icmp',
+		'common.connLabel: changed и device — раньше geoip, без причины — протокол и порт');
 	check(cdev.devActive?.({ last: 700 }, 1000) === true && cdev.devActive({ last: 699 }, 1000) === false && cdev.devActive({ last: null }, 1000) === false,
 		'common.devActive: трафик за 5 минут');
 }

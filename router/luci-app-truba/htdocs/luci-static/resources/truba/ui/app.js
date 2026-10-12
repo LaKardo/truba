@@ -179,6 +179,26 @@ function pending(config, sid) {
 	return !!(sid && (st.creates?.[config]?.[sid] || st.changes?.[config]?.[sid] || st.deletes?.[config]?.[sid]));
 }
 
+// Повторять fn раз в ms, но следующий вызов — только после ответа на прошлый, как poll LuCI: медленный
+// ответ службы не копит вызовы в rpcd, который обслуживает их по одному. Ошибка не останавливает.
+// Возвращает stop.
+function every(fn, ms) {
+	let alive = true, timer = null;
+	const run = () => {
+		if (!alive)
+			return;
+		Promise.resolve().then(fn).catch(() => {}).then(() => {
+			if (alive)
+				timer = setTimeout(run, ms);
+		});
+	};
+	run();
+	return () => {
+		alive = false;
+		clearTimeout(timer);
+	};
+}
+
 // Опрос внутри компонента (панель устройства): сразу и раз в ms, пока компонент на странице; смена deps
 // начинает заново. Ошибка оставляет прежние данные и ставит offline.
 function usePoll(fetchFn, ms, deps) {
@@ -186,11 +206,12 @@ function usePoll(fetchFn, ms, deps) {
 	lib.useEffect(() => {
 		let alive = true;
 		setSt({ data: null, offline: false });
-		const run = () => fetchFn().then((data) => { if (alive) setSt({ data, offline: false }); },
-			() => { if (alive) setSt((s) => ({ data: s.data, offline: true })); });
-		run();
-		const id = setInterval(run, ms);
-		return () => { alive = false; clearInterval(id); };
+		const stop = every(() => fetchFn().then((data) => { if (alive) setSt({ data, offline: false }); },
+			() => { if (alive) setSt((s) => ({ data: s.data, offline: true })); }), ms);
+		return () => {
+			alive = false;
+			stop();
+		};
 	}, deps);
 	return st;
 }
@@ -229,7 +250,7 @@ function mount(view, Page, props) {
 }
 
 return baseclass.extend({
-	load, lib, luminance, schemeFrom, mount, store, use, scheme, changes, changeCount, pending, usePoll,
+	load, lib, luminance, schemeFrom, mount, store, use, scheme, changes, changeCount, pending, every, usePoll,
 	poll: pollStore,
 	set: setOpt,
 	add: addSection,

@@ -382,6 +382,19 @@ function devicePolicy(mac) {
 	return (p == 'tunnel' || p == 'direct') ? p : 'rules';
 }
 
+// Подпись адреса в «Куда ходит сейчас» (truba.connections). «Решено до смены настроек» и Политика
+// устройства — раньше тега geoip: иначе «geoip ru · Туннель» противоречил бы Действию Категории ru.
+// Без причины (Маршрутизация выключена) — протокол и порт.
+function connLabel(a) {
+	if (a.reason == 'changed' || a.reason == 'device')
+		return REASON_LABELS[a.reason];
+	if ((a.geoip || []).length)
+		return 'geoip ' + a.geoip.join(', ');
+	if (a.reason)
+		return REASON_LABELS[a.reason] || a.reason;
+	return a.port ? a.proto + '/' + a.port : a.proto;
+}
+
 // MAC так, как его хранит служба: «aa:bb:cc:dd:ee:ff»; «AA-BB-…» тоже подходит. null — не MAC.
 function normMac(s) {
 	const m = String(s || '').trim().toLowerCase().replace(/-/g, ':');
@@ -434,7 +447,7 @@ function tabUrl(tab) {
 return baseclass.extend({
 	callStatus, callLists, callCategories, callSets, callCheck, callUpdateLists, callRollbackLists, callRates, callLog, callLeases,
 	callSchema, loadSchema, schema, get, field, handshakeLevel, callDevices, callConnections,
-	ACTIVE_SPAN, devRate, devShare, devActive, deviceSections, deviceSection, devicePolicy, normMac,
+	ACTIVE_SPAN, devRate, devShare, devActive, deviceSections, deviceSection, devicePolicy, normMac, connLabel,
 	runNatTest, runTunnelTest,
 	ACTION_LABELS, ACTION_LEVELS, REASON_LABELS, WARNINGS, NAT_ERRORS, UPNP_MISSING, NBSP, TABS,
 	fmtBytes, fmtRate, fmtAge, fmtTime, fmtDate, fmtNum, missingText,

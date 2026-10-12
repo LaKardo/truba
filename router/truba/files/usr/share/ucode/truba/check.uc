@@ -163,8 +163,8 @@ function verdicts(cfg, plan, cats, ips, mac) {
 // Решения для адресов, куда устройство ходит сейчас (truba.connections): Категории geoip — только с
 // Действием в плане. Остальные ничего не решают, а проход по всем подсетям geoip при опросе раз в 5 с
 // держал бы rpcd, который обслуживает вызовы по одному. null — списки распаковывает apply.
-export function ip_verdicts(ips, mac) {
-	let cfg = F.load();
+export function ip_verdicts(ips, mac, cfg) {
+	cfg ??= F.load();   // connections уже загрузила настройки
 	let dat = D.cached();
 	if (!dat)
 		return null;

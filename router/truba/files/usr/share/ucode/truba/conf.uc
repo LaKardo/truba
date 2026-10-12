@@ -137,7 +137,8 @@ export function schema() {
 	return {
 		sections: SCHEMA,
 		upstream_schemes: UPSTREAM_SCHEMES,
-		consts: { fw_zone: C.FW_ZONE, probe_window: C.PROBE_WINDOW, history: C.HISTORY, mosdns_addr: C.MOSDNS_ADDR },
+		consts: { fw_zone: C.FW_ZONE, probe_window: C.PROBE_WINDOW, history: C.HISTORY, mosdns_addr: C.MOSDNS_ADDR,
+		          devices: C.DEV_HISTORY },
 	};
 };
 
@@ -155,8 +156,9 @@ export function device_sections(bad, c) {
 	}
 	let out = [], seen = {};
 	c.foreach('truba', 'device', (s) => {
+		// enabled — флаг схемы, как его читает и интерфейс: «off», «no», «false» тоже выключают.
 		let policy = s.policy ?? SCHEMA.device.policy.def;
-		if (!(policy in [ 'tunnel', 'direct' ]) || s.enabled == '0')
+		if (!(policy in [ 'tunnel', 'direct' ]) || !check_value('device', 'enabled', s.enabled))
 			policy = 'rules';
 		let mac = (type(s.mac) == 'string') ? lc(s.mac) : '';
 		if (!match(mac, MAC_RE)) {
