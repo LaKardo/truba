@@ -14,6 +14,12 @@ PKG_RELEASE:=5
 # и перевод получал версию 0 — apk upgrade никогда бы его не обновил.
 PKG_PO_VERSION=$(PKG_VERSION)-r$(PKG_RELEASE)
 
+# Файлы ставятся как есть: jsmin не понимает шаблонных строк htm, а копии библиотек в lib/
+# должны оставаться побайтно равными закреплённым (sha256 в lib/VERSIONS). Заодно стенд
+# тестов (копирует htdocs) и Роутер получают одни и те же файлы.
+LUCI_MINIFY_JS:=0
+LUCI_MINIFY_CSS:=0
+
 include $(TOPDIR)/feeds/luci/luci.mk
 
 # call BuildPackage - OpenWrt buildroot signature

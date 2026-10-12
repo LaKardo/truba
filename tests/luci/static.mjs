@@ -2,16 +2,22 @@
 // пакета truba и в ACL, в представлениях нет копий значений службы, зависимость от truba, цвет рукопожатия.
 //   node tests/luci/static.mjs           — проверить
 //   node tests/luci/static.mjs --pot     — напечатать шаблон .pot (po/templates/truba.pot)
-import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { tmpdir } from 'node:os';
 import { join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = fileURLToPath(new URL('../../router/luci-app-truba/', import.meta.url));
+// Закреплённые копии библиотек (ES-модули): не модули LuCI и не наш код — их сверяет блок «lib» ниже.
+const libDir = join(root, 'htdocs/luci-static/resources/truba/lib');
 const files = [];
 const rel = (f) => relative(root, f).split(sep).join('/');
 (function walk(d) {
 	for (const f of readdirSync(d)) {
 		const p = join(d, f);
+		if (p === libDir) continue;
 		if (statSync(p).isDirectory()) walk(p);
 		else if (p.endsWith('.js')) files.push(p);
 	}
@@ -48,6 +54,39 @@ if (process.argv.includes('--pot')) {
 	console.log('msgid ""\nmsgstr "Content-Type: text/plain; charset=UTF-8"\n');
 	for (const [s, f] of strings) console.log(`#: ${f}\nmsgid "${esc(s)}"\nmsgstr ""\n`);
 	process.exit(0);
+}
+
+// Закреплённые библиотеки (ADR 0017): каждый файл lib/ записан в VERSIONS, совпадает с sha256 оттуда и
+// разбирается как ES-модуль; лицензии лежат рядом. Пакет ставит их как есть (LUCI_MINIFY_JS:=0).
+const LICENSES = [ 'htm.txt', 'preact.txt', 'uplot.txt', 'lucide.txt' ];
+const versionsFile = join(libDir, 'VERSIONS');
+if (!existsSync(versionsFile)) {
+	console.log('FAIL  lib/VERSIONS: нет файла');
+	fails++;
+} else {
+	const listed = new Set();
+	for (const line of readFileSync(versionsFile, 'utf8').split('\n')) {
+		if (!line.trim() || line.startsWith('#'))
+			continue;
+		const [ file, pkg, path, sum ] = line.trim().split(/\s+/);
+		listed.add(file);
+		const p = join(libDir, file);
+		if (!existsSync(p)) { console.log(`FAIL  lib/${file}: нет файла (${pkg} ${path})`); fails++; continue; }
+		const got = createHash('sha256').update(readFileSync(p)).digest('hex');
+		if (got !== sum) { console.log(`FAIL  lib/${file}: sha256 ${got}, в VERSIONS ${sum || '—'}`); fails++; }
+		if (file.endsWith('.js')) {
+			// node --check разбирает ES-модуль только по расширению .mjs.
+			const tmp = mkdtempSync(join(tmpdir(), 'truba-'));
+			writeFileSync(join(tmp, 'm.mjs'), readFileSync(p));
+			const r = spawnSync(process.execPath, [ '--check', join(tmp, 'm.mjs') ], { encoding: 'utf8' });
+			rmSync(tmp, { recursive: true, force: true });
+			if (r.status !== 0) { console.log(`FAIL  lib/${file}: не разбирается как ES-модуль: ${r.stderr.split('\n').find((x) => x.trim()) || r.status}`); fails++; }
+		}
+	}
+	for (const f of readdirSync(libDir))
+		if (f !== 'VERSIONS' && f !== 'LICENSES' && !listed.has(f)) { console.log(`FAIL  lib/${f}: нет в VERSIONS`); fails++; }
+	for (const l of LICENSES)
+		if (!existsSync(join(libDir, 'LICENSES', l))) { console.log(`FAIL  lib/LICENSES/${l}: нет файла`); fails++; }
 }
 
 // Вызовы ubus из интерфейса: каждый метод truba есть в rpcd-плагине и в ACL. Иначе LuCI
