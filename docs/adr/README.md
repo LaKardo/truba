@@ -17,6 +17,7 @@
 | [0011](0011-own-mark-byte-survives-foreign-chains.md) | Метки Трубы — свои биты 24–27, решение ставится после чужих цепочек mangle и пишется в ct mark последним, свои сокеты берут метку у сокета |
 | [0012](0012-tests-on-real-immortalwrt-in-docker.md) | Проверки — в Docker на настоящей ImmortalWrt, независимыми частями параллельно |
 | [0013](0013-tunnel-dns-server-on-vps.md) | DNS «Туннеля» — свой сервер на Трубе: unbound в Туннеле, TLS до Cloudflare и Google держит VPS |
+| [0014](0014-routed-zones-forwarding-and-dns-snat.md) | Перенаправления зон Маршрутизации в `truba` ведёт Труба; DNS из чужих подсетей dnsmasq получает от имени Роутера |
 
 ## Как вести
 

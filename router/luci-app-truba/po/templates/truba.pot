@@ -1122,7 +1122,7 @@ msgid "Zones"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/routing.js
-msgid "Firewall zones whose devices are routed. Other zones go direct."
+msgid "Firewall zones whose devices are routed. Forwarding from them to zone «truba» is added automatically. Other zones go direct."
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/routing.js

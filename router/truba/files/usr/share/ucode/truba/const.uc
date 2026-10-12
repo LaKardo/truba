@@ -13,6 +13,8 @@ export const PRIO_RULE_MARK = 1000;
 export const PRIO_RULE_OIF  = 1001;
 
 export const NFT_TABLE = 'truba';
+// Зона межсетевого экрана Туннеля (её создаёт uci-defaults).
+export const FW_ZONE = 'truba';
 
 export const LISTS_DIR = '/etc/truba/lists';
 export const PREV_DIR  = '/etc/truba/lists/prev';

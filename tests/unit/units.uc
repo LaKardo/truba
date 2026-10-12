@@ -1,17 +1,19 @@
 // Модули Трубы без procd и сети — секунды. Всё, что можно проверить без ядра и служб:
 // план, Приоритет, правила nftables и конфиг mosdns (эталоны в tests/golden + nft -c),
-// чтение настроек, «Проверить домен/IP» на синтетических Наборах правил, история скорости,
+// чтение настроек, перенаправления зон в truba, «Проверить домен/IP» на синтетических Наборах правил, история скорости,
 // методы ubus-API, которые читают файлы.
 //   ucode -L '/repo/router/truba/files/usr/share/ucode/*.uc' -L '/repo/tests/lib/*.uc' units.uc [каталог эталонов]
 // UPDATE_GOLDEN=1 — записать эталоны заново (tests/run.sh монтирует репозиторий на запись).
 'use strict';
 
 import { readfile, writefile, mkdir, popen } from 'fs';
+import { cursor } from 'uci';
 import * as T from 'tlib';
 import * as C from 'truba.const';
 import * as P from 'truba.plan';
 import * as R from 'truba.render';
 import * as F from 'truba.conf';
+import * as N from 'truba.net';
 import * as K from 'truba.check';
 import * as S from 'truba.stats';
 
@@ -109,6 +111,7 @@ function mk(dns) {
 function ctx_of() {
 	return {
 		lan_if: [ 'br-lan' ], bypass4: [ '192.168.1.0/24', '10.77.77.0/30', '203.0.113.10/32' ],
+		local4: [ '127.0.0.0/8', '192.168.1.0/24', '10.77.77.0/30', '100.64.0.1/32' ],
 		socket_mark: true, vps: '203.0.113.10',
 		counters: { c_tunnel_up: { packets: 3, bytes: 900 } },
 		gi: { block: [], tunnel: [ '100.64.0.0/10' ], direct: [ '5.0.0.0/8', '10.0.0.0/8' ] },
@@ -128,6 +131,14 @@ check('classify: наборы в порядке Приоритета', same(orde
 let output = match(full, /chain output \{([^}]*)\}/)?.[1] ?? '';
 check('output: пакеты к IP Трубы — «Напрямую» раньше socket mark (иначе петля Туннеля)',
 	index(output, 'ip daddr 203.0.113.10') >= 0 && index(output, 'ip daddr 203.0.113.10') < index(output, 'socket mark'));
+
+// Цепочка — последняя в таблице, а в правиле есть «}».
+let snat = (index(full, 'chain dns_snat') >= 0) ? substr(full, index(full, 'chain dns_snat')) : '';
+check('перехват DNS: источник подменяется только у адресов вне подсетей Роутера, после перехвата (input)',
+	index(snat, 'hook input') >= 0 && index(snat, 'ip saddr != @local4') >= 0 && index(snat, 'snat ip to ip daddr') >= 0, snat);
+let nohijack = R.nft_full({ ...mk(), dns_hijack: false }, plan, ctx_of());
+check('без перехвата DNS: нет ни перехвата, ни подмены источника, ни набора local4', !match(nohijack, /dns_hijack|dns_snat|local4/));
+nft_ok('таблицу без перехвата DNS', nohijack);
 
 let notimeout = R.nft_full(mk({ set_timeout: 0 }), plan, ctx_of());
 check('без срока: в наборах IP из DNS нет timeout и expires',
@@ -222,6 +233,39 @@ function peer_of(addr) {
 check('Туннель /30: Роутер .2 — Труба .1', same(peer_of('10.77.77.2/30'), [ '10.77.77.1', '10.77.77.0/30', '203.0.113.10' ]));
 check('Туннель /31: второй адрес', peer_of('10.0.0.0/31')[0] == '10.0.0.1');
 check('Туннель /24: Роутер .1 — Труба .2, а не он сам', peer_of('10.0.0.1/24')[0] == '10.0.0.2');
+check('подсети адресов Роутера: из адреса и длины префикса', '127.0.0.0/8' in F.local_subnets(), join(' ', F.local_subnets()));
+
+// ---- Перенаправления зон Маршрутизации в truba (ADR 0014) ----
+
+const FW_BASE = "config zone\n\toption name 'lan'\n\nconfig zone\n\toption name 'mesh'\n\n" +
+	"config zone\n\toption name 'guest-net'\n\nconfig zone 'truba'\n\toption name 'truba'\n\n" +
+	"config forwarding\n\toption src 'lan'\n\toption dest 'wan'\n\n";
+// Перенаправления в truba: «имя:откуда».
+function fwds() {
+	let c = cursor(), out = [];
+	c.load('firewall');
+	c.foreach('firewall', 'forwarding', (f) => {
+		if (f.dest == 'truba')
+			push(out, (f['.anonymous'] ? '@' : f['.name']) + ':' + f.src);
+	});
+	return sort(out);
+}
+writefile('/etc/config/firewall', FW_BASE);
+check('перенаправления: заведены для выбранных зон; зоны, которой нет, и самой truba — нет',
+	N.forwardings_set([ 'lan', 'mesh', 'ghost', 'truba' ]) && same(fwds(), [ 'lan_truba:lan', 'mesh_truba:mesh' ]), join(' ', fwds()));
+check('перенаправления: повторное применение ничего не меняет', !N.forwardings_set([ 'lan', 'mesh' ]));
+check('перенаправления: зона больше не выбрана — своё убрано', N.forwardings_set([ 'lan' ]) && same(fwds(), [ 'lan_truba:lan' ]), join(' ', fwds()));
+check('перенаправления: имя секции — из имени зоны без недопустимых знаков',
+	N.forwardings_set([ 'guest-net' ]) && same(fwds(), [ 'guest_net_truba:guest-net' ]), join(' ', fwds()));
+writefile('/etc/config/firewall', FW_BASE + "config forwarding\n\toption src 'mesh'\n\toption dest 'truba'\n\n");
+check('перенаправления: своё владельца засчитано — второе не заводится',
+	N.forwardings_set([ 'mesh' ]) == false && same(fwds(), [ '@:mesh' ]), join(' ', fwds()));
+check('перенаправления: своё владельца остаётся и без зоны', N.forwardings_set([ 'lan' ]) && same(fwds(), [ '@:mesh', 'lan_truba:lan' ]), join(' ', fwds()));
+writefile('/etc/config/firewall', FW_BASE + "config rule 'mesh_truba'\n\toption src 'mesh'\n");
+check('перенаправления: имя занято чужой секцией — она не тронута',
+	!N.forwardings_set([ 'mesh' ]) && cursor().get('firewall', 'mesh_truba') == 'rule' && !length(fwds()), join(' ', fwds()));
+writefile('/etc/config/firewall', replace(FW_BASE, "config zone 'truba'\n\toption name 'truba'\n\n", ''));
+check('перенаправления: без зоны truba не заводятся', !N.forwardings_set([ 'lan' ]) && !length(fwds()));
 
 // ---- «Проверить домен/IP»: Приоритет для IP ----
 

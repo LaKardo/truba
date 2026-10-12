@@ -217,6 +217,8 @@ function apply_config(res, prev) {
 		}
 		ctx.dev_tunnel = map(filter(cfg.devices, d => d.policy == 'tunnel'), d => d.mac);
 		ctx.dev_direct = map(filter(cfg.devices, d => d.policy == 'direct'), d => d.mac);
+		if (cfg.dns_hijack)
+			ctx.local4 = F.local_subnets();
 
 		text = R.nft_full(cfg, plan, ctx);
 
@@ -270,6 +272,8 @@ function apply_config(res, prev) {
 	res.table = N.routes(cfg, tinfo);
 	N.cron_set(cfg.routing && cfg.lists.auto_update, cfg.lists.update_utc);
 	N.upnp_set(cfg.upnp, cfg.iface, vps);
+	// И при выключенной Маршрутизации: перенаправления следуют за выбранными зонами.
+	N.forwardings_set(cfg.zones);
 
 	// Сбой записи копии не отменяет того, что применено.
 	try {
@@ -383,20 +387,29 @@ export function teardown() {
 	lk?.close();
 };
 
-// Обновить только набор bypass4 (смена адресов интерфейсов).
+// Есть ли набор в таблице Трубы. Только он: «nft list table» вывел бы и все подсети geoip.
+function set_loaded(name) {
+	return system('nft list set inet ' + C.NFT_TABLE + ' ' + name + ' >/dev/null 2>&1') == 0;
+}
+
+function refill(name, elems) {
+	let s = 'flush set inet ' + C.NFT_TABLE + ' ' + name + '\n';
+	if (length(elems))
+		s += 'add element inet ' + C.NFT_TABLE + ' ' + name + ' { ' + join(', ', elems) + ' }\n';
+	return s;
+}
+
+// Обновить только наборы локальных подсетей — bypass4 и local4 (смена адресов интерфейсов).
+// Новая подсеть, пока её нет в local4, получает подмену источника DNS — это безвредно: dnsmasq ей и так ответил бы.
 export function refresh_bypass() {
 	let prev = U.read_json(C.APPLIED_FILE, {});
-	if (!prev.routing)
-		return;
-	// Только этот набор: «nft list table» вывел бы и все подсети geoip.
-	if (system('nft list set inet ' + C.NFT_TABLE + ' bypass4 >/dev/null 2>&1') != 0)
+	if (!prev.routing || !set_loaded('bypass4'))
 		return;
 	let cfg = F.load();
 	let tinfo = F.tunnel_info(cfg.iface);
-	let b = bypass4(F.vps_ip(tinfo), tinfo);
-	let s = 'flush set inet ' + C.NFT_TABLE + ' bypass4\n';
-	if (length(b))
-		s += 'add element inet ' + C.NFT_TABLE + ' bypass4 { ' + join(', ', b) + ' }\n';
+	let s = refill('bypass4', bypass4(F.vps_ip(tinfo), tinfo));
+	if (set_loaded('local4'))
+		s += refill('local4', F.local_subnets());
 	let tmp = C.RUN_DIR + '/bypass.nft';
 	writefile(tmp, s);
 	system('nft -f ' + U.shq(tmp) + ' >/dev/null 2>&1');

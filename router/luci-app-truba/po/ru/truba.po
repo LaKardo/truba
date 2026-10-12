@@ -448,8 +448,8 @@ msgstr "Пока Туннель не работает, трафик с Дейс�
 msgid "Zones"
 msgstr "Зоны"
 
-msgid "Firewall zones whose devices are routed. Other zones go direct."
-msgstr "Зоны межсетевого экрана, на устройства которых действует Маршрутизация. Остальные зоны идут напрямую."
+msgid "Firewall zones whose devices are routed. Forwarding from them to zone «truba» is added automatically. Other zones go direct."
+msgstr "Зоны межсетевого экрана, на устройства которых действует Маршрутизация. Перенаправление из них в зону «truba» заводится само. Остальные зоны идут напрямую."
 
 msgid "Search category…"
 msgstr "Поиск Категории…"

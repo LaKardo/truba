@@ -124,6 +124,19 @@ function stats_chain(iface) {
 	return s;
 }
 
+// DNS устройств из зон Трубы с адресов вне подсетей Роутера (local4) — например, узлов mesh-VPN
+// за интерфейсом с адресом /32. dnsmasq с --local-service (по умолчанию) таким не отвечает,
+// и перехват оставлял бы их без DNS. Им источник подменяется на адрес Роутера, к которому пришёл
+// запрос (после перехвата — адрес интерфейса): dnsmasq видит в нём свой адрес и отвечает (ADR 0014).
+// Ответ ядро возвращает устройству по conntrack. Устройства из подсетей Роутера dnsmasq видит как есть.
+function dns_snat_chain() {
+	let s = '\n\tchain dns_snat {\n';
+	s += '\t\ttype nat hook input priority srcnat; policy accept;\n';
+	s += '\t\tmeta nfproto ipv4 iifname @lan_if ip saddr != @local4 meta l4proto { tcp, udp } th dport 53 snat ip to ip daddr\n';
+	s += '\t}\n';
+	return s;
+}
+
 // timeout — срок элементов по умолчанию, с (набор с flags timeout).
 function set_decl(name, typ, flags, elems, timeout) {
 	let s = '\tset ' + name + ' {\n\t\ttype ' + typ + ';\n';
@@ -156,7 +169,8 @@ function dns_elems(list, timeout) {
 	return out;
 }
 
-// ctx: { lan_if[], bypass4[], gs_tunnel4[], gs_direct4[], dev_tunnel[], dev_direct[], socket_mark, counters };
+// ctx: { lan_if[], bypass4[], local4[], gs_tunnel4[], gs_direct4[], dev_tunnel[], dev_direct[], socket_mark, counters };
+// local4 — подсети адресов Роутера (F.local_subnets), нужен только с перехватом DNS.
 // gs_* — IP из прежней таблицы: строки или { ip, expires } (S.set_elements).
 // Заполняет ctx.set_sizes — число подсетей geoip по Действиям: из ядра огромный набор читать дорого,
 // и ctx.gi — сами подсети: копия правил (ADR 0006) строится из того же ctx без нового чтения.
@@ -178,6 +192,8 @@ export function nft_full(cfg, plan, ctx) {
 	s += 'table inet ' + C.NFT_TABLE + ' {\n';
 	s += set_decl('lan_if', 'ifname', null, map(ctx.lan_if, q));
 	s += set_decl('bypass4', 'ipv4_addr', 'interval', ctx.bypass4);
+	if (cfg.dns_hijack)
+		s += set_decl('local4', 'ipv4_addr', 'interval', ctx.local4);
 	s += set_decl('gi_block4', 'ipv4_addr', 'interval', gi.block);
 	s += set_decl('gi_tunnel4', 'ipv4_addr', 'interval', gi.tunnel);
 	s += set_decl('gi_direct4', 'ipv4_addr', 'interval', gi.direct);
@@ -229,6 +245,7 @@ export function nft_full(cfg, plan, ctx) {
 		s += '\t\ttype nat hook prerouting priority dstnat - 5; policy accept;\n';
 		s += '\t\tmeta nfproto ipv4 iifname @lan_if meta l4proto { tcp, udp } th dport 53 redirect to :53\n';
 		s += '\t}\n';
+		s += dns_snat_chain();
 	}
 
 	s += '}\n';
