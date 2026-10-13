@@ -369,7 +369,7 @@ const devSchema = { sections: {
 	lists: { update_utc: { type: 'pattern', re: '^([01]?[0-9]|2[0-3]):[0-5][0-9]$', def: '12:00' }, geoip_url: { type: 'string', def: 'https://x' } },
 	dns: { set_timeout: { type: 'int', def: 86400, lo: 0, hi: 604800, min: 600 } },
 	watchdog: { probe: { type: 'ipv4', def: '' } }
-}, upstream_schemes: [], consts: {} };
+}, upstream_schemes: [ 'udp', 'tcp', 'tcp+pipeline', 'tls', 'tls+pipeline', 'https', 'h3', 'quic', 'doq' ], consts: {} };
 // String.prototype.format задаёт luci.js; в Node — замена для текстов ошибок полей и времени строк журнала (%02d).
 String.prototype.format ??= function(...a) {
 	let i = 0;
@@ -413,6 +413,22 @@ if (cdev) {
 		'common.connLabel: changed и device — раньше geoip, без причины — протокол и порт');
 	check(cdev.devActive?.({ last: 700 }, 1000) === true && cdev.devActive({ last: 699 }, 1000) === false && cdev.devActive({ last: null }, 1000) === false,
 		'common.devActive: трафик за 5 минут');
+
+	// «DNS»: адрес сервера — та же проверка, что upstream_ok службы (случаи — из tests/unit/units.uc).
+	const UE = (u) => cdev.upstreamError?.(u);
+	check([ 'https://1.1.1.1/dns-query', 'tls://dns.example@1.2.3.4', 'tls+pipeline://dns.example@1.2.3.4', '1.1.1.1',
+		'udp://[2001:db8::1]:53', '' ].every((u) => UE(u) === null), 'common.upstreamError: верные адреса — как upstream_ok');
+	check([ 'htps://1.1.1.1/dns-query', '1.1.1.1/dns-query', 'udp://a b', 'https://x/y@' ].every((u) => /Expected https:/.test(UE(u) || '')),
+		'common.upstreamError: опечатка в схеме, путь без схемы, пробел — ошибка');
+	// Плитки состояния mosdns: без данных — «—», а не NaN% или 0%.
+	const DS = (st) => cdev.dnsStats?.(st) || { tiles: [] }, vals = (s) => s.tiles.map((t) => t[1]).join(' ');
+	check(DS({ routing: false }).level === '' && vals(DS({ routing: false })) === '— — — —', 'common.dnsStats: маршрутизация выкл — «—»');
+	check(DS({ routing: true, mosdns: false }).level === 'err' && vals(DS({ routing: true, mosdns: false })) === '— — — —', 'common.dnsStats: mosdns остановлен');
+	check(DS({ routing: true, mosdns: true, dns_cache: null }).note === 'mosdns does not report statistics', 'common.dnsStats: нет статистики');
+	const dz = DS({ routing: true, mosdns: true, dns_cache: { query: 0, hit: 0, lazy_hit: 0, size: 0, max: 65536 } });
+	check(vals(dz) === '— — 0% 0' && dz.note === 'no queries yet', `common.dnsStats: запросов ещё нет (${vals(dz)})`);
+	const dn = DS({ routing: true, mosdns: true, dns_cache: { query: 200, hit: 150, lazy_hit: 10, size: 70000, max: 65536 } });
+	check(dn.level === 'ok' && vals(dn) === '75% 5% 100% 200' && dn.note === null, `common.dnsStats: доли, заполнение не больше 100 % (${vals(dn)})`);
 
 	// «Правила»: Действие Категории — как его поймёт служба, по настройкам браузера.
 	const RA = (...a) => cdev.ruleAction?.(...a);

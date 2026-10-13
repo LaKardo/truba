@@ -10,17 +10,9 @@
 
 const NBSP = common.NBSP;
 
-// Адрес DNS-сервера в том виде, что понимает mosdns 5 (та же проверка — upstream_ok в conf.uc):
-// с опечаткой в схеме mosdns не запустился бы, а с ним пропал бы DNS всей сети. Список схем —
-// у службы (truba.schema).
-const UPSTREAM_RE = /^(([a-z0-9+]+):\/\/)?(\[[0-9a-fA-F:.]+\]|[^\]\[\s\/@:]+)(:\d+)?(\/[^\s@]*)?(@[0-9.]+)?$/;
-
+// Адрес DNS-сервера — та же проверка, что у службы (common.upstreamError).
 function validateUpstream(sid, v) {
-	if (!v)
-		return true;
-	const m = UPSTREAM_RE.exec(v);
-	const ok = m && (m[2] == null ? m[5] == null : common.schema().upstream_schemes.includes(m[2]));
-	return ok ? true : _('Expected https://…, tls://…, quic://…, h3://…, tcp://… or udp://… (optionally «@IP»)');
+	return common.upstreamError(v) ?? true;
 }
 
 // ---- Состояние DNS: mosdns и кэш ----

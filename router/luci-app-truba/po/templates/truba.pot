@@ -230,6 +230,46 @@ msgid "Enter an IPv4 address"
 msgstr ""
 
 #: htdocs/luci-static/resources/truba/common.js
+msgid "Expected https://…, tls://…, quic://…, h3://…, tcp://… or udp://… (optionally «@IP»)"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/common.js
+msgid "not used: routing is off"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/common.js
+msgid "mosdns not running"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/common.js
+msgid "mosdns running"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/common.js
+msgid "From cache"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/common.js
+msgid "From expired cache"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/common.js
+msgid "Cache filled"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/common.js
+msgid "Queries since mosdns start"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/common.js
+msgid "mosdns does not report statistics"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/common.js
+msgid "no queries yet"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/common.js
 msgid "service stopped"
 msgstr ""
 
@@ -518,10 +558,6 @@ msgid "Select a device to see its traffic and policy."
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/dns.js
-msgid "Expected https://…, tls://…, quic://…, h3://…, tcp://… or udp://… (optionally «@IP»)"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/dns.js
 msgid "DNS state"
 msgstr ""
 
@@ -530,31 +566,11 @@ msgid "Answers from cache"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/dns.js
-msgid "Cache filled"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/dns.js
 msgid "Counted"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/dns.js
-msgid "not used: routing is off"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/dns.js
-msgid "mosdns running"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/dns.js
-msgid "mosdns not running"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/dns.js
 msgid "%d%% from cache · %d%% expired"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/dns.js
-msgid "no queries yet"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/dns.js

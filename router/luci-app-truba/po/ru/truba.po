@@ -1197,3 +1197,15 @@ msgstr "Следить"
 
 msgid "Download"
 msgstr "Скачать"
+
+msgid "From cache"
+msgstr "Из кэша"
+
+msgid "From expired cache"
+msgstr "Из истёкшего кэша"
+
+msgid "Queries since mosdns start"
+msgstr "Запросов с запуска mosdns"
+
+msgid "mosdns does not report statistics"
+msgstr "mosdns не отдаёт статистику"
