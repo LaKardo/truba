@@ -170,6 +170,20 @@ function invalid(key, isBad) {
 		changes.set({ bad: badFields.size });
 }
 
+// Набранное, но ещё не добавленное (адрес в kit.UpstreamList), сохраняется вместе с остальным: handleSave
+// страницы вызывает flush() до uci.save(). При уходе из поля оно не добавляется: новая строка сдвинула бы
+// страницу под нажатой кнопкой, и клик по «Сохранить и применить» потерялся бы.
+const flushers = new Set();
+
+function onFlush(fn) {
+	flushers.add(fn);
+	return () => flushers.delete(fn);
+}
+
+function flush() {
+	flushers.forEach((fn) => fn());
+}
+
 // Всплывающее сообщение (kit.Toast): id растёт и при том же тексте — второе «Обновление запущено» видно.
 const toasts = store({ text: null, id: 0 });
 
@@ -300,7 +314,7 @@ function mount(view, Page, props) {
 
 return baseclass.extend({
 	load, lib, luminance, schemeFrom, mount, store, use, scheme, changes, changeCount, pending, every, usePoll,
-	invalid, toast, toasts,
+	invalid, toast, toasts, onFlush, flush,
 	poll: pollStore,
 	set: setOpt,
 	add: addSection,

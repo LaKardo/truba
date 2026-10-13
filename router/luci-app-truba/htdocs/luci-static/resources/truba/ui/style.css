@@ -686,3 +686,23 @@
 .ks .mu { margin: 4px 0 0; }
 .log-bar .btn { display: inline-flex; align-items: center; gap: 4px; }
 .log-bar .btn .icon { width: 14px; height: 14px; }
+
+/* ---- Серверы DNS (kit.UpstreamList) ---- */
+.ups ul { margin: 0; padding: 0; list-style: none; }
+.ups li { display: flex; align-items: center; gap: 8px; min-height: 34px; padding: 3px 0; border-bottom: 1px solid var(--bd); }
+/* Адрес и под ним пометка неверного: пометка в строку с адресом сжимала его на телефоне. */
+.ups-a { flex: 1; min-width: 0; display: grid; gap: 2px; }
+.ups li code { min-width: 0; overflow-wrap: anywhere; font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.ups li .dot { width: 8px; height: 8px; box-shadow: none; }
+.ups li .err { display: inline-flex; align-items: center; gap: 6px; color: var(--blk); font-size: 12px; font-style: normal; }
+.ups .btn .icon { width: 14px; height: 14px; }
+.ups .btn.ic { min-height: 26px; padding: 0 6px; }
+.ups .btn:disabled { opacity: .4; cursor: not-allowed; }
+.ups > .mu { margin-top: 6px; font-size: 12px; }
+.ups-add { display: flex; gap: 8px; margin-top: 10px; }
+.ups-add input { flex: 1; min-width: 0; height: 30px; padding: 0 10px; border: 1px solid var(--bd); border-radius: 7px; background: var(--pg); color: var(--tx); font: inherit; font-size: 12px; }
+.ups-add.bad input { border-color: var(--blk); }
+.ups-add .btn { white-space: nowrap; }
+.ups .err-text { margin-top: 4px; }
+/* В столбец flex: 1 давал полю основу 0 — оно сплющивалось; там высота — своя. */
+@container (max-width: 600px) { .ups-add { flex-direction: column; } .ups-add input { flex: none; } }

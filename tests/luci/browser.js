@@ -141,9 +141,9 @@ async function waitApply(page) {
 		await page.screenshot({ path: `${out}/${t}.png`, fullPage: true });
 		// Подсказки полей — из схемы службы (truba.schema, ADR 0015), а не из представления.
 		if (t == 'dns' || t == 'tunnel') {
-			// «Туннель» — на новом интерфейсе: поле в Shadow DOM.
-			const ph = await page.evaluate((t) => (t == 'dns') ? document.getElementById('widget.cbid.truba.dns.port')?.placeholder
-				: document.querySelector('.truba-root')?.shadowRoot?.querySelector('input[data-opt="truba.watchdog.handshake_max"]')?.placeholder, t);
+			// Обе на новом интерфейсе: поле в Shadow DOM.
+			const ph = await page.evaluate((t) => document.querySelector('.truba-root')?.shadowRoot?.querySelector(
+				(t == 'dns') ? 'input[data-opt="truba.dns.port"]' : 'input[data-opt="truba.watchdog.handshake_max"]')?.placeholder, t);
 			const sch = await ubus('truba', 'schema');
 			const want = String(t == 'dns' ? sch.sections.dns.port.def : sch.sections.watchdog.handshake_max.def);
 			result(ph === want, `вкладка ${t}: подсказка поля — умолчание схемы службы`, `${ph} / ${want}`);
@@ -404,12 +404,232 @@ async function waitApply(page) {
 		goodUtc.apply === false && goodUtc.uci == '05:30', '«Правила»: время обновления — неверное не пишется и держит «Применить»', JSON.stringify({ badUtc, goodUtc }));
 	await Promise.all([ page.waitForNavigation({ waitUntil: 'networkidle2' }).catch(() => {}), tap('.changes [data-act="reset"]') ]);
 
-	// «DNS» — только DNS: Наборов правил и полей lists.* там нет.
+	// «DNS» (spec §5.5): состояние mosdns и кэша — только то, что mosdns отдаёт (§6.3); поля кэша и порта; Наборов
+	// правил здесь нет. Числа плиток — с разделителями разрядов браузера или «—», не NaN.
 	await page.goto(url('dns'), { waitUntil: 'networkidle2' });
 	await settled(page);
-	const dnsPage = await page.evaluate(() => ({ h2: document.querySelector('#view h2')?.textContent, rs: /Rule sets/.test(document.querySelector('#view')?.innerText || ''),
-		lists: !!document.querySelector('#view [id*="cbid.truba.lists."]') }));
-	result(dnsPage.h2 == 'DNS' && !dnsPage.rs && !dnsPage.lists, '«DNS»: без Наборов правил', JSON.stringify(dnsPage));
+	const dns = await page.evaluate(() => { const r = document.querySelector('.truba-root').shadowRoot;
+		return { h2: r.querySelector('.head h2')?.textContent, tiles: r.querySelectorAll('.card.state .stat').length,
+			badge: r.querySelector('.card.state .badge')?.textContent, rs: /Rule sets/.test(r.textContent),
+			fields: [ 'cache_size', 'lazy_cache_ttl', 'ttl_max', 'set_timeout', 'port' ].filter((o) => r.querySelector(`input[data-opt="truba.dns.${o}"]`)).length,
+			vals: [ ...r.querySelectorAll('.card.state .stat b') ].map((b) => b.textContent) }; });
+	result(dns.h2 == 'DNS' && dns.tiles == 4 && dns.badge == 'mosdns running' && !dns.rs && dns.fields == 5 &&
+		dns.vals.every((v) => /^(—|\d[\d\s,. ]*%?)$/.test(v)), '«DNS»: состояние, 4 плитки без NaN, поля кэша и порта, без Наборов правил', JSON.stringify(dns));
+	// Перехват DNS: «Применить» доходит до настроек и службы; затем прежнее значение.
+	const hijack = async () => (await ubus('uci', 'get', { config: 'truba', section: 'main', option: 'dns_hijack' }).catch(() => ({}))).value;
+	for (const want of [ '0', '1' ]) {
+		t0 = await time();
+		await tap('input[data-opt="truba.main.dns_hijack"]');
+		await tap('.changes [data-act="apply"]');
+		await waitApply(page);
+		result(await applied(t0, async () => await hijack() == want), `«DNS»: перехват ${want == '0' ? 'выкл' : 'вкл'} — «Применить» дошло до службы`);
+		await page.goto(url('dns'), { waitUntil: 'networkidle2' });
+		await settled(page);
+	}
+
+	// Серверы DNS (spec §5.5, kit.UpstreamList): запрос идёт ко всем серверам пути сразу — порядок не важен.
+	const ups = (card) => page.evaluate((card) => {
+		const r = document.querySelector('.truba-root').shadowRoot, c = r.querySelector(`.card.${card}`);
+		const lis = [ ...(c?.querySelectorAll('.ups li') || []) ];
+		return { rows: lis.map((li) => li.querySelector('code')?.textContent), warn: c?.querySelectorAll('.ups li .dot.warn').length || 0,
+			bad: lis.filter((li) => li.querySelector('.dot.err') && /invalid address, not used/.test(li.textContent)).map((li) => li.querySelector('code')?.textContent),
+			err: c?.querySelector('.ups .err-text')?.textContent || '', def: /Default servers/.test(c?.textContent || ''),
+			off: [ ...(c?.querySelectorAll('[data-act="remove-upstream"]') || []) ].map((b) => b.disabled),
+			titles: [ ...(c?.querySelectorAll('[data-act="remove-upstream"]') || []) ].map((b) => b.title),
+			badW: lis.filter((li) => li.querySelector('.dot.err')).map((li) => Math.round(li.querySelector('code')?.getBoundingClientRect().width || 0)),
+			focus: r.activeElement?.dataset?.act || null,
+			bar: r.querySelector('.changes')?.innerText.replace(/\s+/g, ' ') || '', apply: r.querySelector('.changes [data-act="apply"]')?.disabled };
+	}, card);
+	// Набрать в поле нового адреса карточки (пусто — очистить).
+	const typeUp = async (card, v) => {
+		await (await el(`.card.${card} input[data-act="new-upstream"]`))?.evaluate((e) => { e.focus(); e.select(); });
+		if (v)
+			await page.keyboard.type(v);
+		else
+			await page.keyboard.press('Backspace');
+		await sleep(300);
+	};
+	const addUp = async (card) => { await tap(`.card.${card} [data-act="add-upstream"]`); await sleep(300); };
+	const uciUp = async (o) => (await ubus('uci', 'get', { config: 'truba', section: 'dns', option: o }).catch(() => ({}))).value;
+	const setUp = async (o, v) => {
+		await (v == null ? ubus('uci', 'delete', { config: 'truba', section: 'dns', option: o })
+			: ubus('uci', 'set', { config: 'truba', section: 'dns', values: { [o]: v } }));
+		await ubus('uci', 'commit', { config: 'truba' });
+	};
+	const dnsSch = (await ubus('truba', 'schema')).sections.dns;
+	const prevUp = { tunnel_upstream: await uciUp('tunnel_upstream'), direct_upstream: await uciUp('direct_upstream') };
+	const effUp = (o) => prevUp[o] ? [].concat(prevUp[o]) : dnsSch[o].def;
+	// (a) Списки — действующие адреса: из настроек, без них — умолчание схемы.
+	let ut = await ups('ups-tunnel'), ud = await ups('ups-direct');
+	result(JSON.stringify(ut.rows) == JSON.stringify(effUp('tunnel_upstream')) && JSON.stringify(ud.rows) == JSON.stringify(effUp('direct_upstream')),
+		'«DNS»: списки серверов — действующие адреса', JSON.stringify({ ut: ut.rows, ud: ud.rows }));
+	// (b) Неверный адрес не добавляется: ошибка под полем, изменений нет.
+	await typeUp('ups-tunnel', 'htps://1.1.1.1/dns-query');
+	await addUp('ups-tunnel');
+	ut = await ups('ups-tunnel');
+	result(/Expected https:/.test(ut.err) && ut.rows.length == effUp('tunnel_upstream').length && !/Unapplied changes/.test(ut.bar),
+		'«DNS»: неверный адрес не добавляется', JSON.stringify(ut));
+	// (c) Повтор — ошибка, список тот же.
+	await typeUp('ups-tunnel', effUp('tunnel_upstream')[0]);
+	await addUp('ups-tunnel');
+	ut = await ups('ups-tunnel');
+	result(/already in the list/.test(ut.err) && ut.rows.length == effUp('tunnel_upstream').length, '«DNS»: повтор адреса — ошибка', JSON.stringify(ut));
+	await typeUp('ups-tunnel', '');
+	// (d) Без списка в настройках — умолчание; удалить сервер и вернуть его (в конец) — ноль изменений.
+	// uci commit на стенде сам запускает применение: ждать его, иначе позднее применение засчиталось бы следующему шагу.
+	t0 = await time();
+	await setUp('tunnel_upstream', null);
+	await applied(t0, () => true);
+	await page.goto(url('dns'), { waitUntil: 'networkidle2' });
+	await settled(page);
+	ut = await ups('ups-tunnel');
+	await tap('.card.ups-tunnel [data-act="remove-upstream"]');
+	await sleep(300);
+	await typeUp('ups-tunnel', ut.rows[0]);
+	await addUp('ups-tunnel');
+	const ut2 = await ups('ups-tunnel');
+	result(ut.def && JSON.stringify(ut.rows) == JSON.stringify(dnsSch.tunnel_upstream.def) && ut2.rows.length == ut.rows.length && !/Unapplied changes/.test(ut2.bar),
+		'«DNS»: умолчание — удалить сервер и вернуть — ноль изменений', JSON.stringify({ ut, ut2 }));
+	t0 = await time();
+	await setUp('tunnel_upstream', prevUp.tunnel_upstream);
+	await applied(t0, () => true);
+	// (e) Верный адрес добавляется по Enter — точка «изменено», одно изменение.
+	await page.goto(url('dns'), { waitUntil: 'networkidle2' });
+	await settled(page);
+	const newUp = 'tls://dns.example@192.0.2.53';
+	await typeUp('ups-direct', newUp);
+	await page.keyboard.press('Enter');
+	await sleep(300);
+	ud = await ups('ups-direct');
+	result(ud.rows.includes(newUp) && ud.warn == 1 && /Unapplied changes: 1/.test(ud.bar), '«DNS»: адрес добавляется по Enter, с точкой «изменено»', JSON.stringify(ud));
+	// (f) Неверный текст в поле держит «Применить» и «Save & Apply» LuCI; очищен — применяется.
+	await typeUp('ups-tunnel', 'htps://x');
+	const heldUp = await ups('ups-direct');
+	await page.evaluate(() => [ ...document.querySelectorAll('.cbi-page-actions *') ]
+		.find((x) => x.childElementCount == 0 && x.textContent.trim() == 'Save & Apply')?.click());
+	await sleep(2000);
+	heldUp.toast = await page.evaluate(() => document.querySelector('.truba-root')?.shadowRoot?.querySelector('.toast')?.innerText || '');
+	heldUp.uci = await uciUp('direct_upstream');
+	await typeUp('ups-tunnel', '');
+	const freeUp = await ups('ups-direct');
+	result(heldUp.apply === true && /Fix the highlighted fields/.test(heldUp.toast) && ![].concat(heldUp.uci || []).includes(newUp) && freeUp.apply === false,
+		'«DNS»: набранный неверный адрес держит «Применить» и «Save & Apply»', JSON.stringify({ heldUp, freeApply: freeUp.apply }));
+	t0 = await time();
+	await tap('.changes [data-act="apply"]');
+	await waitApply(page);
+	result(await applied(t0, async (st) => st.mosdns && !(st.applied.invalid || []).length && [].concat(await uciUp('direct_upstream') || []).includes(newUp)),
+		'«DNS»: новый сервер Напрямую — «Применить» дошло до службы');
+	// (g) Последний сервер не удаляется.
+	await page.goto(url('dns'), { waitUntil: 'networkidle2' });
+	await settled(page);
+	for (let i = 0; i < 5 && (await ups('ups-direct')).rows.length > 1; i++) {
+		await tap('.card.ups-direct [data-act="remove-upstream"]');
+		await sleep(300);
+	}
+	ud = await ups('ups-direct');
+	result(ud.rows.length == 1 && JSON.stringify(ud.off) == '[true]', '«DNS»: последний сервер не удаляется', JSON.stringify(ud));
+	await Promise.all([ page.waitForNavigation({ waitUntil: 'networkidle2' }).catch(() => {}), tap('.changes [data-act="reset"]') ]);
+	// (h) Неверный адрес из сохранённых настроек: помечен, удаляется, применение без предупреждений.
+	t0 = await time();
+	await setUp('direct_upstream', [ ...[].concat(await uciUp('direct_upstream') || []), 'htps://bad.example' ]);
+	await applied(t0, (st) => (st.applied.invalid || []).some((x) => x.key == 'dns.direct_upstream'));
+	await page.goto(url('dns'), { waitUntil: 'networkidle2' });
+	await settled(page);
+	ud = await ups('ups-direct');
+	await tap('.card.ups-direct [data-act="remove-upstream"][aria-label="Remove htps://bad.example"]');
+	await sleep(300);
+	t0 = await time();
+	await tap('.changes [data-act="apply"]');
+	await waitApply(page);
+	result(JSON.stringify(ud.bad) == '["htps://bad.example"]' && await applied(t0, async (st) => !(st.applied.invalid || []).length &&
+		![].concat(await uciUp('direct_upstream') || []).includes('htps://bad.example')), '«DNS»: неверный сохранённый адрес помечен и удаляется', JSON.stringify(ud));
+	// (j) Набранный верный адрес и сразу «Save & Apply» LuCI настоящим нажатием мыши (фокус остаётся в поле):
+	// адрес применяется. Уход из поля не должен сдвигать страницу под нажатой кнопкой — иначе клик теряется.
+	await page.goto(url('dns'), { waitUntil: 'networkidle2' });
+	await settled(page);
+	const typedUp = 'udp://192.0.2.54';
+	await typeUp('ups-direct', typedUp);
+	const saveApply = await page.evaluateHandle(() => [ ...document.querySelectorAll('.cbi-page-actions *') ]
+		.find((x) => x.childElementCount == 0 && x.textContent.trim() == 'Save & Apply'));
+	t0 = await time();
+	await saveApply.asElement()?.click();
+	await waitApply(page);
+	result(await applied(t0, async () => [].concat(await uciUp('direct_upstream') || []).includes(typedUp)),
+		'«DNS»: набранный адрес и сразу «Save & Apply» (нажатие мыши) — применён');
+	// Прежние серверы Напрямую.
+	t0 = await time();
+	await setUp('direct_upstream', prevUp.direct_upstream);
+	result(await applied(t0, (st) => st.mosdns && !(st.applied.invalid || []).length), '«DNS»: прежние серверы Напрямую');
+	await page.goto(url('dns'), { waitUntil: 'networkidle2' });
+	await settled(page);
+	const resetDns = () => Promise.all([ page.waitForNavigation({ waitUntil: 'networkidle2' }).catch(() => {}), tap('.changes [data-act="reset"]') ]);
+	const appBad = () => page.evaluate(async () => (await L.require('truba.ui.app')).changes.get().bad);
+	// (k) Повтор в поле: ошибка видна, но «Применить» не держит (сервер уже в списке); строку удалили — ошибка
+	// не остаётся, набранный адрес снова можно добавить.
+	ud = await ups('ups-direct');
+	await typeUp('ups-direct', ud.rows[0]);
+	await addUp('ups-direct');
+	const k1 = { ...(await ups('ups-direct')), held: await appBad() };
+	await tap('.card.ups-direct [data-act="remove-upstream"]');
+	await sleep(300);
+	const k2 = { ...(await ups('ups-direct')), held: await appBad() };
+	result(/already in the list/.test(k1.err) && k1.held === 0 && !k2.err && k2.held === 0,
+		'«DNS»: повтор в поле не держит «Применить», ошибка не устаревает', JSON.stringify({ k1, k2 }));
+	await resetDns();
+	// (l) Последний — это последний верный сервер: строки-дубли и неверные не в счёт; удаляется одна строка.
+	t0 = await time();
+	await setUp('direct_upstream', [ 'udp://192.0.2.1', 'udp://192.0.2.1', 'htps://bad.example' ]);
+	await applied(t0, () => true);
+	await page.goto(url('dns'), { waitUntil: 'networkidle2' });
+	await settled(page);
+	const l1 = await ups('ups-direct');
+	await tap('.card.ups-direct [data-act="remove-upstream"]');
+	await sleep(300);
+	const l2 = await ups('ups-direct');
+	result(JSON.stringify(l1.off) == '[false,false,false]' && JSON.stringify(l2.rows) == '["udp://192.0.2.1","htps://bad.example"]' &&
+		JSON.stringify(l2.off) == '[true,false]' && /at least one/i.test(l2.titles[0]), '«DNS»: последний верный сервер не удаляется, дубль удаляется по одному',
+		JSON.stringify({ l1, l2 }));
+	await resetDns();
+	// (m) Адрес, сохранённый одной строкой (option, не list): одна строка, как у службы; добавить и удалить — ноль
+	// изменений; строка с пробелом — один неверный адрес, а не два.
+	t0 = await time();
+	await setUp('tunnel_upstream', 'udp://10.77.77.1');
+	await applied(t0, () => true);
+	await page.goto(url('dns'), { waitUntil: 'networkidle2' });
+	await settled(page);
+	const m1 = await ups('ups-tunnel');
+	await typeUp('ups-tunnel', 'udp://192.0.2.9');
+	await addUp('ups-tunnel');
+	await tap('.card.ups-tunnel [data-act="remove-upstream"][aria-label="Remove udp://192.0.2.9"]');
+	await sleep(300);
+	const m2 = await ups('ups-tunnel');
+	t0 = await time();
+	await setUp('tunnel_upstream', 'udp://192.0.2.7 udp://192.0.2.8');
+	await applied(t0, () => true);
+	await page.goto(url('dns'), { waitUntil: 'networkidle2' });
+	await settled(page);
+	const m3 = await ups('ups-tunnel');
+	result(JSON.stringify(m1.rows) == '["udp://10.77.77.1"]' && m2.rows.length == 1 && !/Unapplied changes/.test(m2.bar) &&
+		m3.rows.length == 1 && m3.bad.length == 1, '«DNS»: адрес одной строкой — как у службы, без лишних изменений', JSON.stringify({ m1, m2, m3 }));
+	t0 = await time();
+	await setUp('tunnel_upstream', prevUp.tunnel_upstream);
+	await applied(t0, () => true);
+	// (n) Доступность: поле и кнопка называют свой путь; удаление последней строки с клавиатуры не теряет фокус.
+	await page.goto(url('dns'), { waitUntil: 'networkidle2' });
+	await settled(page);
+	const names = await page.evaluate(() => [ 'ups-tunnel', 'ups-direct' ].map((c) => {
+		const r = document.querySelector('.truba-root').shadowRoot;
+		return [ r.querySelector(`.card.${c} input[data-act="new-upstream"]`)?.getAttribute('aria-label'),
+			r.querySelector(`.card.${c} [data-act="add-upstream"]`)?.getAttribute('aria-label') ];
+	}));
+	await page.evaluate(() => [ ...document.querySelector('.truba-root').shadowRoot.querySelectorAll('.card.ups-direct [data-act="remove-upstream"]') ].pop()?.focus());
+	await page.keyboard.press('Enter');
+	await sleep(300);
+	const n1 = await ups('ups-direct');
+	result(/Tunnel/.test(names[0][0]) && /Tunnel/.test(names[0][1]) && /Direct/.test(names[1][0]) && /Direct/.test(names[1][1]) &&
+		/Unapplied changes: 1/.test(n1.bar) && [ 'remove-upstream', 'new-upstream' ].includes(n1.focus),
+		'«DNS»: поле и кнопка с именем пути, фокус после удаления строки остаётся в списке', JSON.stringify({ names, focus: n1.focus }));
+	await resetDns();
 
 	// «Туннель» (spec §5.4): состояние, подключение к Трубе, контроль. На стенде awg0 — dummy с пиром
 	// 203.0.113.10:51820 (stand.sh).
@@ -857,6 +1077,35 @@ async function waitApply(page) {
 	result(log375.doc <= log375.win && log375.tr <= 0 && cols375.rows > 0 && cols375.bad === 0,
 		'«Журнал» 375: без горизонтальной прокрутки, время — одной строкой', JSON.stringify({ ...log375, cols375 }));
 	await page.screenshot({ path: `${out}/log-375.png`, fullPage: true });
+	// (i) «DNS» на телефоне: длинный адрес DoH переносится, поле и кнопка — без горизонтальной прокрутки.
+	await page.goto(url('dns'), { waitUntil: 'networkidle2' });
+	await settled(page);
+	const longUp = 'https://dns.very-long-resolver-name.example.com/dns-query-with-a-long-path';
+	await typeUp('ups-tunnel', longUp);
+	await addUp('ups-tunnel');
+	await page.evaluate(() => document.querySelector('.truba-root').shadowRoot.querySelectorAll('details.fold').forEach((d) => { d.open = true; }));
+	const dns375 = await page.evaluate(() => {
+		const r = document.querySelector('.truba-root').shadowRoot, tr = r.querySelector('.tr');
+		return { doc: document.documentElement.scrollWidth, win: window.innerWidth, tr: tr.scrollWidth - tr.clientWidth,
+			inputH: Math.round(r.querySelector('.card.ups-direct input[data-act="new-upstream"]')?.getBoundingClientRect().height || 0) };
+	});
+	dns375.added = (await ups('ups-tunnel')).rows.includes(longUp);
+	// Поле и кнопка на телефоне — в столбец; поле — полной высоты, а не сплющенное.
+	result(dns375.added && dns375.doc <= dns375.win && dns375.tr <= 0 && dns375.inputH >= 28,
+		'«DNS» 375: длинный адрес — без горизонтальной прокрутки, поле адреса полной высоты', JSON.stringify(dns375));
+	await page.screenshot({ path: `${out}/dns-375.png`, fullPage: true });
+	await resetDns();
+	// (o) Пометка неверного сохранённого адреса на телефоне не сжимает адрес в узкую колонку.
+	t0 = await time();
+	await setUp('direct_upstream', [ ...effUp('direct_upstream'), 'htps://bad-resolver.example/dns-query' ]);
+	await applied(t0, () => true);
+	await page.goto(url('dns'), { waitUntil: 'networkidle2' });
+	await settled(page);
+	const o375 = await ups('ups-direct');
+	result(o375.badW.length == 1 && o375.badW[0] >= 150, '«DNS» 375: пометка неверного адреса не сжимает его', JSON.stringify(o375.badW));
+	t0 = await time();
+	await setUp('direct_upstream', prevUp.direct_upstream);
+	await applied(t0, () => true);
 	await page.setViewport({ width: 1280, height: 900 });
 
 	// Длинное неверное значение настройки попадает в предупреждение как есть — и на телефоне не должно

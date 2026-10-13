@@ -378,6 +378,42 @@ function tunnelIface() {
 	return get('main', 'iface');
 }
 
+// ---- DNS ----
+
+// Адрес DNS-сервера в том виде, что понимает mosdns 5 (та же проверка — upstream_ok в conf.uc):
+// с опечаткой в схеме mosdns не запустился бы, а с ним пропал бы DNS всей сети. Список схем —
+// у службы (truba.schema).
+const UPSTREAM_RE = /^(([a-z0-9+]+):\/\/)?(\[[0-9a-fA-F:.]+\]|[^\]\[\s\/@:]+)(:\d+)?(\/[^\s@]*)?(@[0-9.]+)?$/;
+
+// Текст ошибки адреса или null; пустое — не ошибка (его не добавляют).
+function upstreamError(v) {
+	if (!v)
+		return null;
+	const m = UPSTREAM_RE.exec(v);
+	const ok = m && (m[2] == null ? m[5] == null : schema().upstream_schemes.includes(m[2]));
+	return ok ? null : _('Expected https://…, tls://…, quic://…, h3://…, tcp://… or udp://… (optionally «@IP»)');
+}
+
+// Состояние mosdns и плитки кэша для «DNS». Счётчики — с запуска mosdns: hit — ответы из кэша вместе
+// с истёкшими, lazy_hit — истёкшие. Без данных (маршрутизация выкл, mosdns стоит, нет API) — «—».
+function dnsStats(st) {
+	const dc = (st.routing && st.mosdns) ? st.dns_cache : null;
+	const pct = (n, all) => all ? Math.round(n * 100 / all) + '%' : '—';
+	const [ level, text ] = !st.routing ? [ '', _('not used: routing is off') ]
+		: !st.mosdns ? [ 'err', _('mosdns not running') ] : [ 'ok', _('mosdns running') ];
+	return {
+		level, text,
+		tiles: [
+			[ _('From cache'), dc ? pct(dc.hit, dc.query) : '—' ],
+			[ _('From expired cache'), dc ? pct(dc.lazy_hit, dc.query) : '—' ],
+			[ _('Cache filled'), dc ? pct(Math.min(dc.size, dc.max), dc.max) : '—' ],
+			[ _('Queries since mosdns start'), dc ? fmtNum(dc.query) : '—' ]
+		],
+		note: (st.routing && st.mosdns && !dc) ? _('mosdns does not report statistics')
+			: (dc && !dc.query) ? _('no queries yet') : null
+	};
+}
+
 // ---- Правила Категорий ----
 
 // Действия правила, которые служба принимает (const.uc, ACTIONS); остальные она пропускает.
@@ -602,7 +638,7 @@ return baseclass.extend({
 	callSchema, loadSchema, schema, get, field, fieldError, handshakeLevel, callDevices, callConnections,
 	ACTIVE_SPAN, devRate, devShare, devActive, deviceSections, deviceSection, devicePolicy, normMac, connLabel,
 	RULE_ACTIONS, ruleKey, ruleOf, ruleSections, ruleActions, ruleAction, catRows, catsDue, listsDue, checkErrorText,
-	runNatTest, runTunnelTest, parseLog, logSource, logShown,
+	runNatTest, runTunnelTest, parseLog, logSource, logShown, upstreamError, dnsStats,
 	ACTION_LABELS, ACTION_LEVELS, REASON_LABELS, VIA_LABELS, WARNINGS, NAT_ERRORS, CHECK_ERRORS, UPNP_MISSING, NBSP, TABS,
 	fmtBytes, fmtRate, fmtAge, fmtTime, fmtDate, fmtNum, missingText,
 	pill, busy, empty, span, svgEl, kvTable, table, row, chips,

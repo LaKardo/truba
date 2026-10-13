@@ -230,6 +230,46 @@ msgid "Enter an IPv4 address"
 msgstr ""
 
 #: htdocs/luci-static/resources/truba/common.js
+msgid "Expected https://…, tls://…, quic://…, h3://…, tcp://… or udp://… (optionally «@IP»)"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/common.js
+msgid "not used: routing is off"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/common.js
+msgid "mosdns not running"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/common.js
+msgid "mosdns running"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/common.js
+msgid "From cache"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/common.js
+msgid "From expired cache"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/common.js
+msgid "Cache filled"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/common.js
+msgid "Queries since mosdns start"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/common.js
+msgid "mosdns does not report statistics"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/common.js
+msgid "no queries yet"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/common.js
 msgid "service stopped"
 msgstr ""
 
@@ -295,6 +335,38 @@ msgstr ""
 
 #: htdocs/luci-static/resources/truba/ui/kit.js
 msgid "changed, not applied yet"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/ui/kit.js
+msgid "This server is already in the list"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/ui/kit.js
+msgid "At least one valid server is needed"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/ui/kit.js
+msgid "invalid address, not used"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/ui/kit.js
+msgid "Remove"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/ui/kit.js
+msgid "Remove %s"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/ui/kit.js
+msgid "Default servers"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/ui/kit.js
+msgid "Server address"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/ui/kit.js
+msgid "Add server"
 msgstr ""
 
 #: htdocs/luci-static/resources/truba/ui/kit.js
@@ -422,10 +494,6 @@ msgid "A device with an invalid MAC address «%s» is ignored."
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/devices.js
-msgid "Remove"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/devices.js
 msgid "Name, IP or MAC"
 msgstr ""
 
@@ -518,79 +586,15 @@ msgid "Select a device to see its traffic and policy."
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/dns.js
-msgid "Expected https://…, tls://…, quic://…, h3://…, tcp://… or udp://… (optionally «@IP»)"
+msgid "State"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/dns.js
-msgid "DNS state"
+msgid "queried all at once"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/dns.js
-msgid "Answers from cache"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/dns.js
-msgid "Cache filled"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/dns.js
-msgid "Counted"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/dns.js
-msgid "not used: routing is off"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/dns.js
-msgid "mosdns running"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/dns.js
-msgid "mosdns not running"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/dns.js
-msgid "%d%% from cache · %d%% expired"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/dns.js
-msgid "no queries yet"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/dns.js
-msgid "%s of %s entries"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/dns.js
-msgid "since mosdns started"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/dns.js
-msgid "no data"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/dns.js
-msgid "General"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/dns.js
-msgid "Advanced"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/dns.js
-msgid "For «Tunnel»"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/dns.js
-msgid "Used for categories with action Tunnel and, in mode «All via tunnel», for everything else. Requests go through the tunnel, each one to all servers at once. udp://10.77.77.1 is the DNS server on the Truba itself (install-vps.sh). Formats: https://…, tls://…, tls+pipeline://… (several requests in one connection), udp://…; «address@IP» sets the IP to connect to."
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/dns.js
-msgid "For «Direct»"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/dns.js
-msgid "Used for categories with action Direct, for the router's own hosts (NTP, list mirrors) and, in mode «Selective», for everything else."
+msgid "Settings"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/dns.js
@@ -599,6 +603,10 @@ msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/dns.js
 msgid "IPv4 DNS requests of devices to any server are redirected to the router, so domain categories work for them too. Encrypted DNS in browsers (DoH) is not affected."
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/dns.js
+msgid "Cache"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/dns.js
@@ -622,6 +630,10 @@ msgid "Upper limit for answers of classified domains, so devices re-resolve quic
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/dns.js
+msgid "Advanced"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/dns.js
 msgid "Keep DNS addresses in routing sets, s"
 msgstr ""
 
@@ -639,6 +651,22 @@ msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/dns.js
 msgid "Router DNS goes through mosdns: it recognises geosite categories, picks the upstream and puts resolved IPs into the routing sets."
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/dns.js
+msgid "Servers for «Tunnel»"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/dns.js
+msgid "Used for categories with action Tunnel and, in mode «All via tunnel», for everything else. Requests go through the tunnel, each one to all servers at once. udp://10.77.77.1 is the DNS server on the Truba itself (install-vps.sh). Formats: https://…, tls://…, tls+pipeline://… (several requests in one connection), udp://…; «address@IP» sets the IP to connect to."
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/dns.js
+msgid "Servers for «Direct»"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/dns.js
+msgid "Used for categories with action Direct, for the router's own hosts (NTP, list mirrors) and, in mode «Selective», for everything else."
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/inbound.js
@@ -803,10 +831,6 @@ msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/inbound.js
 msgid "Port forwards from the tunnel"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/inbound.js
-msgid "State"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/inbound.js
@@ -1347,6 +1371,10 @@ msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/tunnel.js
 msgid "lost"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/tunnel.js
+msgid "no data"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/tunnel.js

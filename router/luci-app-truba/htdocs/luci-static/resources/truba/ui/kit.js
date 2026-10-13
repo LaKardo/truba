@@ -211,6 +211,100 @@ function Fold({ title, open, children }) {
 	return html`<details class="fold" open=${!!open}><summary>${title}</summary><div class="fold-b">${children}</div></details>`;
 }
 
+// Список DNS-серверов опции truba.sec.name (spec §4.3, §5.5): добавить, удалить, проверка адреса как у службы.
+// Запрос идёт ко всем серверам пути сразу — порядка нет. Без списка в настройках действует умолчание схемы.
+// Список, равный сохранённому (без учёта порядка), — не изменение; равный умолчанию при пустых настройках —
+// снова без опции. Последний верный сервер не удаляется: без верных служба молча взяла бы умолчание.
+// Адрес добавляется по Enter и «Add server», а набранный верный и не добавленный — при сохранении (app.flush):
+// «Сохранить и применить» сразу после набора его не теряет. При уходе из поля страница не меняется — иначе
+// сдвиг под нажатой кнопкой съедал бы клик. Неверный набранный держит «Применить», пока поле не очищено;
+// повтор — нет: этот сервер уже в списке. Неверный адрес из сохранённых настроек служба пропускает — он
+// помечен, и его можно удалить.
+function UpstreamList({ sec, name, label }) {
+	const { html, useState, useEffect, useRef } = app.lib;
+	// Как служба (to_list): массив — как есть, строка (option вместо list) — один адрес, без деления по пробелам.
+	const asList = (v) => (v == null) ? [] : Array.isArray(v) ? v : [ v ];
+	const def = common.schema().sections?.[sec]?.[name]?.def || [];
+	const list = asList(uci.get('truba', sec, name));
+	const rows = list.length ? list : def;
+	const savedRaw = uci.state?.values?.truba?.[sec]?.[name], saved = asList(savedRaw);
+	const base = saved.length ? saved : def;
+	const key = 'truba.%s.%s.new'.format(sec, name), id = 'ups-' + sec + '-' + name;
+	const ul = useRef(null), inp = useRef(null);
+	const [ text, setText ] = useState('');
+	// Ошибка видна после Enter или «Add server», а её текст — по тому, что сейчас в поле и в списке: удалили
+	// строку-повтор — ошибки больше нет.
+	const [ tried, setTried ] = useState(false);
+	const v = text.trim(), vErr = common.upstreamError(v), dup = !vErr && !!v && rows.includes(v);
+	const err = !tried ? null : vErr || (dup ? _('This server is already in the list') : null);
+	useEffect(() => { app.invalid(key, !!vErr); }, [ key, !!vErr ]);
+	useEffect(() => () => app.invalid(key, false), [ key ]);
+	const sameSet = (a, b) => a.length == b.length && a.every((x) => b.includes(x));
+	// Набор, равный сохранённому, пишется самим сохранённым значением — app.set сравнит его как есть и снимет правку.
+	const write = (arr) => app.set('truba', sec, name, sameSet(arr, base) ? (saved.length ? savedRaw : null) : arr);
+	// quiet — при сохранении: неверное там не показывается (его держит проверка «Применить»), повтор просто убирается.
+	const add = (quiet) => {
+		if (!v)
+			return;
+		if (vErr || dup) {
+			if (!quiet)
+				setTried(true);
+			else if (dup)
+				setText('');
+			return;
+		}
+		write([ ...rows, v ]);
+		setText('');
+		setTried(false);
+	};
+	const addNow = useRef(add);
+	addNow.current = add;
+	useEffect(() => app.onFlush(() => addNow.current(true)), []);
+	const onKey = (ev) => {
+		if (ev.key == 'Enter') {
+			ev.preventDefault();
+			add();
+		}
+	};
+	// Без строки i остался бы хоть один верный сервер.
+	const keeps = (i) => rows.some((x, j) => j != i && !common.upstreamError(x));
+	// Удаляется одна строка (дубль — по одному). Фокус с удалённой кнопки — на соседнюю или в поле, а не в никуда.
+	const remove = (i, ev) => {
+		const had = ev.currentTarget == ev.currentTarget.getRootNode().activeElement;
+		write(rows.filter((x, j) => j != i));
+		if (had)
+			requestAnimationFrame(() => {
+				const bs = [ ...(ul.current?.querySelectorAll('[data-act="remove-upstream"]') || []) ].filter((b) => !b.disabled);
+				(bs[Math.min(i, bs.length - 1)] || inp.current)?.focus();
+			});
+	};
+	const lone = _('At least one valid server is needed');
+	// Ключ строки — адрес и номер его повтора: удаление не переносит фокус и точки на соседнюю строку.
+	const seen = {};
+	return html`<div class="ups">
+		<ul aria-label=${label} ref=${ul}>${rows.map((u, i) => {
+			const n = seen[u] = (seen[u] || 0) + 1, off = !keeps(i);
+			return html`<li key=${u + '#' + n}>
+				<span class="ups-a"><code>${u}</code>${common.upstreamError(u)
+					? html`<em class="err"><${Dot} level="err" />${_('invalid address, not used')}</em>` : ''}</span>
+				${!common.upstreamError(u) && !base.includes(u) ? html`<${Dot} level="warn" label=${_('changed, not applied yet')} />` : ''}
+				<button type="button" class="btn ic" data-act="remove-upstream" disabled=${off} title=${off ? lone : _('Remove')}
+					aria-label=${off ? '%s — %s'.format(_('Remove %s').format(u), lone) : _('Remove %s').format(u)}
+					onClick=${(ev) => remove(i, ev)}><${Icon} name="x" /></button>
+			</li>`;
+		})}</ul>
+		${list.length ? '' : html`<div class="mu">${_('Default servers')}</div>`}
+		<div class=${'ups-add' + (vErr ? ' bad' : '')}>
+			<input data-act="new-upstream" ref=${inp} aria-label=${'%s: %s'.format(label, _('Server address'))} placeholder="https://… tls://… udp://…"
+				autocomplete="off" spellcheck="false" value=${text} aria-invalid=${vErr ? 'true' : undefined} aria-describedby=${err ? id + '-e' : undefined}
+				onInput=${(ev) => { setText(ev.target.value); setTried(false); }} onKeyDown=${onKey} />
+			<button type="button" class="btn" data-act="add-upstream" aria-label=${'%s: %s'.format(label, _('Add server'))}
+				onClick=${() => add()}><${Icon} name="plus" />${_('Add server')}</button>
+		</div>
+		${err ? html`<div class="err-text" id=${id + '-e'} role="alert">${err}</div>` : ''}
+	</div>`;
+}
+
 // Файл или текст для импорта (router.conf): файл перетаскивают в зону или выбирают нажатием на неё, текст
 // вставляют в поле под ней — на телефоне вставить можно только в поле ввода. onText получает текст;
 // error — почему он не подошёл, под зоной.
@@ -361,4 +455,4 @@ function ChangesBar({ view }) {
 }
 
 return baseclass.extend({ Card, Stat, Badge, Dot, Icon, Switch, Segmented, Chips, ActionTag, ShareBar, KV, Busy, Empty, Go, ChangesBar, step,
-	ActionPicker, Field, Fold, DropZone, Dialog, Toast, Check });
+	ActionPicker, Field, Fold, UpstreamList, DropZone, Dialog, Toast, Check });
