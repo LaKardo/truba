@@ -463,9 +463,19 @@ function upnpRows(leases, devices) {
 }
 
 // Пробросы портов из Туннеля (spec §5.6) — секции firewall.redirect с src = зона Туннеля, по настройкам
-// браузера (с несохранёнными изменениями).
+// браузера (с несохранёнными изменениями). Опции, удалённые в браузере (uci.unset), uci.sections не снимает —
+// их снимает здесь, как uci.get: иначе снова включённый проброс (enabled снят) оставался бы выключенным.
 function forwardSections() {
-	return uci.sections('firewall', 'redirect').filter((s) => s.src == schema().consts.fw_zone);
+	const del = uci.state?.deletes?.firewall || {};
+	return uci.sections('firewall', 'redirect').map((s) => {
+		const d = del[s['.name']];
+		if (!d || d === true)
+			return s;
+		const x = Object.assign({}, s);
+		for (let o in d)
+			delete x[o];
+		return x;
+	}).filter((s) => s.src == schema().consts.fw_zone);
 }
 
 // Протоколы секции: без опции — tcp и udp, как у fw4; tcpudp, all, any — оба.
@@ -500,12 +510,13 @@ function portRange(v) {
 	return (a >= 1 && b <= 65535 && a <= b) ? [ a, b ] : null;
 }
 
-// Ошибка поля порта или null; optional — пустое можно (внутренний порт: тот же, что внешний).
+// Ошибка поля порта или null; optional — пустое можно (внутренний порт: тот же, что внешний). Диапазон —
+// через «-» или «:», как у fw4 (parse_port).
 function portError(v, optional) {
 	const t = String(v ?? '').trim();
 	if (t === '' && optional)
 		return null;
-	return (/^\d+(-\d+)?$/.test(t) && portRange(t)) ? null : _('Enter a port or a range «from-to» within 1–65535');
+	return portRange(t) ? null : _('Enter a port or a range «from-to» within 1–65535');
 }
 
 // Ошибки формы проброса: { ext, ip, port } — только неверные. Внешний порт, который уже пробрасывает другой

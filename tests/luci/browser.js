@@ -746,22 +746,32 @@ async function waitApply(page) {
 	const offA = (await fwds()).find((s) => s['.name'] == sidA)?.enabled;
 	const rowOff = (await fwdRows()).find((r) => r.sid == sidA);
 	await tap(`.fwd li[data-sid="${sidA}"] input[type="checkbox"]`);
+	await sleep(200);
+	// До «Применить»: строка уже включена — снятая в браузере опция enabled '0' больше не действует.
+	const rowOnPending = await page.evaluate((sid) => {
+		const li = document.querySelector('.truba-root').shadowRoot.querySelector(`.fwd li[data-sid="${sid}"]`);
+		return { on: li?.querySelector('input[type="checkbox"]')?.checked, off: li?.classList.contains('off') };
+	}, sidA);
 	await applyFwd();
 	const onA = (await fwds()).find((s) => s['.name'] == sidA) || {};
-	result(offA === '0' && rowOff?.on === false && !('enabled' in onA) && onA.dest_port == '80', '«Входящие»: переключатель проброса — enabled 0, обратно — без опции',
-		JSON.stringify({ offA, rowOff, onA }));
+	result(offA === '0' && rowOff?.on === false && rowOnPending.on === true && rowOnPending.off === false && !('enabled' in onA) && onA.dest_port == '80',
+		'«Входящие»: переключатель проброса — enabled 0, обратно — строка включена сразу, в настройках — без опции', JSON.stringify({ offA, rowOff, rowOnPending, onA }));
 
-	// (e) Опции, заданные в «Межсетевом экране», правка на вкладке не трогает.
-	await ubus('uci', 'set', { config: 'firewall', section: sidA, values: { reflection: '0', src_ip: '198.51.100.0/24' } });
+	// (e) Опции, заданные в «Межсетевом экране», правка на вкладке не трогает. Неверный сохранённый внешний порт — ошибка
+	// сразу при открытии окна, а не после ухода из поля: иначе «Save» недоступна без видимой причины.
+	await ubus('uci', 'set', { config: 'firewall', section: sidA, values: { reflection: '0', src_ip: '198.51.100.0/24', src_dport: '0' } });
 	await ubus('uci', 'commit', { config: 'firewall' });
 	await openInbound();
 	await openDlg(`.fwd li[data-sid="${sidA}"] [data-act="fwd-edit"]`);
+	const dE0 = await dlg();
+	result(dE0?.errs.some((e) => /1–65535/.test(e)) && dE0.save === true, '«Входящие»: неверное сохранённое значение — ошибка сразу при открытии окна', JSON.stringify(dE0));
+	await fill('ext', '8080');
 	await fill('port', '8081');
 	const dE = await dlg();
 	await tap('dialog.dlg[open] [data-act="confirm"]');
 	await applyFwd();
 	const fE = (await fwds()).find((s) => s['.name'] == sidA) || {};
-	result(dE?.title == 'Port forward' && dE.del && fE.dest_port == '8081' && fE.reflection == '0' && fE.src_ip == '198.51.100.0/24' && fE.dest == 'lan' &&
+	result(dE?.title == 'Port forward' && dE.del && fE.src_dport == '8080' && fE.dest_port == '8081' && fE.reflection == '0' && fE.src_ip == '198.51.100.0/24' && fE.dest == 'lan' &&
 		fE.proto == 'tcp' && fE.name == 'Test web' && fE.target == 'DNAT', '«Входящие»: правка проброса — чужие опции на месте', JSON.stringify({ dE, fE }));
 
 	// (f) IP вручную вне известных сетей — секция без зоны назначения; затем «Delete» в окне — секции нет.

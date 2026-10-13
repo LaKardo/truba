@@ -66,7 +66,8 @@ function devChoices(devices) {
 
 // Окно правки проброса (решения 2–6 плана этапа 6). Пишутся только опции, которые есть в окне; остальные
 // (src_ip, reflection и другие из «Межсетевого экрана») остаются. Протокол того же смысла и зона при том же
-// IP — как в настройках. Ошибка поля видна после ухода из него, «Save» недоступна сразу.
+// IP — как в настройках. У нового проброса ошибка поля видна после ухода из него, у сохранённого — сразу:
+// неверное значение из настроек иначе держало бы «Save» без видимой причины. «Save» недоступна сразу.
 function FwdDialog({ row, devices, onClose }) {
 	const { html, useState } = app.lib;
 	const choices = devChoices(devices);
@@ -74,7 +75,7 @@ function FwdDialog({ row, devices, onClose }) {
 		? { name: row.name, proto: row.proto, ext: row.ext, port: uci.get('firewall', row.sid, 'dest_port') || '',
 			dev: choices.some((d) => d.ip == row.ip) ? row.ip : row.ip ? OTHER : '', ip: row.ip }
 		: { name: '', proto: 'tcp udp', ext: '', port: '', dev: '', ip: '' });
-	const [ touched, setTouched ] = useState({});
+	const [ touched, setTouched ] = useState(() => row ? { name: true, proto: true, ext: true, dev: true, ip: true, port: true } : {});
 	const ip = (v.dev == OTHER) ? v.ip : v.dev;
 	const errs = common.forwardErrors({ sid: row?.sid || null, name: v.name, proto: v.proto, ext: v.ext, ip, port: v.port });
 	const shown = {

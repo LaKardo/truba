@@ -388,12 +388,13 @@ String.prototype.format ??= function(...a) {
 	let i = 0;
 	return this.replace(/%(0\d+)?([sd%])/g, (m, w, t) => (t == '%') ? '%' : w ? String(a[i++]).padStart(+w, '0') : String(a[i++]));
 };
+// state.deletes — опции, удалённые в браузере: LuCI uci.sections их не снимает, а uci.get — снимает.
+const devUci = { sections: (c, t) => devSecs.filter((s) => (s['.conf'] || 'truba') == c && s['.type'] == t),
+	get: (c, sid, o) => devSecs.find((s) => (s['.conf'] || 'truba') == c && s['.name'] == sid)?.[o], state: { deletes: {} } };
 let cdev = null;
 try {
 	cdev = new Function('baseclass', 'rpc', 'uci', '_', 'L', 'E', 'document', commonSrc)(
-		baseclass, { declare: (o) => () => Promise.resolve(o.method == 'schema' ? devSchema : {}) },
-		{ sections: (c, t) => devSecs.filter((s) => (s['.conf'] || 'truba') == c && s['.type'] == t),
-			get: (c, sid, o) => devSecs.find((s) => (s['.conf'] || 'truba') == c && s['.name'] == sid)?.[o] },
+		baseclass, { declare: (o) => () => Promise.resolve(o.method == 'schema' ? devSchema : {}) }, devUci,
 		(s) => s, new Proxy(stub, { get: (t, k) => (k === 'toArray') ? (x) => (x == null) ? [] : Array.isArray(x) ? x : String(x).split(/\s+/) : stub }),
 		stub, { querySelector: () => true });
 	await cdev.loadSchema();
@@ -479,6 +480,13 @@ if (cdev) {
 		'common.forwardErrors: пересечение портов при общем протоколе; выключенный и свой — не в счёт');
 	check(/IPv4/.test(FE2({ ext: '1', ip: '1.2.3' }).ip || '') && /1–65535/.test(FE2({ ext: '1', ip: '192.168.1.5', port: '0' }).port || ''),
 		'common.forwardErrors: IP и внутренний порт');
+	check(PE('8000:8100') === null, 'common.portError: диапазон через «:», как у fw4 (parse_port)');
+	// Проброс, снова включённый в браузере (enabled снят), — включён и в строках, и в проверке пересечения.
+	devUci.state.deletes = { firewall: { fw3: { enabled: true } } };
+	const FRd = cdev.forwardRows?.([]) || [];
+	check(FRd.find((r) => r.sid == 'fw3')?.on === true && /already forwarded/.test(FE2({ ext: '9000', ip: '192.168.1.20' }).ext || ''),
+		'common.forwardRows и forwardErrors: опция, удалённая в браузере, не действует (как у uci.get)');
+	devUci.state.deletes = {};
 	const ZO = (ip, d) => cdev.zoneOfIp?.(ip, d || []);
 	check(ZO('192.168.1.77') === 'lan' && ZO('10.9.9.9') === null && ZO('100.64.0.9', [ { ip: '100.64.0.9', zone: 'mesh' } ]) === 'mesh',
 		'common.zoneOfIp: устройство, сеть со статическим адресом, неизвестно — null');
