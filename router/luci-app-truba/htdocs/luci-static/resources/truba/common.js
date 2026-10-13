@@ -664,15 +664,19 @@ const LOG_RE = /^\w{3} (\w{3}) +(\d+) (\d\d:\d\d:\d\d) \d{4} \w+\.(\w+) ([\w.-]+
 const MONTHS = { Jan: 1, Feb: 2, Mar: 3, Apr: 4, May: 5, Jun: 6, Jul: 7, Aug: 8, Sep: 9, Oct: 10, Nov: 11, Dec: 12 };
 
 // Источник строки на «Журнале» — по тегу: у watchdog свой (truba-watchdog), строки интерфейса Туннеля
-// пишут netifd и ядро. Остальное, что отдаёт truba.log (Труба, её переустановка, cron с её задачей), — Труба.
+// пишут netifd и ядро. truba.log отдаёт и строки других программ с именем интерфейса (межсетевой экран при
+// его подъёме) — они тоже об интерфейсе. Остальное (Труба, её переустановка, cron с её задачей) — Труба.
 const LOG_SOURCES = { mosdns: 'mosdns', 'truba-watchdog': 'watchdog', netifd: 'awg', kernel: 'awg' };
 
-function logSource(src) {
-	return LOG_SOURCES[src] || 'truba';
+function logSource(src, text, iface) {
+	if (LOG_SOURCES[src])
+		return LOG_SOURCES[src];
+	return (iface && !/^truba/.test(src) && src != 'crond' && String(text).includes(iface)) ? 'awg' : 'truba';
 }
 
 // Строки журнала по порядку текста: время, тег, источник, уровень, текст и исходная строка (для «Скачать»).
-function parseLog(text) {
+// iface — интерфейс Туннеля: строки других программ с его именем — источник awg.
+function parseLog(text, iface) {
 	return (text || '').split('\n').filter((l) => l).map((l) => {
 		const m = l.match(LOG_RE);
 		if (!m)
@@ -693,7 +697,7 @@ function parseLog(text) {
 			if (/failed to load cache dump.*no such file/.test(msg))
 				level = 'info';
 		}
-		return { time: '%02d.%02d %s'.format(+m[2], MONTHS[m[1]] || 0, m[3]), src: m[5], source: logSource(m[5]), level, text: msg, raw: l };
+		return { time: '%02d.%02d %s'.format(+m[2], MONTHS[m[1]] || 0, m[3]), src: m[5], source: logSource(m[5], msg, iface), level, text: msg, raw: l };
 	});
 }
 

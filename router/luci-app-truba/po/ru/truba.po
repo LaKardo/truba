@@ -371,19 +371,16 @@ msgid "MTU"
 msgstr "MTU"
 
 msgid "Decoy packets before the handshake (CPS format); may differ from the Truba."
-msgstr "Пакеты-приманки перед handshake (формат CPS); могут отличаться от Трубы."
+msgstr "Пакеты-приманки перед рукопожатием (формат CPS); могут отличаться от Трубы."
 
 msgid "Keepalive, s"
 msgstr "Keepalive, с"
-
-msgid "Keeps the provider NAT mapping open so inbound connections via the Truba IP reach the router. A range «from-to» (AmneziaWG 3.1) gives a random period, so an idle tunnel has no steady rhythm."
-msgstr "Держит открытым отображение в NAT провайдера, чтобы входящие через IP Трубы доходили до Роутера. Диапазон «от-до» (AmneziaWG 3.1) даёт случайный период: у простаивающего Туннеля нет ровного ритма."
 
 msgid "Check interval, s"
 msgstr "Интервал проверки, с"
 
 msgid "Max handshake age, s"
-msgstr "Максимальный возраст handshake, с"
+msgstr "Максимальный возраст рукопожатия, с"
 
 msgid "Failures before restart"
 msgstr "Неудач до перезапуска"
@@ -710,7 +707,7 @@ msgid "install-vps.sh picks it for the VPS network. If full-size packets do not 
 msgstr "install-vps.sh подбирает его под сеть VPS. Если крупные пакеты не проходят (см. «Состояние» выше), уменьшите его на обеих сторонах."
 
 msgid "Pings the Truba inside the tunnel and checks the handshake age; restarts the interface after repeated failures. Every tenth check also makes sure that full-size packets get through."
-msgstr "Пингует Трубу внутри Туннеля и следит за возрастом handshake; после нескольких неудач подряд перезапускает интерфейс. Раз в 10 проверок убеждается, что проходят крупные пакеты."
+msgstr "Пингует Трубу внутри Туннеля и следит за возрастом рукопожатия; после нескольких неудач подряд перезапускает интерфейс. Раз в 10 проверок убеждается, что проходят крупные пакеты."
 
 msgid "Keys and parameters come from router.conf made by install-vps.sh on the VPS. To replace them, import a new file."
 msgstr "Ключи и параметры приходят из router.conf, который создаёт install-vps.sh на VPS. Чтобы их сменить, импортируйте новый файл."
@@ -1248,3 +1245,15 @@ msgstr "Другие параметры: Сеть → Межсетевой эк�
 
 msgid "The changes were not saved: %s"
 msgstr "Изменения не сохранены: %s"
+
+msgid "handshake %s"
+msgstr "рукопожатие %s"
+
+msgid "The file is too large for router.conf: %d KiB"
+msgstr "Файл слишком большой для router.conf: %d КиБ"
+
+msgid "The file cannot be read: %s"
+msgstr "Файл не читается: %s"
+
+msgid "Keeps the provider NAT mapping open so inbound connections via the Truba IP reach the router. A range «from-to» (AmneziaWG 3.1) gives a random period, so an idle tunnel has no steady rhythm. Empty — no keepalive."
+msgstr "Держит открытым отображение в NAT провайдера, чтобы входящие через IP Трубы доходили до Роутера. Диапазон «от-до» (AmneziaWG 3.1) даёт случайный период: у простаивающего Туннеля нет ровного ритма. Пусто — без keepalive."

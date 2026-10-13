@@ -164,7 +164,7 @@ function lossPct(probes) {
 function Hero({ st, iface, warns }) {
 	const { html } = app.lib;
 	const t = st.tunnel || {}, h = st.health || {}, awg = t.awg || {};
-	const wdOn = common.get('watchdog', 'enabled');
+	const wdOn = !!st.watchdog;   // как у службы, а не в UCI браузера
 	let [ level, title ] = common.tunnelState(st);
 	if (level == 'ok') {
 		title = warns ? _('Works · warnings: %d').format(warns) : _('Everything works');
@@ -174,7 +174,7 @@ function Hero({ st, iface, warns }) {
 	const loss = lossPct(probes);
 	const sub = !t.up ? NBSP : [
 		(wdOn && h.rtt != null) ? _('%d ms').format(Math.round(h.rtt)) : null,
-		'handshake ' + common.fmtAge(awg.handshake ? awg.handshake_age : null),
+		_('handshake %s').format(common.fmtAge(awg.handshake ? awg.handshake_age : null)),
 		!wdOn ? _('the watchdog is off') : (loss != null) ? _('loss %d%%').format(loss) : null
 	].filter((x) => x).join(' · ');
 	const ifaceExists = !!uci.get('network', iface);
@@ -208,7 +208,7 @@ function FlowCard({ st, devices }) {
 function TunnelCard({ st, iface }) {
 	const { html } = app.lib;
 	const t = st.tunnel || {}, h = st.health || {};
-	const wdOn = common.get('watchdog', 'enabled');
+	const wdOn = !!st.watchdog;
 	const [ level, text ] = common.tunnelState(st);
 	const probes = Array.isArray(h.probes) ? h.probes : [];
 	const loss = lossPct(probes);
@@ -288,7 +288,7 @@ function DevicesCard({ devices }) {
 function InfoCard({ st }) {
 	const { html } = app.lib;
 	const l = st.lists || {}, n = st.nat, up = st.upnp || {}, dc = st.dns_cache;
-	const wdOn = common.get('watchdog', 'enabled');
+	const wdOn = !!st.watchdog;
 	const auto = common.get('lists', 'auto_update');
 
 	const [ dLevel, dText ] = !st.routing ? [ '', _('not used') ]

@@ -599,6 +599,9 @@ if (cdev) {
 	const l5 = PL(D + 'cron.err crond[900]: USER root pid 1 cmd truba update-lists');
 	check(l5.source === 'truba' && l5.level === 'info', 'common.parseLog: запуск задачи cron — не ошибка');
 	check(PL(D + "daemon.notice netifd: Interface 'awg0' is now up").source === 'awg', 'common.parseLog: netifd — источник awg');
+	check(cdev.parseLog?.(D + 'user.notice firewall: Reloading firewall due to ifup of truba (awg0)', 'awg0')?.[0]?.source === 'awg' &&
+		cdev.parseLog?.(D + 'cron.err crond[900]: USER root pid 1 cmd truba update-lists', 'awg0')?.[0]?.source === 'truba',
+		'common.parseLog: строка другой программы с именем интерфейса Туннеля — awg, cron с задачей Трубы — truba');
 	const l7 = PL('garbage');
 	check(l7.time === '' && l7.source === 'truba' && l7.level === 'info' && l7.text === 'garbage' && l7.raw === 'garbage',
 		`common.parseLog: неразобранная строка — как есть (${JSON.stringify(l7)})`);
@@ -744,6 +747,15 @@ for (const s of translated.keys())
 if (app) {
 	check(app.luminance('color(srgb 0 0 0)') === 0 && Math.abs(app.luminance('color(srgb 1 1 1)') - 1) < 1e-3 &&
 		app.luminance('color(srgb 1 1 1 / 0.3)') === null, 'app.luminance: color(srgb …), почти прозрачный — null');
+}
+
+// «Рукопожатие» — одним словом во всём русском интерфейсе: рядом с плиткой «Рукопожатие» не «handshake».
+{
+	const po = readFileSync(join(root, 'po/ru/truba.po'), 'utf8');
+	const latin = [ ...po.matchAll(/^msgstr "(.*handshake.*)"$/gm) ].map((m) => m[1]);
+	check(!latin.length, `ru/truba.po: «handshake» в переводе — ${latin.join(' | ')}`);
+	const lit = files.filter((f) => /(?<!_\()'handshake /.test(readFileSync(f, 'utf8'))).map(rel);
+	check(!lit.length, `«handshake» без перевода: ${lit.join(', ')}`);
 }
 
 // ---- Остатки прежнего интерфейса (spec §3.3, этап 7) ----

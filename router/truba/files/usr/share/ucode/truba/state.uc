@@ -220,6 +220,8 @@ export function status() {
 		routing: cfg.routing,
 		mode: cfg.mode,
 		killswitch: cfg.killswitch,
+		// Работает ли сторож Туннеля: «Состояние» показывает его, а не переключатель в браузере.
+		watchdog: running(ub, 'truba', 'watchdog'),
 		service: applied != null,
 		applied,
 		tunnel: {

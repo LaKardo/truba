@@ -1,5 +1,6 @@
 'use strict';
 'require view';
+'require uci';
 'require truba.common as common';
 'require truba.ui.app as app';
 'require truba.ui.kit as kit';
@@ -14,7 +15,14 @@ const FOLLOW_MS = 5000;     // «Следить» — раз в 5 с
 const SOURCES = [ 'truba', 'mosdns', 'watchdog', 'awg' ];
 
 function fetchLog() {
-	return common.callLog(LINES).then((t) => ({ lines: common.parseLog(t), error: null }));
+	return common.callLog(LINES).then((t) => ({ lines: common.parseLog(t, common.tunnelIface()), error: null }));
+}
+
+// Ключ строки — она сама и номер её повтора: новые строки сверху не пересоздают прежние, и выделенный
+// в журнале текст при «Следить» не сбрасывается.
+function keyed(lines) {
+	const seen = {};
+	return lines.map((l) => ({ l, k: l.raw + '#' + (seen[l.raw] = (seen[l.raw] || 0) + 1) }));
 }
 
 // truba-log-ГГГГММДД-ЧЧММ.txt — по часам компьютера: файл сохраняет он.
@@ -40,8 +48,11 @@ function Page({ first }) {
 
 	// Пока включено «Следить», журнал — раз в 5 с; ответ, пришедший после выключения, не показывается.
 	useEffect(() => {
-		if (!follow)
+		// Без «Следить» журнал не спрашивается — и связи с Роутером не о чем судить.
+		if (!follow) {
+			setOffline(false);
 			return;
+		}
 		let alive = true;
 		const stop = app.every(() => fetchLog().then((d) => {
 			if (alive) {
@@ -81,7 +92,7 @@ function Page({ first }) {
 				<div class="loglines">
 					${data.error ? html`<${kit.Empty} text=${_('Error: %s').format(data.error)} />`
 						: !shown.length ? html`<${kit.Empty} text=${_('Nothing to show.')} />`
-						: shown.slice().reverse().map((l) => html`<div class=${'ln ' + ((l.level == 'info') ? '' : l.level)} data-level=${l.level} data-source=${l.source}>
+						: keyed(shown).reverse().map(({ l, k }) => html`<div key=${k} class=${'ln ' + ((l.level == 'info') ? '' : l.level)} data-level=${l.level} data-source=${l.source}>
 							<span>${l.time}</span><span>${l.src}</span><span>${l.text}</span></div>`)}
 				</div>
 			</${kit.Card}>
@@ -90,7 +101,7 @@ function Page({ first }) {
 
 return view.extend({
 	load: function() {
-		return app.load().then(() => fetchLog().catch((e) => ({ lines: [], error: e.message })));
+		return Promise.all([ app.load(), common.loadSchema(), uci.load('truba') ]).then(() => fetchLog().catch((e) => ({ lines: [], error: e.message })));
 	},
 
 	render: function(first) {

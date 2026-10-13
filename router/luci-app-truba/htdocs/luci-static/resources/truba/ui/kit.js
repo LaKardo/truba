@@ -162,7 +162,7 @@ function Field({ config, sec, name, sid, label, hint, msg, disabled, check, plac
 	const saved = () => uci.get(c, s, name) ?? '';
 	const errOf = (x) => check ? check(x) : common.fieldError(sec, name, x);
 	const [ v, setV ] = useState(saved);
-	const base = useRef(saved());   // значение, с которым поле появилось на странице
+	const base = useRef(saved());   // значение на начало правки: при появлении поля и при каждом фокусе
 	// Выключенное поле не проверяется и показывает то, что в настройках: неверный ввод в нём не держит «Применить».
 	useEffect(() => { if (disabled) setV(saved()); }, [ disabled ]);
 	const err = disabled ? null : errOf(v.trim());
@@ -193,7 +193,7 @@ function Field({ config, sec, name, sid, label, hint, msg, disabled, check, plac
 				app.set(c, s, name, t === '' ? null : t);
 		}
 		// Неверное не пишется, а верное, набранное по пути к нему («900» на пути к «9000»), снимается: в настройках
-		// остаётся то, с чем поле появилось, — иначе «Сохранить» LuCI незаметно отправил бы промежуточное.
+		// остаётся то, что было на начало правки, — иначе «Сохранить» LuCI незаметно отправил бы промежуточное.
 		else if (saved() !== base.current)
 			app.set(c, s, name, base.current === '' ? null : base.current);
 	};
@@ -205,7 +205,8 @@ function Field({ config, sec, name, sid, label, hint, msg, disabled, check, plac
 		<label for=${id}>${label}${changed ? html` <${Dot} level="warn" label=${_('changed, not applied yet')} />` : ''}</label>
 		<input id=${id} data-opt=${opt} autocomplete="off" value=${v} disabled=${!!disabled}
 			placeholder=${(def != null && typeof def != 'object') ? String(def) : ''}
-			aria-invalid=${err ? 'true' : undefined} aria-describedby=${shown ? id + '-e' : undefined} onInput=${onInput} onBlur=${settle} />
+			aria-invalid=${err ? 'true' : undefined} aria-describedby=${shown ? id + '-e' : undefined} onInput=${onInput} onBlur=${settle}
+			onFocus=${() => { if (!err) base.current = saved(); }} />
 		${shown ? html`<div class="err-text" id=${id + '-e'} role="alert">${msg || err}</div>` : ''}
 		${hint ? html`<div class="mu">${hint}</div>` : ''}
 	</div>`;
@@ -314,25 +315,38 @@ function UpstreamList({ sec, name, label }) {
 // Файл или текст для импорта (router.conf): файл перетаскивают в зону или выбирают нажатием на неё, текст
 // вставляют в поле под ней — на телефоне вставить можно только в поле ввода. onText получает текст;
 // error — почему он не подошёл, под зоной.
+const DROP_MAX = 64 * 1024;   // router.conf — меньше 1 КиБ; файл больше — не он
+
 function DropZone({ label, accept, placeholder, error, onText }) {
 	const { html, useState } = app.lib;
-	const [ over, setOver ] = useState(false), [ text, setText ] = useState('');
-	const read = (f) => { if (f) f.text().then(onText); };
+	const [ over, setOver ] = useState(false), [ text, setText ] = useState(''), [ own, setOwn ] = useState(null);
+	const read = (f) => {
+		if (!f)
+			return;
+		if (f.size > DROP_MAX) {
+			setOwn(_('The file is too large for router.conf: %d KiB').format(Math.ceil(f.size / 1024)));
+			return;
+		}
+		setOwn(null);
+		f.text().then(onText, (e) => setOwn(_('The file cannot be read: %s').format(e?.message || e)));
+	};
 	const drop = (ev) => {
 		ev.preventDefault();
 		setOver(false);
 		read(ev.dataTransfer?.files?.[0]);
 	};
-	return html`<div class="drop">
+	// Файл, брошенный мимо зоны (на поле текста), браузер открыл бы вместо страницы.
+	const block = (ev) => { if (ev.dataTransfer?.types?.includes?.('Files')) ev.preventDefault(); };
+	return html`<div class="drop" onDragOver=${block} onDrop=${block}>
 		<label class=${'zone' + (over ? ' over' : '')} onDragOver=${(ev) => { ev.preventDefault(); setOver(true); }}
 				onDragLeave=${() => setOver(false)} onDrop=${drop}>
 			<${Icon} name="file-up" /><span>${label}</span>
 			<input type="file" accept=${accept} onChange=${(ev) => { read(ev.target.files[0]); ev.target.value = ''; }} />
 		</label>
-		<textarea name="conf" rows="3" autocomplete="off" spellcheck="false" placeholder=${placeholder} value=${text}
+		<textarea name="conf" rows="3" autocomplete="off" spellcheck="false" aria-label=${placeholder} placeholder=${placeholder} value=${text}
 			onInput=${(ev) => setText(ev.target.value)}></textarea>
 		<div class="acts"><button type="button" class="btn" data-act="import" disabled=${!text.trim()} onClick=${() => onText(text)}>${_('Import')}</button></div>
-		${error ? html`<div class="err-text" role="alert">${error}</div>` : ''}
+		${(own || error) ? html`<div class="err-text" role="alert">${own || error}</div>` : ''}
 	</div>`;
 }
 

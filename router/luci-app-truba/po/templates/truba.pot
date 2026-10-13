@@ -458,6 +458,14 @@ msgid "Add server"
 msgstr ""
 
 #: htdocs/luci-static/resources/truba/ui/kit.js
+msgid "The file is too large for router.conf: %d KiB"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/ui/kit.js
+msgid "The file cannot be read: %s"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/ui/kit.js
 msgid "Import"
 msgstr ""
 
@@ -987,6 +995,10 @@ msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/overview.js
 msgid "Everything works"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/overview.js
+msgid "handshake %s"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/overview.js
@@ -1598,7 +1610,7 @@ msgid "Keepalive, s"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/tunnel.js
-msgid "Keeps the provider NAT mapping open so inbound connections via the Truba IP reach the router. A range «from-to» (AmneziaWG 3.1) gives a random period, so an idle tunnel has no steady rhythm."
+msgid "Keeps the provider NAT mapping open so inbound connections via the Truba IP reach the router. A range «from-to» (AmneziaWG 3.1) gives a random period, so an idle tunnel has no steady rhythm. Empty — no keepalive."
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/tunnel.js

@@ -23,7 +23,7 @@ function NatCard({ st }) {
 		common.runNatTest().then((n) => setMine({ n, base }), (e) => setMine({ n: { time: Date.now() / 1000, error: e.message }, base }))
 			.finally(() => setBusy(false));
 	};
-	const s = common.natSummary(common.natPick(st.nat, mine), common.get('watchdog', 'enabled'));
+	const s = common.natSummary(common.natPick(st.nat, mine), !!st.watchdog);
 	const aside = html`${busy ? html`<${kit.Busy} text=${_('Testing…')} />` : html`<${kit.Badge} level=${s.level}>${s.text}</${kit.Badge}>`}
 		<button type="button" class="btn" data-act="nat-test" disabled=${busy} onClick=${run}>${_('Check NAT')}</button>`;
 	return html`<${kit.Card} cls="nat" title=${_('NAT check')} aside=${aside}>

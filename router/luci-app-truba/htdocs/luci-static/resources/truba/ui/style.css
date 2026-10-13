@@ -633,6 +633,8 @@
 	cursor: pointer;
 }
 .drop .zone.over, .drop .zone:hover, .drop .zone:focus-within { border-color: var(--tun); color: var(--tx); }
+/* Поле выбора файла прозрачно: его рамку фокуса не видно — рамка у зоны. */
+.drop .zone:has(input:focus-visible) { outline: 2px solid var(--tun); outline-offset: 2px; }
 /* Поле выбора файла — под зоной целиком, прозрачное: нажатие и фокус — его, вид — зоны. */
 .drop input[type="file"] { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
 .drop textarea {

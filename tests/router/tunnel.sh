@@ -114,4 +114,16 @@ reload "ping по умолчанию"
 wd_up() { [ "$(health '@.state')" = healthy ] && tlog | grep -q 'truba-watchdog: Туннель восстановлен'; }
 check "Туннель снова отвечает — строка «восстановлен»" wait_for 40 wd_up
 
+section "status: сторож службы"
+# «Состояние» на «Туннеле» и «Обзоре» — по работающему сторожу, а не по переключателю в браузере: в UCI сессии
+# бывают и неприменённые изменения.
+wd_is() { [ "$(truba status | jsonfilter -e '@.watchdog')" = "$1" ]; }
+check "сторож работает — status.watchdog true" wd_is true
+uci set truba.watchdog.enabled='0'; uci commit truba
+reload "сторож выключен"
+check "сторож выключен — status.watchdog false" wait_for 15 wd_is false
+uci set truba.watchdog.enabled='1'; uci commit truba
+reload "сторож снова включён"
+check "сторож снова работает" wait_for 15 wd_is true
+
 finish
