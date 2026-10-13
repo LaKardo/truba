@@ -478,7 +478,7 @@
 /* Поле — сверху ячейки: в сетке соседнее поле с подсказкой выше, а растянутое поле опустило бы своё поле ввода. */
 .field { display: grid; align-content: start; gap: 3px; min-width: 0; }
 .field label { color: var(--mu); font-size: 12px; }
-.field label .dot, .tt-res .dot { display: inline-block; width: 8px; height: 8px; box-shadow: none; vertical-align: 1px; }
+.field label .dot, .tt-res .dot, .kv .dot { display: inline-block; width: 8px; height: 8px; box-shadow: none; vertical-align: 1px; }
 .field input {
 	min-width: 0;
 	height: 30px;
@@ -706,3 +706,13 @@
 .ups .err-text { margin-top: 4px; }
 /* В столбец flex: 1 давал полю основу 0 — оно сплющивалось; там высота — своя. */
 @container (max-width: 600px) { .ups-add { flex-direction: column; } .ups-add input { flex: none; } }
+
+/* ---- «Входящие» ---- */
+.nat .card-h .aside { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.nat-srv, .upnp-rows { margin: 0; padding: 0; list-style: none; font-size: 12px; }
+.nat-srv li { overflow-wrap: anywhere; }
+.upnp-rows li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 12px; padding: 7px 0; border-top: 1px solid var(--bd); }
+.upnp-rows li:first-child { border-top: 0; padding-top: 0; }
+.upnp-rows b { flex: 1 1 12em; min-width: 0; overflow-wrap: anywhere; font-weight: 500; }
+.upnp .warns { margin: 8px 0 0; }
+.upnp .warns .dot { width: 8px; height: 8px; box-shadow: none; }

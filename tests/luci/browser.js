@@ -631,6 +631,44 @@ async function waitApply(page) {
 		'«DNS»: поле и кнопка с именем пути, фокус после удаления строки остаётся в списке', JSON.stringify({ names, focus: n1.focus }));
 	await resetDns();
 
+	// «Входящие» (spec §5.6): «Проверка NAT» и UPnP / NAT-PMP. На стенде есть miniupnpd (TEST_PKGS в run.sh),
+	// а Туннель — dummy: проверка NAT кончается ошибкой, но текстом, а не undefined:NaN.
+	const openInbound = async () => {
+		await page.goto(url('inbound'), { waitUntil: 'networkidle2' });
+		await settled(page);
+	};
+	await openInbound();
+	const inb = await page.evaluate(() => { const r = document.querySelector('.truba-root').shadowRoot;
+		return { h2: r.querySelector('.head h2')?.textContent, badge: !!r.querySelector('.card.nat .badge'), dt: r.querySelectorAll('.card.nat dt').length,
+			upnp: r.querySelector('.card.upnp input[data-opt="truba.main.upnp"]')?.disabled }; });
+	result(inb.h2 == 'Inbound' && inb.badge && inb.dt == 4 && inb.upnp === false,
+		'«Входящие»: проверка NAT — значок и 4 строки, переключатель UPnP доступен', JSON.stringify(inb));
+	// «Check NAT» (нажатие мыши): итог у службы новее прежнего, на карточке — без undefined и NaN.
+	const natBefore = (await ubus('truba', 'status')).nat?.time ?? 0;
+	await tap('.card.nat [data-act="nat-test"]');
+	await page.waitForFunction(() => document.querySelector('.truba-root').shadowRoot.querySelector('.card.nat .spinning'), { timeout: 3000 }).catch(() => {});
+	await page.waitForFunction(() => !document.querySelector('.truba-root').shadowRoot.querySelector('.card.nat .spinning'), { timeout: 30000 }).catch(() => {});
+	const natAfter = await page.evaluate(() => { const c = document.querySelector('.truba-root').shadowRoot.querySelector('.card.nat');
+		return { badge: (c?.querySelector('.badge')?.textContent || '').trim(), text: (c?.innerText || '').replace(/\s+/g, ' ') }; });
+	natAfter.time = (await ubus('truba', 'status')).nat?.time ?? 0;
+	result(natAfter.time > natBefore && !!natAfter.badge && !/undefined|NaN/.test(natAfter.text), '«Входящие»: «Check NAT» — итог службы на карточке',
+		JSON.stringify({ natBefore, time: natAfter.time, badge: natAfter.badge, text: natAfter.text.slice(0, 160) }));
+	// UPnP: включить и «Применить» — служба включает miniupnpd на Туннеле (upnpd.config.enabled); выключить — снова выкл.
+	const upnpUci = async () => (await ubus('uci', 'get', { config: 'upnpd', section: 'config', option: 'enabled' }).catch(() => ({}))).value;
+	t0 = await time();
+	await tap('.card.upnp input[data-opt="truba.main.upnp"]');
+	await tap('.changes [data-act="apply"]');
+	await waitApply(page);
+	result(await applied(t0, async (st) => st.upnp?.enabled === true && await upnpUci() == '1'), '«Входящие»: UPnP вкл — «Применить» дошло до службы и upnpd');
+	await openInbound();
+	const upnpText = await page.evaluate(() => document.querySelector('.truba-root').shadowRoot.querySelector('.card.upnp')?.innerText || '');
+	t0 = await time();
+	await tap('.card.upnp input[data-opt="truba.main.upnp"]');
+	await tap('.changes [data-act="apply"]');
+	await waitApply(page);
+	result(await applied(t0, (st) => st.upnp?.enabled === false) && /No active mappings\./.test(upnpText),
+		'«Входящие»: UPnP выкл — «Применить» дошло до службы; без отображений — «No active mappings.»', upnpText.replace(/\s+/g, ' ').slice(0, 120));
+
 	// «Туннель» (spec §5.4): состояние, подключение к Трубе, контроль. На стенде awg0 — dummy с пиром
 	// 203.0.113.10:51820 (stand.sh).
 	await page.goto(url('tunnel'), { waitUntil: 'networkidle2' });

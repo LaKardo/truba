@@ -754,6 +754,10 @@ msgid "Used for categories with action Direct, for the router's own hosts (NTP, 
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/inbound.js
+msgid "Testing…"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/inbound.js
 msgid "Check NAT"
 msgstr ""
 
@@ -774,10 +778,6 @@ msgid "This checks the Truba layer only. For the full RFC 5780 test run NatTypeT
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/inbound.js
-msgid "Testing…"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/inbound.js
 msgid "UPnP / NAT-PMP"
 msgstr ""
 
@@ -794,7 +794,19 @@ msgid "Package luci-app-upnp is not installed."
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/inbound.js
-msgid "enabled"
+msgid "Active UPnP / NAT-PMP mappings"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/inbound.js
+msgid "No active mappings."
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/inbound.js
+msgid "Port forwards from the tunnel"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/inbound.js
+msgid "Edit port forwards"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/inbound.js
@@ -807,50 +819,6 @@ msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/inbound.js
 msgid "Inbound traffic is on the Overview."
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/inbound.js
-msgid "Active UPnP / NAT-PMP mappings"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/inbound.js
-msgid "Protocol"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/inbound.js
-msgid "External port"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/inbound.js
-msgid "Device"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/inbound.js
-msgid "Description"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/inbound.js
-msgid "Expires"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/inbound.js
-msgid "No active mappings."
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/inbound.js
-msgid "Port forwards from the tunnel"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/inbound.js
-msgid "No port forwards with source zone «truba»."
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/inbound.js
-msgid "Edit port forwards"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/inbound.js
-msgid "Choose source zone «truba»."
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/log.js
@@ -1551,6 +1519,10 @@ msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/tunnel.js
 msgid "Address"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/tunnel.js
+msgid "Protocol"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/tunnel.js
