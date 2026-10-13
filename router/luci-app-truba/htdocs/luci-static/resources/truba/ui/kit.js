@@ -157,6 +157,7 @@ function Field({ config, sec, name, sid, label, hint, msg, disabled, check, plac
 	const saved = () => uci.get(c, s, name) ?? '';
 	const errOf = (x) => check ? check(x) : common.fieldError(sec, name, x);
 	const [ v, setV ] = useState(saved);
+	const base = useRef(saved());   // значение, с которым поле появилось на странице
 	// Выключенное поле не проверяется и показывает то, что в настройках: неверный ввод в нём не держит «Применить».
 	useEffect(() => { if (disabled) setV(saved()); }, [ disabled ]);
 	const err = disabled ? null : errOf(v.trim());
@@ -181,8 +182,15 @@ function Field({ config, sec, name, sid, label, hint, msg, disabled, check, plac
 		setQuiet(true);
 		clearTimeout(timer.current);
 		timer.current = setTimeout(settle, 800);
-		if (!errOf(x.trim()) && x.trim() !== saved())
-			app.set(c, s, name, x.trim() === '' ? null : x.trim());
+		const t = x.trim();
+		if (!errOf(t)) {
+			if (t !== saved())
+				app.set(c, s, name, t === '' ? null : t);
+		}
+		// Неверное не пишется, а верное, набранное по пути к нему («900» на пути к «9000»), снимается: в настройках
+		// остаётся то, с чем поле появилось, — иначе «Сохранить» LuCI незаметно отправил бы промежуточное.
+		else if (saved() !== base.current)
+			app.set(c, s, name, base.current === '' ? null : base.current);
 	};
 	const def = (placeholder != null) ? placeholder : (c == 'truba') ? common.schema().sections?.[sec]?.[name]?.def : null;
 	const changed = uci.state?.changes?.[c]?.[s]?.[name] !== undefined;

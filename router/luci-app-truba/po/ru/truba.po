@@ -82,9 +82,6 @@ msgstr "%d мин назад"
 msgid "%d h ago"
 msgstr "%d ч назад"
 
-msgid "Enabled"
-msgstr "Включено"
-
 msgid "Name"
 msgstr "Название"
 
@@ -319,12 +316,6 @@ msgstr "через Туннель"
 msgid "fallback to direct (no tunnel route)"
 msgstr "обход напрямую (маршрута через Туннель нет)"
 
-msgid "Last handshake"
-msgstr "Последний handshake"
-
-msgid "Tunnel address"
-msgstr "Адрес в Туннеле"
-
 msgid "Tunnel route table"
 msgstr "Таблица Туннеля"
 
@@ -403,12 +394,6 @@ msgstr "В секции [Interface] нет PrivateKey"
 msgid "No [Peer] section with PublicKey"
 msgstr "Нет секции [Peer] с PublicKey"
 
-msgid "Import tunnel configuration"
-msgstr "Импорт конфигурации Туннеля"
-
-msgid "Paste router.conf produced by install-vps.sh on the VPS, or choose the file."
-msgstr "Вставьте router.conf, который выдал install-vps.sh на VPS, или выберите файл."
-
 msgid "Cancel"
 msgstr "Отмена"
 
@@ -418,47 +403,14 @@ msgstr "Импортировать"
 msgid "AmneziaWG interface %s. Settings are stored in the standard network configuration and are also visible in Network → Interfaces."
 msgstr "Интерфейс AmneziaWG %s. Настройки хранятся в стандартной конфигурации сети и видны также в «Сеть → Интерфейсы»."
 
-msgid "Interface"
-msgstr "Интерфейс"
-
 msgid "General"
 msgstr "Основное"
-
-msgid "Obfuscation"
-msgstr "Маскировка"
-
-msgid "Private key"
-msgstr "Приватный ключ"
 
 msgid "MTU"
 msgstr "MTU"
 
-msgid "Listen port"
-msgstr "Порт прослушивания"
-
-msgid "Not needed: the router connects to the Truba itself."
-msgstr "Не нужен: Роутер сам подключается к Трубе."
-
-msgid "A number or a range «from-to»; must match the Truba."
-msgstr "Число или диапазон «от-до»; должно совпадать с Трубой."
-
 msgid "Decoy packets before the handshake (CPS format); may differ from the Truba."
 msgstr "Пакеты-приманки перед handshake (формат CPS); могут отличаться от Трубы."
-
-msgid "Truba (peer)"
-msgstr "Труба (пир)"
-
-msgid "Truba public key"
-msgstr "Публичный ключ Трубы"
-
-msgid "Preshared key"
-msgstr "Общий ключ (PSK)"
-
-msgid "Truba address"
-msgstr "Адрес Трубы"
-
-msgid "Truba port"
-msgstr "Порт Трубы"
 
 msgid "Keepalive, s"
 msgstr "Keepalive, с"
@@ -483,9 +435,6 @@ msgstr "Пусто — адрес Трубы внутри Туннеля. Адр
 
 msgid "The tunnel is not configured yet. Run install-vps.sh on the VPS and import the resulting router.conf."
 msgstr "Туннель ещё не настроен. Запустите install-vps.sh на VPS и импортируйте полученный router.conf."
-
-msgid "Import .conf"
-msgstr "Импорт .conf"
 
 msgid "bit/s"
 msgstr "бит/с"
@@ -535,20 +484,11 @@ msgstr "С защитой заголовков S1–S4 должны быть н�
 msgid "Header protection key"
 msgstr "Ключ защиты заголовков"
 
-msgid "AmneziaWG 3.1: encrypts the header fields WireGuard is recognised by. Must match the Truba and needs S1–S4 of at least 12; comes with router.conf."
-msgstr "AmneziaWG 3.1: шифрует поля заголовка, по которым узнают WireGuard. Должен совпадать с Трубой, нужны S1–S4 не меньше 12; приходит с router.conf."
-
 msgid "Disable cookies"
 msgstr "Без ответов cookie"
 
-msgid "AmneziaWG 3.1: no cookie replies under load. Not needed with a single peer, and their size is recognisable."
-msgstr "AmneziaWG 3.1: не отвечать cookie под нагрузкой. С одним пиром они не нужны, а их размер узнаваем."
-
 msgid "Random trailers"
 msgstr "Случайные хвосты (RandomTrailers)"
-
-msgid "AmneziaWG 3.1, in reserve against DPI by packet sizes: pads packets to a random length, costly in traffic for small packets. Must match the Truba: after «install-vps.sh random-trailers on» or «off» on the VPS import router.conf again — it switches the content padding too."
-msgstr "AmneziaWG 3.1, запас против DPI по размерам пакетов: добивает пакеты до случайной длины, дорого по трафику на мелких пакетах. Должен совпадать с Трубой: после «install-vps.sh random-trailers on» или «off» на VPS импортируйте router.conf заново — он переключает и добавку к пакетам."
 
 msgid "Content padding"
 msgstr "Добавка к пакетам"
@@ -558,9 +498,6 @@ msgstr "AmneziaWG 3.1: случайные байты к пакетам данн�
 
 msgid "Leave empty with random trailers: the module would use the padding instead of them"
 msgstr "Со случайными хвостами оставьте пустым: модуль взял бы добавку вместо них"
-
-msgid "A number or a range «from-to» within 0–65535"
-msgstr "Число или диапазон «от-до» в пределах 0–65535"
 
 msgid "geoip.dat is published every three days around 10–11 UTC, geosite.dat irregularly, usually by 09 UTC; at 12:00 a new release is picked up the same day. Converted to the router time zone for cron."
 msgstr "geoip.dat выходит раз в три дня около 10–11 UTC, geosite.dat — нерегулярно, обычно до 09 UTC; в 12:00 новый выпуск подхватывается в тот же день. Для cron время переводится в часовой пояс Роутера."
@@ -589,12 +526,6 @@ msgstr "ошибка — %s"
 msgid "now"
 msgstr "сейчас"
 
-msgid "Latency to the Truba"
-msgstr "Задержка до Трубы"
-
-msgid "Packet loss"
-msgstr "Потери"
-
 msgid "Interface traffic"
 msgstr "Трафик интерфейса"
 
@@ -604,14 +535,8 @@ msgstr "Контроль Туннеля выключен"
 msgid "%d ms"
 msgstr "%d мс"
 
-msgid "average %d ms"
-msgstr "в среднем %d мс"
-
 msgid "no reply"
 msgstr "нет ответа"
-
-msgid "%d%% over %d min"
-msgstr "%d%% за %d мин"
 
 msgid "not used: routing is off"
 msgstr "не используется: Маршрутизация выключена"
@@ -862,29 +787,11 @@ msgstr "Фильтр по Действию"
 msgid "Full-size packets"
 msgstr "Крупные пакеты"
 
-msgid "Latency over %d min"
-msgstr "Задержка за %d мин"
-
-msgid "Points are the watchdog checks; a gap is a lost ping."
-msgstr "Точки — проверки контроля Туннеля; разрыв — потерянный ping."
-
-msgid "%d–%d ms"
-msgstr "%d–%d мс"
-
-msgid "get through · %d bytes, the whole MTU"
-msgstr "проходят · %d байт, весь MTU"
-
-msgid "lost (%d of %d) · %d bytes: lower the MTU"
-msgstr "теряются (%d из %d) · %d байт: уменьшите MTU"
-
 msgid "install-vps.sh picks it for the VPS network. If full-size packets do not get through (see State above), lower it on both sides."
 msgstr "install-vps.sh подбирает его под сеть VPS. Если крупные пакеты не проходят (см. «Состояние» выше), уменьшите его на обеих сторонах."
 
 msgid "Pings the Truba inside the tunnel and checks the handshake age; restarts the interface after repeated failures. Every tenth check also makes sure that full-size packets get through."
 msgstr "Пингует Трубу внутри Туннеля и следит за возрастом handshake; после нескольких неудач подряд перезапускает интерфейс. Раз в 10 проверок убеждается, что проходят крупные пакеты."
-
-msgid "Connection"
-msgstr "Подключение"
 
 msgid "Keys and parameters come from router.conf made by install-vps.sh on the VPS. To replace them, import a new file."
 msgstr "Ключи и параметры приходят из router.conf, который создаёт install-vps.sh на VPS. Чтобы их сменить, импортируйте новый файл."
@@ -1239,3 +1146,63 @@ msgstr "Введите целое число"
 
 msgid "Log"
 msgstr "Журнал"
+
+msgid "Handshake"
+msgstr "Рукопожатие"
+
+msgid "Loss over %d min"
+msgstr "Потери за %d мин"
+
+msgid "get through"
+msgstr "проходят"
+
+msgid "lost"
+msgstr "теряются"
+
+msgid "The Truba does not answer inside the tunnel: see the State above."
+msgstr "Труба не отвечает внутри Туннеля: см. «Состояние» выше."
+
+msgid "If only the largest packets are lost, lower the MTU here and in install-vps.sh on the VPS."
+msgstr "Если теряются только самые крупные пакеты, уменьшите MTU здесь и в install-vps.sh на VPS."
+
+msgid "on"
+msgstr "вкл"
+
+msgid "off"
+msgstr "выкл"
+
+msgid "AmneziaWG parameters"
+msgstr "Параметры AmneziaWG"
+
+msgid "H1–H4: a number or a range «from-to»; must match the Truba."
+msgstr "H1–H4: число или диапазон «от-до»; должны совпадать с Трубой."
+
+msgid "set"
+msgstr "задан"
+
+msgid "not set"
+msgstr "не задан"
+
+msgid "Other interface settings"
+msgstr "Другие настройки интерфейса"
+
+msgid "router.conf imported: apply the changes to use it."
+msgstr "router.conf импортирован: примените изменения, чтобы он заработал."
+
+msgid "Drop router.conf here or choose the file"
+msgstr "Перетащите сюда router.conf или выберите файл"
+
+msgid "…or paste its text"
+msgstr "…или вставьте его текст"
+
+msgid "Connection to the Truba"
+msgstr "Подключение к Трубе"
+
+msgid "Address"
+msgstr "Адрес"
+
+msgid "If the tunnel does not respond"
+msgstr "Если Туннель не отвечает"
+
+msgid "Watchdog"
+msgstr "Контроль"

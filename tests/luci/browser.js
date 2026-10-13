@@ -141,8 +141,9 @@ async function waitApply(page) {
 		await page.screenshot({ path: `${out}/${t}.png`, fullPage: true });
 		// Подсказки полей — из схемы службы (truba.schema, ADR 0015), а не из представления.
 		if (t == 'dns' || t == 'tunnel') {
-			const id = t == 'dns' ? 'widget.cbid.truba.dns.port' : 'widget.cbid.truba.watchdog.handshake_max';
-			const ph = await page.evaluate((id) => document.getElementById(id)?.placeholder, id);
+			// «Туннель» — на новом интерфейсе: поле в Shadow DOM.
+			const ph = await page.evaluate((t) => (t == 'dns') ? document.getElementById('widget.cbid.truba.dns.port')?.placeholder
+				: document.querySelector('.truba-root')?.shadowRoot?.querySelector('input[data-opt="truba.watchdog.handshake_max"]')?.placeholder, t);
 			const sch = await ubus('truba', 'schema');
 			const want = String(t == 'dns' ? sch.sections.dns.port.def : sch.sections.watchdog.handshake_max.def);
 			result(ph === want, `вкладка ${t}: подсказка поля — умолчание схемы службы`, `${ph} / ${want}`);
@@ -407,6 +408,113 @@ async function waitApply(page) {
 		lists: !!document.querySelector('#view [id*="cbid.truba.lists."]') }));
 	result(dnsPage.h2 == 'DNS' && !dnsPage.rs && !dnsPage.lists, '«DNS»: без Наборов правил', JSON.stringify(dnsPage));
 
+	// «Туннель» (spec §5.4): состояние, подключение к Трубе, контроль. На стенде awg0 — dummy с пиром
+	// 203.0.113.10:51820 (stand.sh).
+	await page.goto(url('tunnel'), { waitUntil: 'networkidle2' });
+	await settled(page);
+	const tun = await page.evaluate(() => {
+		const r = document.querySelector('.truba-root').shadowRoot;
+		return { stats: r.querySelectorAll('.card.state .stat').length, on: r.querySelector('input[data-opt="network.awg0.disabled"]')?.checked,
+			conn: (r.querySelector('.card.conn')?.innerText || '').replace(/\s+/g, ' ').slice(0, 100) };
+	});
+	result(tun.stats == 4 && tun.on === true && /203\.0\.113\.10:51820/.test(tun.conn), '«Туннель»: плитки состояния, переключатель, адрес Трубы', JSON.stringify(tun));
+	// MTU — опция network со своей проверкой: неверное не пишется и держит «Применить» и «Save & Apply» LuCI.
+	// Ввод заново — выделением в самом поле: под прилипшей панелью изменений клик пришёлся бы в неё.
+	const retypeIn = async (h, v) => {
+		await h?.evaluate((e) => { e.focus(); e.select(); });
+		await page.keyboard.type(v);
+	};
+	const uciKs = async () => (await ubus('uci', 'get', { config: 'truba', section: 'main', option: 'killswitch' }).catch(() => ({}))).value ?? null;
+	const uciMtu = () => page.evaluate(async () => (await L.require('uci')).get('network', 'awg0', 'mtu') ?? null);
+	const ksBefore = await uciKs(), mtuBefore = await uciMtu();
+	await tap('input[data-opt="truba.main.killswitch"]');
+	const mtu = await el('input[data-opt="network.awg0.mtu"]');
+	await retypeIn(mtu, '9000');
+	await page.waitForFunction(() => document.querySelector('.truba-root').shadowRoot.querySelector('.card.conn .field.bad [role="alert"]'), { timeout: 3000 }).catch(() => {});
+	const badMtu = await page.evaluate(() => {
+		const r = document.querySelector('.truba-root').shadowRoot;
+		return { err: r.querySelector('.card.conn .field.bad [role="alert"]')?.textContent || '', apply: r.querySelector('.changes [data-act="apply"]')?.disabled };
+	});
+	badMtu.uci = await uciMtu();
+	await page.evaluate(() => [ ...document.querySelectorAll('.cbi-page-actions *') ]
+		.find((x) => x.childElementCount == 0 && x.textContent.trim() == 'Save & Apply')?.click());
+	await sleep(2000);
+	badMtu.ks = await uciKs();
+	badMtu.toast = await page.evaluate(() => document.querySelector('.truba-root')?.shadowRoot?.querySelector('.toast')?.innerText || '');
+	await retypeIn(mtu, '1280');
+	await page.waitForFunction(() => document.querySelector('.truba-root').shadowRoot.querySelector('.changes [data-act="apply"]')?.disabled === false,
+		{ timeout: 3000 }).catch(() => {});
+	const goodMtu = { apply: await page.evaluate(() => document.querySelector('.truba-root').shadowRoot.querySelector('.changes [data-act="apply"]')?.disabled),
+		uci: await uciMtu() };
+	result(!!mtu && /576/.test(badMtu.err) && badMtu.apply === true && badMtu.uci === mtuBefore && badMtu.ks === ksBefore && /Fix the highlighted fields/.test(badMtu.toast) &&
+		goodMtu.apply === false && goodMtu.uci === '1280', '«Туннель»: MTU — неверное не пишется и держит «Применить» и «Save & Apply»', JSON.stringify({ badMtu, goodMtu }));
+	await Promise.all([ page.waitForNavigation({ waitUntil: 'networkidle2' }).catch(() => {}), tap('.changes [data-act="reset"]') ]);
+	await settled(page);
+	// Импорт router.conf (Решение 5): файл в зону — UCI браузера; адрес, строка «Протокол» и поля — новые. S1 меньше
+	// 12 при защите заголовков — ошибка у поля.
+	fs.writeFileSync(`${out}/router.conf`, [ '[Interface]', 'PrivateKey = cHJpdmF0ZS1rZXktZm9yLXRlc3RzLW9ubHk=', 'Address = 10.77.77.2/30', 'MTU = 1313',
+		'Jc = 4', 'S1 = 20', 'S2 = 40', 'H1 = 100-200', 'HeaderProtectionKey = aHBrLWZvci10ZXN0cw==', '[Peer]', 'PublicKey = cHVibGljLWtleS1mb3ItdGVzdHMtb25seQ==',
+		'Endpoint = 198.51.100.7:40243', 'PersistentKeepalive = 15-25', '' ].join('\r\n'));
+	await (await el('.drop input[type="file"]'))?.uploadFile(`${out}/router.conf`);
+	await page.waitForFunction(() => /AmneziaWG 3\.1/.test(document.querySelector('.truba-root')?.shadowRoot?.querySelector('.card.conn')?.innerText || ''),
+		{ timeout: 5000 }).catch(() => {});
+	await page.evaluate(() => document.querySelector('.truba-root').shadowRoot.querySelectorAll('.card.conn details.fold').forEach((d) => { d.open = true; }));
+	const imp = await page.evaluate(async () => {
+		const u = await L.require('uci'), r = document.querySelector('.truba-root').shadowRoot;
+		return { text: (r.querySelector('.card.conn')?.innerText || '').replace(/\s+/g, ' ').slice(0, 160), proto: u.get('network', 'awg0', 'proto'),
+			port: (u.sections('network', 'amneziawg_awg0')[0] || {}).endpoint_port, s1: r.querySelector('input[data-opt="network.awg0.awg_s1"]')?.value,
+			bar: !!r.querySelector('.changes') };
+	});
+	// Уход из поля показывает ошибку сразу (пауза в наборе проверена на «Правилах»).
+	await retypeIn(await el('input[data-opt="network.awg0.awg_s1"]'), '5');
+	await page.keyboard.press('Tab');
+	imp.s1Err = await page.waitForFunction(() => document.querySelector('.truba-root').shadowRoot.querySelector('.card.conn .field.bad [role="alert"]')?.textContent,
+		{ timeout: 5000 }).then((h) => h.jsonValue()).catch(() => '');
+	imp.s1Typed = await page.evaluate(() => {
+		const r = document.querySelector('.truba-root').shadowRoot, i = r.querySelector('input[data-opt="network.awg0.awg_s1"]');
+		return { value: i?.value, invalid: i?.getAttribute('aria-invalid') };
+	});
+	result(/198\.51\.100\.7:40243/.test(imp.text) && /AmneziaWG 3\.1/.test(imp.text) && imp.proto == 'amneziawg' && imp.port == '40243' && imp.s1 == '20' && imp.bar &&
+		/at least 12/.test(imp.s1Err), '«Туннель»: импорт router.conf — адрес, протокол и поля; S1 меньше 12 с защитой заголовков — ошибка', JSON.stringify(imp));
+	await Promise.all([ page.waitForNavigation({ waitUntil: 'networkidle2' }).catch(() => {}), tap('.changes [data-act="reset"]') ]);
+	await settled(page);
+	// Неверная вставка — ошибка под зоной, изменений нет.
+	await (await el('.drop textarea'))?.type('[Peer]\nPublicKey = x');
+	await tap('.drop [data-act="import"]');
+	await sleep(300);
+	const badConf = await page.evaluate(() => {
+		const r = document.querySelector('.truba-root').shadowRoot;
+		return { err: r.querySelector('.drop .err-text')?.textContent || '', bar: !!r.querySelector('.changes') };
+	});
+	result(/No PrivateKey/.test(badConf.err) && !badConf.bar, '«Туннель»: неверная вставка — ошибка под зоной, изменений нет', JSON.stringify(badConf));
+	// Туннель не настроен (секции интерфейса нет): пояснение и импорт, переключатель недоступен.
+	await page.evaluate(async () => (await L.require('truba.ui.app')).remove('network', 'awg0'));
+	await sleep(300);
+	const nc = await page.evaluate(() => {
+		const r = document.querySelector('.truba-root').shadowRoot;
+		return { text: (r.querySelector('.card.conn')?.innerText || '').replace(/\s+/g, ' ').slice(0, 100), drop: !!r.querySelector('.card.conn .drop'),
+			sw: r.querySelector('input[data-opt="network.awg0.disabled"]')?.disabled };
+	});
+	result(/not configured yet/.test(nc.text) && nc.drop && nc.sw === true, '«Туннель»: не настроен — пояснение, импорт, переключатель недоступен', JSON.stringify(nc));
+	await Promise.all([ page.waitForNavigation({ waitUntil: 'networkidle2' }).catch(() => {}), tap('.changes [data-act="reset"]') ]);
+	await settled(page);
+	// «Проверить Туннель» (была на «Диагностике»): итог — в карточке подключения.
+	await tap('[data-act="tunnel-test"]');
+	const tt = await page.waitForFunction(() => {
+		const r = document.querySelector('.truba-root')?.shadowRoot, t = r?.querySelector('.card.conn .tt-res')?.innerText || '';
+		return !r?.querySelector('.card.conn .spinning') && t.trim() && t;
+	}, { timeout: 45000 }).then((h) => h.jsonValue()).catch(() => '');
+	result(!!tt, '«Туннель»: «Проверить Туннель» — итог в карточке', tt.replace(/\s+/g, ' ').slice(0, 100));
+	// Аварийная блокировка — «Применить» на «Туннеле» доходит до службы; затем прежнее значение.
+	t0 = await time();
+	const ksOn = await page.evaluate(() => document.querySelector('.truba-root').shadowRoot.querySelector('input[data-opt="truba.main.killswitch"]')?.checked);
+	await tap('input[data-opt="truba.main.killswitch"]');
+	await tap('.changes [data-act="apply"]');
+	await waitApply(page);
+	result(await applied(t0, (st) => st.killswitch === !ksOn), '«Применить» на «Туннеле»: Аварийная блокировка → действует');
+	await ubus('uci', 'set', { config: 'truba', section: 'main', values: { killswitch: ksOn ? '1' : '0' } });
+	await ubus('uci', 'commit', { config: 'truba' });
+
 	// 2. Политика устройства «Всё в туннель» — в панели устройства, применение — панелью изменений.
 	t0 = await time();
 	await page.goto(url('devices'), { waitUntil: 'networkidle2' });
@@ -620,6 +728,16 @@ async function waitApply(page) {
 	const versText = await page.evaluate(() => document.querySelector('.truba-root').shadowRoot.querySelector('.rule-sets .vers')?.innerText || '');
 	result(/Current version/.test(versText) && /Previous version/.test(versText), '«Правила» 375: версии с подписями', versText.replace(/\s+/g, ' '));
 	await page.screenshot({ path: `${out}/rules-375.png`, fullPage: true });
+	// «Туннель» на телефоне: плитки по две, поля и зона импорта — без горизонтальной прокрутки.
+	await page.goto(url('tunnel'), { waitUntil: 'networkidle2' });
+	await settled(page);
+	await page.evaluate(() => document.querySelector('.truba-root').shadowRoot.querySelectorAll('details.fold').forEach((d) => { d.open = true; }));
+	const tun375 = await page.evaluate(() => {
+		const tr = document.querySelector('.truba-root').shadowRoot.querySelector('.tr');
+		return { doc: document.documentElement.scrollWidth, win: window.innerWidth, tr: tr.scrollWidth - tr.clientWidth };
+	});
+	result(tun375.doc <= tun375.win && tun375.tr <= 0, '«Туннель» 375: без горизонтальной прокрутки', JSON.stringify(tun375));
+	await page.screenshot({ path: `${out}/tunnel-375.png`, fullPage: true });
 	await page.setViewport({ width: 1280, height: 900 });
 
 	// Длинное неверное значение настройки попадает в предупреждение как есть — и на телефоне не должно
