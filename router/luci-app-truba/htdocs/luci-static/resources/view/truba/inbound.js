@@ -55,10 +55,114 @@ function UpnpCard({ st, devices }) {
 
 // ---- Пробросы портов из Туннеля ----
 
-function FwdCard() {
-	const { html } = app.lib;
-	return html`<${kit.Card} cls="w3 fwd" title=${_('Port forwards from the tunnel')}>
-		<${kit.Go} href=${L.url('admin/network/firewall/forwards')} label=${_('Edit port forwards')} />
+const PROTOS = { 'tcp udp': 'TCP+UDP', tcp: 'TCP', udp: 'UDP' };
+const OTHER = 'other';   // «Другой IP-адрес…» в выборе устройства
+
+// Устройства с IP для выбора: сначала с именем — по имени, затем по IP.
+function devChoices(devices) {
+	const num = (ip) => ip.split('.').reduce((n, x) => n * 256 + +x, 0);
+	return devices.filter((d) => d.ip).sort((a, b) => (!a.name - !b.name) || String(a.name || '').localeCompare(String(b.name || '')) || num(a.ip) - num(b.ip));
+}
+
+// Окно правки проброса (решения 2–6 плана этапа 6). Пишутся только опции, которые есть в окне; остальные
+// (src_ip, reflection и другие из «Межсетевого экрана») остаются. Протокол того же смысла и зона при том же
+// IP — как в настройках. Ошибка поля видна после ухода из него, «Save» недоступна сразу.
+function FwdDialog({ row, devices, onClose }) {
+	const { html, useState } = app.lib;
+	const choices = devChoices(devices);
+	const [ v, setV ] = useState(() => row
+		? { name: row.name, proto: row.proto, ext: row.ext, port: uci.get('firewall', row.sid, 'dest_port') || '',
+			dev: choices.some((d) => d.ip == row.ip) ? row.ip : row.ip ? OTHER : '', ip: row.ip }
+		: { name: '', proto: 'tcp udp', ext: '', port: '', dev: '', ip: '' });
+	const [ touched, setTouched ] = useState({});
+	const ip = (v.dev == OTHER) ? v.ip : v.dev;
+	const errs = common.forwardErrors({ sid: row?.sid || null, name: v.name, proto: v.proto, ext: v.ext, ip, port: v.port });
+	const shown = {
+		ext: touched.ext && errs.ext,
+		dev: touched.dev && v.dev != OTHER && errs.ip && _('Choose a device'),
+		ip: touched.ip && v.dev == OTHER && errs.ip,
+		port: touched.port && errs.port
+	};
+	const set = (k) => (ev) => setV((s) => ({ ...s, [k]: ev.target.value }));
+	const touch = (k) => () => setTouched((t) => t[k] ? t : { ...t, [k]: true });
+
+	const save = () => {
+		const vals = common.forwardValues({ ...v, ip }, devices);
+		let sid = row?.sid;
+		if (sid) {
+			const proto = uci.get('firewall', sid, 'proto');
+			if (common.fwProto(proto) == vals.proto)
+				vals.proto = proto ?? null;
+			if (ip == uci.get('firewall', sid, 'dest_ip'))
+				delete vals.dest;
+		}
+		else {
+			sid = app.add('firewall', 'redirect');
+			app.set('firewall', sid, 'src', common.schema().consts.fw_zone);
+			app.set('firewall', sid, 'target', 'DNAT');
+		}
+		for (let k in vals)
+			app.set('firewall', sid, k, vals[k]);
+	};
+	const del = (ev) => {
+		app.remove('firewall', row.sid);
+		ev.currentTarget.closest('dialog')?.close();
+	};
+
+	// Поле окна: подпись, элемент, ошибка и подсказка — как у kit.Field.
+	const field = (k, label, control, hint) => html`<div class=${'field' + (shown[k] ? ' bad' : '')}>
+		<label for=${'fwd-' + k}>${label}</label>
+		${control({ id: 'fwd-' + k, 'data-f': k, 'aria-invalid': shown[k] ? 'true' : undefined, 'aria-describedby': shown[k] ? 'fwd-' + k + '-e' : undefined,
+			onBlur: touch(k) })}
+		${shown[k] ? html`<div class="err-text" id=${'fwd-' + k + '-e'} role="alert">${shown[k]}</div>` : ''}
+		${hint ? html`<div class="mu">${hint}</div>` : ''}
+	</div>`;
+	const input = (k, extra) => (a) => html`<input ...${a} autocomplete="off" value=${v[k]} onInput=${set(k)} ...${extra || {}} />`;
+	const protos = PROTOS[v.proto] ? Object.entries(PROTOS) : [ ...Object.entries(PROTOS), [ v.proto, v.proto ] ];
+
+	return html`<${kit.Dialog} open=${true} title=${row ? _('Port forward') : _('New port forward')} confirm=${_('Save')}
+		disabled=${Object.keys(errs).length > 0} onConfirm=${save} onClose=${onClose}>
+		<div class="fwd-form">
+			${field('name', _('Name'), input('name'))}
+			<div class="cols">
+				${field('proto', _('Protocol'), (a) => html`<select ...${a} value=${v.proto} onChange=${set('proto')}>
+					${protos.map(([ x, l ]) => html`<option value=${x} selected=${x == v.proto}>${l}</option>`)}
+				</select>`)}
+				${field('ext', _('External port'), input('ext', { placeholder: '8080' }), _('A port or a range «from-to»'))}
+			</div>
+			${field('dev', _('Device'), (a) => html`<select ...${a} value=${v.dev} onChange=${(ev) => { set('dev')(ev); touch('dev')(); }}>
+				<option value="" disabled selected=${v.dev == ''}>${_('Choose a device')}</option>
+				${choices.map((d) => html`<option value=${d.ip} selected=${d.ip == v.dev}>${d.name ? '%s (%s)'.format(d.name, d.ip) : d.ip}</option>`)}
+				<option value=${OTHER} selected=${v.dev == OTHER}>${_('Other IP address…')}</option>
+			</select>`)}
+			${(v.dev == OTHER) ? field('ip', _('IP address'), input('ip', { inputmode: 'decimal', placeholder: '192.168.1.10' })) : ''}
+			${field('port', _('Internal port'), input('port'), _('Empty — the same as external'))}
+			${row ? html`<div><button type="button" class="btn del" data-act="fwd-delete" onClick=${del}>${_('Delete')}</button></div>` : ''}
+		</div>
+	</${kit.Dialog}>`;
+}
+
+// Пробросы из Туннеля: строка — имя, протокол, внешний порт → устройство:внутренний порт и переключатель.
+// Выключение — enabled '0', включение — опция снимается (или '1', если так было в настройках): туда и обратно —
+// ноль изменений. Нажатие на строку — окно правки.
+function FwdCard({ devices }) {
+	const { html, useState } = app.lib;
+	const [ edit, setEdit ] = useState(null);   // { row, n } открытого окна: row null — новый проброс
+	const rows = common.forwardRows(devices);
+	const open = (row) => setEdit((e) => ({ row, n: (e?.n || 0) + 1 }));
+	const toggle = (sid, on) => app.set('firewall', sid, 'enabled',
+		on ? ((uci.state?.values?.firewall?.[sid]?.enabled == '1') ? '1' : null) : '0');
+	const aside = html`<button type="button" class="btn" data-act="fwd-add" onClick=${() => open(null)}><${kit.Icon} name="plus" />${_('Add')}</button>`;
+	return html`<${kit.Card} cls="w3 fwd" title=${_('Port forwards from the tunnel')} aside=${aside}>
+		${rows.length ? html`<ul class="fwd-rows">${rows.map((r) => html`<li data-sid=${r.sid} class=${r.on ? '' : 'off'}>
+			<button type="button" class="fwd-b" data-act="fwd-edit" onClick=${() => open(r)}>
+				<b>${r.name || '—'}${app.pending('firewall', r.sid) ? html` <${kit.Dot} level="warn" label=${_('changed, not applied yet')} />` : ''}</b>
+				<span class="num">${'%s %s → %s:%s'.format(PROTOS[r.proto] || r.proto, r.ext, r.who || '?', r.port)}</span>
+			</button>
+			<${kit.Switch} label=${_('Enabled')} opt=${'firewall.' + r.sid + '.enabled'} checked=${r.on} onChange=${(on) => toggle(r.sid, on)} />
+		</li>`)}</ul>` : html`<${kit.Empty} text=${_('No port forwards from the tunnel yet.')} />`}
+		<div><${kit.Go} href=${L.url('admin/network/firewall/forwards')} label=${_('More options: Network → Firewall')} /></div>
+		${edit ? html`<${FwdDialog} key=${edit.n} row=${edit.row} devices=${devices} onClose=${() => setEdit(null)} />` : ''}
 	</${kit.Card}>`;
 }
 
@@ -78,7 +182,7 @@ function Page({ store, view, devices }) {
 		<div class="grid g2">
 			<${NatCard} st=${st} />
 			<${UpnpCard} st=${st} devices=${devices} />
-			<${FwdCard} />
+			<${FwdCard} devices=${devices} />
 		</div>
 		<${kit.ChangesBar} view=${view} />
 		<${kit.Toast} />`;

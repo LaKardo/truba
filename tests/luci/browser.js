@@ -669,6 +669,130 @@ async function waitApply(page) {
 	result(await applied(t0, (st) => st.upnp?.enabled === false) && /No active mappings\./.test(upnpText),
 		'«Входящие»: UPnP выкл — «Применить» дошло до службы; без отображений — «No active mappings.»', upnpText.replace(/\s+/g, ' ').slice(0, 120));
 
+	// Пробросы портов из Туннеля (spec §5.6): правка в окне на вкладке, «Применить» — панелью изменений; итог —
+	// секции firewall у ubus. Устройство стенда 192.168.1.50 — в зоне lan.
+	const fwds = async () => Object.values((await ubus('uci', 'get', { config: 'firewall', type: 'redirect' })).values || {})
+		.filter((s) => s.src == 'truba');
+	const fwdRows = () => page.evaluate(() => [ ...document.querySelector('.truba-root').shadowRoot.querySelectorAll('.fwd li[data-sid]') ]
+		.map((li) => ({ sid: li.dataset.sid, text: li.innerText.replace(/\s+/g, ' '), dot: !!li.querySelector('.dot.warn'),
+			on: li.querySelector('input[type="checkbox"]')?.checked })));
+	const dlg = () => page.evaluate(() => {
+		const d = document.querySelector('.truba-root').shadowRoot.querySelector('dialog.dlg[open]');
+		return d ? { title: d.querySelector('h3')?.textContent, errs: [ ...d.querySelectorAll('.err-text') ].map((e) => e.textContent),
+			save: d.querySelector('[data-act="confirm"]')?.disabled, del: !!d.querySelector('[data-act="fwd-delete"]') } : null;
+	});
+	const changesBar = () => page.evaluate(() => document.querySelector('.truba-root').shadowRoot.querySelector('.changes')?.innerText.replace(/\s+/g, ' ') || '');
+	// Поле окна: выделить и набрать заново, затем Tab — ошибка поля видна после ухода из него.
+	const fill = async (f, v) => {
+		await (await el(`dialog.dlg[open] [data-f="${f}"]`))?.evaluate((e) => { e.focus(); e.select(); });
+		await page.keyboard.type(v);
+		await page.keyboard.press('Tab');
+		await sleep(100);
+	};
+	const pick = async (f, v) => {
+		await (await el(`dialog.dlg[open] select[data-f="${f}"]`))?.select(v);
+		await sleep(100);
+	};
+	const openDlg = async (sel) => {
+		await tap(sel);
+		await page.waitForFunction(() => document.querySelector('.truba-root').shadowRoot.querySelector('dialog.dlg[open]'), { timeout: 3000 }).catch(() => {});
+	};
+	const applyFwd = async () => {
+		await tap('.changes [data-act="apply"]');
+		await waitApply(page);
+		await openInbound();
+	};
+
+	// (a) Новый проброс: строка с точкой «изменено», одно изменение; «Применить» — секция redirect зоны Туннеля.
+	await openInbound();
+	await openDlg('[data-act="fwd-add"]');
+	await fill('name', 'Test web');
+	await pick('proto', 'tcp');
+	await fill('ext', '8080');
+	await pick('dev', '192.168.1.50');
+	await fill('port', '80');
+	const dA = await dlg();
+	await tap('dialog.dlg[open] [data-act="confirm"]');
+	await sleep(300);
+	const rowsA = await fwdRows(), barA = await changesBar();
+	await applyFwd();
+	const fA = (await fwds()).find((s) => s.name == 'Test web') || {};
+	result(dA?.title == 'New port forward' && dA.save === false && !dA.del && rowsA.some((r) => /Test web/.test(r.text) && r.dot) && /Unapplied changes: 1/.test(barA) &&
+		fA.target == 'DNAT' && fA.src_dport == '8080' && fA.dest_ip == '192.168.1.50' && fA.dest_port == '80' && fA.dest == 'lan' && fA.proto == 'tcp',
+		'«Входящие»: новый проброс — строка с точкой, «Применить» пишет секцию firewall', JSON.stringify({ dA, rowsA, barA, fA }));
+	const sidA = fA['.name'];
+
+	// (b) Внешний порт вне 1–65535 — ошибка у поля, «Save» недоступна.
+	await openDlg('[data-act="fwd-add"]');
+	await fill('ext', '70000');
+	const dB = await dlg();
+	result(dB?.errs.some((e) => /1–65535/.test(e)) && dB.save === true, '«Входящие»: внешний порт вне 1–65535 — ошибка, «Save» недоступна', JSON.stringify(dB));
+	// (c) Диапазон, который пересекает сохранённый 8080/tcp: при tcp+udp — ошибка, при udp — нет. «Отмена» — без изменений.
+	await fill('ext', '8000-8100');
+	await pick('dev', '192.168.1.50');
+	const dC1 = await dlg();
+	await pick('proto', 'udp');
+	const dC2 = await dlg();
+	await tap('dialog.dlg[open] [data-act="cancel"]');
+	await sleep(200);
+	const barC = await changesBar();
+	result(dC1?.errs.some((e) => /already forwarded/.test(e)) && dC1.save === true && dC2 && !dC2.errs.length && dC2.save === false && !barC,
+		'«Входящие»: пересечение внешних портов при общем протоколе — ошибка; другой протокол — нет; «Отмена» — без изменений',
+		JSON.stringify({ dC1, dC2, barC }));
+
+	// (d) Переключатель строки: выкл — enabled '0'; снова вкл — опции нет (как до выключения).
+	await tap(`.fwd li[data-sid="${sidA}"] input[type="checkbox"]`);
+	await applyFwd();
+	const offA = (await fwds()).find((s) => s['.name'] == sidA)?.enabled;
+	const rowOff = (await fwdRows()).find((r) => r.sid == sidA);
+	await tap(`.fwd li[data-sid="${sidA}"] input[type="checkbox"]`);
+	await applyFwd();
+	const onA = (await fwds()).find((s) => s['.name'] == sidA) || {};
+	result(offA === '0' && rowOff?.on === false && !('enabled' in onA) && onA.dest_port == '80', '«Входящие»: переключатель проброса — enabled 0, обратно — без опции',
+		JSON.stringify({ offA, rowOff, onA }));
+
+	// (e) Опции, заданные в «Межсетевом экране», правка на вкладке не трогает.
+	await ubus('uci', 'set', { config: 'firewall', section: sidA, values: { reflection: '0', src_ip: '198.51.100.0/24' } });
+	await ubus('uci', 'commit', { config: 'firewall' });
+	await openInbound();
+	await openDlg(`.fwd li[data-sid="${sidA}"] [data-act="fwd-edit"]`);
+	await fill('port', '8081');
+	const dE = await dlg();
+	await tap('dialog.dlg[open] [data-act="confirm"]');
+	await applyFwd();
+	const fE = (await fwds()).find((s) => s['.name'] == sidA) || {};
+	result(dE?.title == 'Port forward' && dE.del && fE.dest_port == '8081' && fE.reflection == '0' && fE.src_ip == '198.51.100.0/24' && fE.dest == 'lan' &&
+		fE.proto == 'tcp' && fE.name == 'Test web' && fE.target == 'DNAT', '«Входящие»: правка проброса — чужие опции на месте', JSON.stringify({ dE, fE }));
+
+	// (f) IP вручную вне известных сетей — секция без зоны назначения; затем «Delete» в окне — секции нет.
+	await openDlg('[data-act="fwd-add"]');
+	await fill('ext', '25565');
+	await pick('dev', 'other');
+	await fill('ip', '10.9.9.9');
+	await tap('dialog.dlg[open] [data-act="confirm"]');
+	await applyFwd();
+	const fF = (await fwds()).find((s) => s.src_dport == '25565') || {};
+	await openDlg(`.fwd li[data-sid="${fF['.name']}"] [data-act="fwd-edit"]`);
+	await tap('dialog.dlg[open] [data-act="fwd-delete"]');
+	await applyFwd();
+	const goneF = !(await fwds()).some((s) => s.src_dport == '25565');
+	result(fF.dest_ip == '10.9.9.9' && !('dest' in fF) && fF.proto == 'tcp udp' && goneF, '«Входящие»: IP вручную — без зоны назначения; «Delete» — секции нет',
+		JSON.stringify({ fF, goneF }));
+
+	// (g) «Delete» проброса из (a).
+	await openDlg(`.fwd li[data-sid="${sidA}"] [data-act="fwd-edit"]`);
+	await tap('dialog.dlg[open] [data-act="fwd-delete"]');
+	await applyFwd();
+	const left = await fwds(), rowsG = await fwdRows();
+	// Ссылка на «Межсетевой экран» — своей строкой под «нет пробросов», а не вплотную к нему.
+	const goBelow = await page.evaluate(() => {
+		const c = document.querySelector('.truba-root').shadowRoot.querySelector('.card.fwd');
+		const e = c?.querySelector('.empty')?.getBoundingClientRect(), g = c?.querySelector('a.go')?.getBoundingClientRect();
+		return (e && g) ? g.top >= e.bottom - 1 : false;
+	});
+	result(!left.some((s) => s['.name'] == sidA) && !rowsG.length && /No port forwards from the tunnel yet/.test(await pageText(page)) && goBelow,
+		'«Входящие»: «Delete» — секции нет, на карточке — «нет пробросов», ссылка — своей строкой', JSON.stringify({ left, rowsG, goBelow }));
+
 	// «Туннель» (spec §5.4): состояние, подключение к Трубе, контроль. На стенде awg0 — dummy с пиром
 	// 203.0.113.10:51820 (stand.sh).
 	await page.goto(url('tunnel'), { waitUntil: 'networkidle2' });
@@ -1144,6 +1268,26 @@ async function waitApply(page) {
 	t0 = await time();
 	await setUp('direct_upstream', prevUp.direct_upstream);
 	await applied(t0, () => true);
+	// (h) «Входящие» на телефоне: строка проброса с длинным именем и окно правки — без горизонтальной прокрутки.
+	const longFwd = (await ubus('uci', 'add', { config: 'firewall', type: 'redirect', values: { name: 'A very long port forward name for the home media server',
+		src: 'truba', target: 'DNAT', proto: 'tcp udp', src_dport: '30000-30100', dest_ip: '192.168.1.50', dest_port: '30000' } })).section;
+	await ubus('uci', 'commit', { config: 'firewall' });
+	await openInbound();
+	const wideOf = () => page.evaluate(() => {
+		const r = document.querySelector('.truba-root').shadowRoot, tr = r.querySelector('.tr'), d = r.querySelector('dialog.dlg[open]');
+		return { doc: document.documentElement.scrollWidth, win: window.innerWidth, tr: tr.scrollWidth - tr.clientWidth,
+			rows: r.querySelectorAll('.fwd li[data-sid]').length, dlg: d ? Math.round(d.getBoundingClientRect().right) : null, dlgX: d ? d.scrollWidth - d.clientWidth : null };
+	});
+	const in375 = await wideOf();
+	await page.screenshot({ path: `${out}/inbound-375.png`, fullPage: true });
+	await openDlg(`.fwd li[data-sid="${longFwd}"] [data-act="fwd-edit"]`);
+	const dlg375 = await wideOf();
+	await page.screenshot({ path: `${out}/inbound-375-dialog.png` });
+	await page.keyboard.press('Escape');
+	result(in375.rows == 1 && in375.doc <= in375.win && in375.tr <= 0 && dlg375.dlg != null && dlg375.dlg <= dlg375.win && dlg375.dlgX <= 0,
+		'«Входящие» 375: строка проброса и окно правки — без горизонтальной прокрутки', JSON.stringify({ in375, dlg375 }));
+	await ubus('uci', 'delete', { config: 'firewall', section: longFwd });
+	await ubus('uci', 'commit', { config: 'firewall' });
 	await page.setViewport({ width: 1280, height: 900 });
 
 	// Длинное неверное значение настройки попадает в предупреждение как есть — и на телефоне не должно

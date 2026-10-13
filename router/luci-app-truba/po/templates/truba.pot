@@ -802,11 +802,71 @@ msgid "No active mappings."
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/inbound.js
+msgid "Choose a device"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/inbound.js
+msgid "Port forward"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/inbound.js
+msgid "New port forward"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/inbound.js
+msgid "Save"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/inbound.js
+msgid "Protocol"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/inbound.js
+msgid "External port"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/inbound.js
+msgid "A port or a range «from-to»"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/inbound.js
+msgid "Device"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/inbound.js
+msgid "Other IP address…"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/inbound.js
+msgid "IP address"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/inbound.js
+msgid "Internal port"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/inbound.js
+msgid "Empty — the same as external"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/inbound.js
+msgid "Delete"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/inbound.js
 msgid "Port forwards from the tunnel"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/inbound.js
-msgid "Edit port forwards"
+msgid "Enabled"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/inbound.js
+msgid "No port forwards from the tunnel yet."
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/inbound.js
+msgid "More options: Network → Firewall"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/inbound.js
@@ -1519,10 +1579,6 @@ msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/tunnel.js
 msgid "Address"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/tunnel.js
-msgid "Protocol"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/tunnel.js
