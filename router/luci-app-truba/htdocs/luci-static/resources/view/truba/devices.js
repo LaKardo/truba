@@ -101,7 +101,7 @@ function AddMac({ onDone }) {
 		<label><span class="mu">${_('MAC address')}</span>
 			<input name="mac" autocomplete="off" value=${mac} onInput=${(ev) => setMac(ev.target.value)} /></label>
 		${(mac.trim() && !m) ? html`<div class="err-text">${_('Not a MAC address')}</div>` : ''}
-		<label><span class="mu">${_('Name')}</span>
+		<label><span class="mu">${_('Name', 'truba')}</span>
 			<input name="name" autocomplete="off" value=${name} onInput=${(ev) => setName(ev.target.value)} /></label>
 		<${kit.Segmented} label=${_('Policy')} value=${pol} onChange=${setPol}
 			items=${[ [ 'tunnel', _('All via tunnel') ], [ 'direct', _('All direct') ] ]} />
@@ -139,13 +139,13 @@ function List({ devices, now, sel, onSel }) {
 		${adding ? html`<${AddMac} onDone=${done} />` : ''}
 		${bad.map((s) => html`<div class="badmac">
 			<span>${_('A device with an invalid MAC address «%s» is ignored.').format(s.mac)}</span>
-			<button type="button" class="btn" data-act="remove-bad" onClick=${() => app.remove('truba', s['.name'])}>${_('Remove')}</button>
+			<button type="button" class="btn" data-act="remove-bad" onClick=${() => app.remove('truba', s['.name'])}>${_('Remove', 'truba')}</button>
 		</div>`)}
 		<div class="toolbar">
 			<input type="search" placeholder=${_('Name, IP or MAC')} value=${q} onInput=${(ev) => setQ(ev.target.value)} />
 			<${kit.Chips} label=${_('Filter')} value=${f} onChange=${setF} items=${[
 				[ 'all', _('All'), devices.length ],
-				[ 'active', _('Active'), devices.filter(active).length ],
+				[ 'active', _('Active', 'truba'), devices.filter(active).length ],
 				[ 'policy', _('With a policy'), devices.filter(ruled).length ]
 			]} />
 		</div>
@@ -222,7 +222,7 @@ function Panel({ d, now, onClose }) {
 			<div class="mu">${d.mac ? _('«All via tunnel» is recommended for game consoles: then all their traffic gets the Truba IP and full cone NAT.')
 				: _('The policy is tied to the MAC address; mesh VPN nodes have none.')}</div>
 		</div>
-		${sid ? html`<label class="rename"><span class="mu">${_('Name')}</span>
+		${sid ? html`<label class="rename"><span class="mu">${_('Name', 'truba')}</span>
 			<input name="devname" autocomplete="off" value=${uci.get('truba', sid, 'name') || ''}
 				onChange=${(ev) => app.set('truba', sid, 'name', ev.target.value.trim() || null)} /></label>` : ''}
 		<h4 class="sub">${_('Last hour')}</h4>

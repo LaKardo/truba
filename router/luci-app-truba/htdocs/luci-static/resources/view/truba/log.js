@@ -72,7 +72,7 @@ function Page({ first }) {
 	const toggle = (s) => setSources((cur) => cur.includes(s) ? cur.filter((x) => x != s) : cur.concat([ s ]));
 	return html`
 		<div class="head">
-			<h2>${_('Log')}</h2>
+			<h2>${_('Log', 'truba')}</h2>
 			<span class="mu">${_('Truba, its watchdog, mosdns and the tunnel interface: the last %d lines, newest first.').format(LINES)}</span>
 			${offline ? html`<${kit.Badge} level="err"><${kit.Icon} name="wifi-off" />${_('No connection to the router')}</${kit.Badge}>` : ''}
 		</div>
@@ -84,7 +84,7 @@ function Page({ first }) {
 					<${kit.Chips} label=${_('Sources')} value=${sources} onChange=${toggle}
 						items=${SOURCES.map((s) => [ s, s, lines.filter((l) => l.source == s).length ])} />
 					<div class="end">
-						<${kit.Switch} label=${_('Follow')} checked=${follow} onChange=${setFollow} />
+						<${kit.Switch} label=${_('Follow', 'truba')} checked=${follow} onChange=${setFollow} />
 						<button type="button" class="btn" data-act="download" disabled=${!shown.length} onClick=${() => download(shown)}>
 							<${kit.Icon} name="download" />${_('Download')}</button>
 					</div>

@@ -7,8 +7,8 @@
 'require truba.ui.kit as kit';
 'require truba.ui.chart as chart';
 
-// «Туннель» (spec §5.4): состояние Туннеля; подключение к Трубе — импорт router.conf, «Проверка Туннеля»,
-// параметры AmneziaWG; что делать, когда Туннель не отвечает. Интерфейс — в стандартной конфигурации
+// «Туннель» (spec §5.4): состояние Туннеля; подключение к Трубе и «Проверка Туннеля»; что делать, когда Туннель
+// не отвечает; ключи и параметры AmneziaWG — импорт router.conf и поля. Интерфейс — в стандартной конфигурации
 // network, контроль и Аварийная блокировка — в truba. Страница — компоненты Preact в Shadow DOM (ADR 0017).
 
 const POLL = 5;   // состояние — раз в 5 с
@@ -116,42 +116,42 @@ function TestResult({ r }) {
 
 const label = (k) => k[0].toUpperCase() + k.slice(1);   // jmin → Jmin, s1 → S1
 
-// Параметры AmneziaWG с прежними проверками; ключ защиты заголовков и флаги AWG 3.1 приходят с router.conf —
-// здесь они видны, потому что от них зависят проверки S1–S4 и добавки к пакетам.
+// Параметры AmneziaWG с прежними проверками — группами, как в router.conf: мусорные пакеты, префиксы пакетов,
+// заголовки, пакеты-приманки, добавки AmneziaWG 3.1. У группы — подпись слева и что о ней важно: совпадать с
+// Трубой или нет. Ключ защиты заголовков и флаги AWG 3.1 приходят с router.conf — здесь они видны, потому что
+// от них зависят проверки S1–S4 и добавки к пакетам.
 function AwgParams({ iface }) {
 	const { html } = app.lib;
-	const field = (k, hint, cls) => html`<div class=${cls || ''}><${kit.Field} config="network" sec=${iface} name=${'awg_' + k}
-		label=${(k == 'content_padding_addition') ? _('Content padding') : label(k)} hint=${hint}
-		check=${(v) => awg.paramError(iface, k, v)} /></div>`;
+	const field = (k) => html`<${kit.Field} config="network" sec=${iface} name=${'awg_' + k}
+		label=${(k == 'content_padding_addition') ? _('Content padding') : label(k)} check=${(v) => awg.paramError(iface, k, v)} />`;
 	const flag = (o) => (uci.get('network', iface, o) == '1') ? _('on') : _('off');
+	const group = (title, hint, body, cls) => html`<div class="awg-g">
+		<div class="awg-l"><b>${title}</b><span class="mu">${hint}</span></div>
+		<div class=${'awg-f' + (cls ? ' ' + cls : '')}>${body}</div>
+	</div>`;
+	const num = (ks) => awg.NUM_PARAMS.filter((k) => ks.test(k)).map(field);
 	return html`<${kit.Fold} title=${_('AmneziaWG parameters')}>
-		<div class="fields">${awg.NUM_PARAMS.map((k) => field(k))}</div>
-		<p class="mu">${_('H1–H4: a number or a range «from-to»; must match the Truba.')}</p>
-		<div class="fields">
-			${awg.CPS_PARAMS.map((k) => field(k, (k == 'i1') ? _('Decoy packets before the handshake (CPS format); may differ from the Truba.') : null, 'wide'))}
-			${field('content_padding_addition', _('AmneziaWG 3.1: random bytes added to data packets instead of padding to a multiple of 16, so packet lengths do not share one remainder; a range «from-to». May differ from the Truba; comes with router.conf.'), 'wide')}
-		</div>
-		<${kit.KV} rows=${[
-			[ _('Header protection key'), uci.get('network', iface, 'awg_header_protection_key') ? _('set') : _('not set') ],
-			[ _('Random trailers'), flag('awg_random_trailers') ],
-			[ _('Disable cookies'), flag('awg_disable_cookies') ]
-		]} />
+		${group(_('Junk packets'), _('Jc — how many, Jmin–Jmax — their size in bytes; may differ from the Truba.'), num(/^j/), 'n3')}
+		${group(_('Packet prefixes'), _('Random bytes before packets of each type; must match the Truba.'), num(/^s/))}
+		${group(_('Headers'), _('A number or a range «from-to»; must match the Truba.'), num(/^h/))}
+		${group(_('Decoy packets'), _('Sent before the handshake (CPS format); may differ from the Truba.'), awg.CPS_PARAMS.map(field), 'txt')}
+		${group('AmneziaWG 3.1', _('Come with router.conf.'), html`
+			<div>${field('content_padding_addition')}
+				<div class="mu">${_('Random bytes added to data packets instead of padding to a multiple of 16, so packet lengths do not share one remainder; a range «from-to». May differ from the Truba.')}</div></div>
+			<${kit.KV} rows=${[
+				[ _('Header protection key'), uci.get('network', iface, 'awg_header_protection_key') ? _('set') : _('not set') ],
+				[ _('Random trailers'), flag('awg_random_trailers') ],
+				[ _('Disable cookies'), flag('awg_disable_cookies') ]
+			]} />`, 'txt')}
 		<${kit.Go} href=${L.url('admin/network/network')} label=${_('Other interface settings')} />
 	</${kit.Fold}>`;
 }
 
-// Адрес и порт Трубы, протокол, MTU и Keepalive, «Проверить Туннель», импорт router.conf и параметры AWG.
-// Импорт меняет UCI браузера, а применяет его панель изменений; после него карточка монтируется заново
-// (onImport меняет её key), и поля читают новые значения.
-function ConnCard({ iface, onImport }) {
+// Импорт router.conf: меняет UCI браузера, а применяет его панель изменений. После него карточки монтируются
+// заново (onImport меняет их key), и поля читают новые значения.
+function Import({ iface, onImport }) {
 	const { html, useState } = app.lib;
-	const [ err, setErr ] = useState(null), [ tt, setTt ] = useState(null), [ busy, setBusy ] = useState(false);
-	const ok = awg.configured(iface), peer = awg.peerSection(iface);
-
-	const run = () => {
-		setBusy(true);
-		common.runTunnelTest().then(setTt, (e) => setTt({ error: e.message })).finally(() => setBusy(false));
-	};
+	const [ err, setErr ] = useState(null);
 	const imp = (text) => {
 		let conf;
 		try {
@@ -166,14 +166,26 @@ function ConnCard({ iface, onImport }) {
 		app.toast(_('router.conf imported: apply the changes to use it.'));
 		onImport();
 	};
-
-	const zone = html`<${kit.DropZone} label=${_('Drop router.conf here or choose the file')} accept=".conf,text/plain"
+	return html`<${kit.DropZone} label=${_('Drop router.conf here or choose the file')} accept=".conf,text/plain"
 		placeholder=${_('…or paste its text')} error=${err} onText=${imp} />`;
+}
+
+// Адрес и порт Трубы, протокол, MTU и Keepalive, «Проверить Туннель». Не настроен — что сделать и импорт здесь же:
+// карточки ключей и параметров тогда нет.
+function ConnCard({ iface, onImport }) {
+	const { html, useState } = app.lib;
+	const [ tt, setTt ] = useState(null), [ busy, setBusy ] = useState(false);
+	const ok = awg.configured(iface), peer = awg.peerSection(iface);
+
+	const run = () => {
+		setBusy(true);
+		common.runTunnelTest().then(setTt, (e) => setTt({ error: e.message })).finally(() => setBusy(false));
+	};
 	const aside = html`<button type="button" class="btn" data-act="tunnel-test" disabled=${!ok || busy} onClick=${run}>${_('Check the tunnel')}</button>`;
 	if (!ok)
 		return html`<${kit.Card} cls="peer" title=${_('Connection to the Truba')} aside=${aside}>
 			<p class="note"><b>${_('The tunnel is not configured yet. Run install-vps.sh on the VPS and import the resulting router.conf.')}</b></p>
-			${zone}
+			<${Import} iface=${iface} onImport=${onImport} />
 		</${kit.Card}>`;
 
 	const host = peer ? uci.get('network', peer, 'endpoint_host') : null, port = peer ? uci.get('network', peer, 'endpoint_port') : null;
@@ -184,7 +196,7 @@ function ConnCard({ iface, onImport }) {
 	return html`<${kit.Card} cls="peer" title=${_('Connection to the Truba')} aside=${aside}>
 		<${kit.KV} rows=${rows} />
 		<div class="cols conn-f">
-			<${kit.Field} config="network" sec=${iface} name="mtu" label=${_('MTU')} check=${awg.mtuError} placeholder=${MTU_HINT}
+			<${kit.Field} config="network" sec=${iface} name="mtu" label=${_('MTU', 'truba')} check=${awg.mtuError} placeholder=${MTU_HINT}
 				hint=${_('install-vps.sh picks it for the VPS network. If full-size packets do not get through (see State above), lower it on both sides.')} />
 			${peer ? html`<${kit.Field} config="network" sid=${peer} name="persistent_keepalive" label=${_('Keepalive, s')}
 				check=${(v) => awg.rangeError(v, 65535)} placeholder=""
@@ -192,8 +204,16 @@ function ConnCard({ iface, onImport }) {
 		</div>
 		${busy ? html`<${kit.Busy} text=${_('Checking… about 5 seconds')} />` : tt ? html`<${TestResult} r=${tt} />`
 			: html`<p class="mu tt-hint">${_('Pings the Truba inside the tunnel with packets of three sizes, up to the whole tunnel MTU. Shows loss of large packets that a normal ping does not see: with it pages open slowly and downloads stall.')}</p>`}
+	</${kit.Card}>`;
+}
+
+// Ключи и параметры настроенного Туннеля: импорт нового router.conf и поля интерфейса — своя карточка во всю
+// ширину, чтобы раскрытые параметры не растягивали соседние карточки.
+function AwgCard({ iface, onImport }) {
+	const { html } = app.lib;
+	return html`<${kit.Card} cls="w3 awg" title=${_('AmneziaWG keys and parameters')}>
 		<p class="mu">${_('Keys and parameters come from router.conf made by install-vps.sh on the VPS. To replace them, import a new file.')}</p>
-		${zone}
+		<${Import} iface=${iface} onImport=${onImport} />
 		<${AwgParams} iface=${iface} />
 	</${kit.Card}>`;
 }
@@ -229,6 +249,7 @@ function Page({ store, view, iface }) {
 	const { status, offline } = app.use(store);
 	app.use(app.changes);   // карточки читают UCI браузера — перерисовка после app.set
 	const [ gen, setGen ] = useState(0);
+	const imported = () => setGen((g) => g + 1);
 	return html`
 		<div class="head">
 			<h2>${_('Tunnel')}</h2>
@@ -237,8 +258,9 @@ function Page({ store, view, iface }) {
 		</div>
 		<div class="grid g2">
 			<${StateCard} st=${status || {}} iface=${iface} />
-			<${ConnCard} key=${gen} iface=${iface} onImport=${() => setGen((g) => g + 1)} />
+			<${ConnCard} key=${'c' + gen} iface=${iface} onImport=${imported} />
 			<${WatchdogCard} />
+			${awg.configured(iface) ? html`<${AwgCard} key=${'a' + gen} iface=${iface} onImport=${imported} />` : ''}
 		</div>
 		<${kit.ChangesBar} view=${view} />
 		<${kit.Toast} />`;

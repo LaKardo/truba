@@ -296,7 +296,7 @@ function UpstreamList({ sec, name, label }) {
 				<span class="ups-a"><code>${u}</code>${common.upstreamError(u)
 					? html`<em class="err"><${Dot} level="err" />${_('invalid address, not used')}</em>` : ''}</span>
 				${!common.upstreamError(u) && !base.includes(u) ? html`<${Dot} level="warn" label=${_('changed, not applied yet')} />` : ''}
-				<button type="button" class="btn ic" data-act="remove-upstream" disabled=${off} title=${off ? lone : _('Remove')}
+				<button type="button" class="btn ic" data-act="remove-upstream" disabled=${off} title=${off ? lone : _('Remove', 'truba')}
 					aria-label=${off ? '%s — %s'.format(_('Remove %s').format(u), lone) : _('Remove %s').format(u)}
 					onClick=${(ev) => remove(i, ev)}><${Icon} name="x" /></button>
 			</li>`;
@@ -413,7 +413,7 @@ function CheckResult({ r, full }) {
 			<h4 class="sub">${_('geosite categories containing the domain')}</h4>
 			${hits.length ? html`<div class="hits">${hits.map((h) => html`<div class="hit">
 				<b>${h.tag}${(r.decisive?.tag == h.tag) ? ' ✓' : ''}</b><code>${h.entry}</code><${ActionTag} action=${h.action} />
-			</div>`)}</div>` : html`<${Empty} text=${_('none')} />`}
+			</div>`)}</div>` : html`<${Empty} text=${_('none', 'truba')} />`}
 			${r.decisive ? html`<div class="mu">${_('Decisive category (the narrowest one with an explicit action): %s').format(r.decisive.tag)}</div>` : ''}` : ''}
 		${(full && ips.length) ? html`<${Fold} title=${_('Addresses (%d)').format(ips.length)}>
 			${ips.map((v) => html`<div class="hit"><b>${v.ip}</b><span class="mu">${(v.geoip || []).join(', ') || '—'}</span>
@@ -487,7 +487,7 @@ function ChangesBar({ view }) {
 	return html`<div class="changes" role="status" ref=${ref}>
 		<${Icon} name="pencil" />
 		<span>${_('Unapplied changes: %d').format(n)}${bad ? html` · <button type="button" class="link" data-act="show-bad" onClick=${showBad}>${_('Fix the highlighted fields')}</button>` : ''}</span>
-		<button type="button" class="btn" data-act="reset" disabled=${busy.current} onClick=${() => run(() => view.handleReset())}>${_('Reset')}</button>
+		<button type="button" class="btn" data-act="reset" disabled=${busy.current} onClick=${() => run(() => view.handleReset())}>${_('Reset', 'truba')}</button>
 		<button type="button" class="btn p" data-act="apply" disabled=${!!bad || busy.current}
 			onClick=${() => run(() => view.handleSaveApply(null, '0'))}>${_('Apply')}</button>
 		${err ? html`<span class="err-text" role="alert">${_('The changes were not saved: %s').format(err)}</span>` : ''}

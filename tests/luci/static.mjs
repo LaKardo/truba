@@ -24,7 +24,10 @@ const rel = (f) => relative(root, f).split(sep).join('/');
 })(join(root, 'htdocs'));
 
 let fails = 0;
+// Строки перевода: ключ — «контекст \u0004 строка», как в gettext; без контекста — сама строка.
 const strings = new Map();
+const key = (ctx, s) => (ctx != null ? ctx + '\u0004' : '') + s;
+const split = (k) => k.includes('\u0004') ? k.split('\u0004') : [ null, k ];
 
 for (const f of files) {
 	const src = readFileSync(f, 'utf8');
@@ -36,10 +39,16 @@ for (const f of files) {
 		fails++;
 		continue;
 	}
-	const re = /_\((['"])((?:\\.|(?!\1).)*)\1\)/g;
+	// _('строка') и _('строка', 'контекст'). Контекст — у строк, которые есть и в каталогах LuCI: браузер получает
+	// строки всех каталогов разом, и без контекста у такой строки был бы чужой перевод (browser.js сверяет).
+	const re = /_\((['"])((?:\\.|(?!\1).)*)\1(?:,\s*(['"])((?:\\.|(?!\3).)*)\3)?\)/g;
 	let m;
 	while ((m = re.exec(src))) {
-		const s = m[2].replace(/\\'/g, "'").replace(/\\"/g, '"');
+		const s = key(m[4], m[2].replace(/\\'/g, "'").replace(/\\"/g, '"'));
+		if (m[4] != null && m[4] !== 'truba') {
+			console.log(`FAIL  контекст перевода не «truba» (${rel(f)}): ${m[4]}`);
+			fails++;
+		}
 		if (!strings.has(s)) strings.set(s, rel(f));
 	}
 }
@@ -52,7 +61,10 @@ const esc = (s) => s.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, 
 
 if (process.argv.includes('--pot')) {
 	console.log('msgid ""\nmsgstr "Content-Type: text/plain; charset=UTF-8"\n');
-	for (const [s, f] of strings) console.log(`#: ${f}\nmsgid "${esc(s)}"\nmsgstr ""\n`);
+	for (const [k, f] of strings) {
+		const [ ctx, s ] = split(k);
+		console.log(`#: ${f}\n${ctx != null ? `msgctxt "${esc(ctx)}"\n` : ''}msgid "${esc(s)}"\nmsgstr ""\n`);
+	}
 	process.exit(0);
 }
 
@@ -694,17 +706,20 @@ const translated = new Map();
 const blocks = po.split(/\n\s*\n/);
 for (const b of blocks) {
 	const id = b.match(/^msgid "((?:\\.|[^"])*)"/m);
+	const ctx = b.match(/^msgctxt "((?:\\.|[^"])*)"/m);
 	const str = b.match(/^msgstr "((?:\\.|[^"])*)"/m);
-	if (id && str && id[1]) translated.set(id[1].replace(/\\"/g, '"').replace(/\\\\/g, '\\'), str[1]);
+	const unq = (s) => s.replace(/\\"/g, '"').replace(/\\\\/g, '\\');
+	if (id && str && id[1]) translated.set(key(ctx && unq(ctx[1]), unq(id[1])), str[1]);
 }
+const shown = (k) => split(k).filter((x) => x != null).join(' | ');
 for (const [s, f] of strings) {
 	if (!translated.has(s) || !translated.get(s)) {
-		console.log(`FAIL  нет перевода (${f}): ${s}`);
+		console.log(`FAIL  нет перевода (${f}): ${shown(s)}`);
 		fails++;
 	}
 }
 for (const s of translated.keys())
-	if (!strings.has(s)) console.log(`warn  лишняя строка в po: ${s}`);
+	if (!strings.has(s)) console.log(`warn  лишняя строка в po: ${shown(s)}`);
 
 // ---- Отложенные мелочи этапа 1 (этап 7) ----
 

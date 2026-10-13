@@ -82,10 +82,10 @@ function Zones() {
 function ModeCard() {
 	const { html } = app.lib;
 	const mode = common.get('main', 'mode');
-	return html`<${kit.Card} cls="mode" title=${_('Mode')}
+	return html`<${kit.Card} cls="mode" title=${_('Mode', 'truba')}
 		aside=${html`<${kit.Switch} label=${_('Routing')} opt="truba.main.routing" checked=${common.get('main', 'routing')}
 			onChange=${(on) => app.set('truba', 'main', 'routing', on ? '1' : '0')} />`}>
-		<div class="wide-seg"><${kit.Segmented} label=${_('Mode')} items=${MODES()} value=${mode}
+		<div class="wide-seg"><${kit.Segmented} label=${_('Mode', 'truba')} items=${MODES()} value=${mode}
 			onChange=${(v) => app.set('truba', 'main', 'mode', v)} /></div>
 		<p class="mu note">${(mode == 'all')
 			? _('Traffic without a category goes through the Tunnel; Russian traffic goes Direct by the starting settings.')
@@ -115,7 +115,7 @@ function inSets(sets) {
 function Version({ v }) {
 	const { html } = app.lib;
 	return v ? html`<span><code>${(v.sha256 || '').substring(0, 12)}</code> ${common.fmtTime(v.mtime)} · ${common.fmtBytes(v.size)}</span>`
-		: html`<span class="mu">${_('none')}</span>`;
+		: html`<span class="mu">${_('none', 'truba')}</span>`;
 }
 
 function RuleSets({ store, timing }) {
@@ -145,7 +145,7 @@ function RuleSets({ store, timing }) {
 		aside=${common.get('lists', 'via_tunnel') ? common.VIA_LABELS.tunnel : common.VIA_LABELS.direct}>
 		${[ 'geoip', 'geosite' ].map((k) => html`<div class="ver" data-set=${k}>
 			<b>${k}</b>
-			<span class="mu">${l[k] ? common.fmtTime(l[k].mtime) : _('none')} · ${common.setResult(last?.sets?.[k])}</span>
+			<span class="mu">${l[k] ? common.fmtTime(l[k].mtime) : _('none', 'truba')} · ${common.setResult(last?.sets?.[k])}</span>
 			<span class="r" title=${_('Categories')}>${common.fmtNum(count(k))}</span>
 		</div>`)}
 		<div class="mu sets">${_('In the sets now')}: ${inSets(sets)}</div>
@@ -241,7 +241,7 @@ function Categories({ cats, snap }) {
 			<${kit.Segmented} label=${_('Show actions for mode')} items=${MODES()} value=${mode} onChange=${setShown} />`}>
 		${missing.length ? html`<div class="missing">
 			<span>${common.missingText(missing)}</span>
-			<button type="button" class="btn" data-act="remove-missing" onClick=${removeMissing}>${_('Remove')}</button>
+			<button type="button" class="btn" data-act="remove-missing" onClick=${removeMissing}>${_('Remove', 'truba')}</button>
 		</div>` : ''}
 		<div class="toolbar">
 			<input type="search" aria-label=${_('Find a category')} placeholder=${_('Find a category')} value=${q} onInput=${search} />
@@ -258,7 +258,7 @@ function Categories({ cats, snap }) {
 				changed=${(was.get(c.set + ':' + c.tag) || 'mode') != act(c)} />`)}</div>`}
 		${(total > rows.length) ? html`<button type="button" class="btn more" data-act="show-all" onClick=${() => setFullFor(sig)}>
 			${_('Show all (%d)').format(total)}</button>` : ''}
-		<${kit.Dialog} open=${dlg} title=${_('Reset all category actions of this mode to the starting settings?')} confirm=${_('Reset')}
+		<${kit.Dialog} open=${dlg} title=${_('Reset all category actions of this mode to the starting settings?')} confirm=${_('Reset', 'truba')}
 			onConfirm=${() => toStarting(mode, cats?.starting || [])} onClose=${() => setDlg(false)}>
 			${_('Mode: %s. The change is applied with the Apply button, like the others.').format(MODES().find(([ v ]) => v == mode)[1])}
 		</${kit.Dialog}>

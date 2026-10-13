@@ -173,7 +173,8 @@
 }
 .card-h { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 6px 10px; margin: 0 0 8px; }
 .card-h h3 { font-size: 14px; font-weight: 500; }
-.card-h .aside { margin-left: auto; color: var(--mu); font-size: 12px; }
+/* Значок, переключатель и кнопка в заголовке — по средней линии: по базовой линии значок ниже переключателя. */
+.card-h .aside { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin-left: auto; color: var(--mu); font-size: 12px; }
 .card .sub { margin: 14px 0 6px; }
 /* Две части в одной карточке (DNS и входящие); на узком месте — одна под другой. */
 .cols { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px 24px; }
@@ -566,7 +567,6 @@
 .chip.zone { border: 1px solid var(--bd); background: transparent; color: var(--tx); }
 .chip.zone[aria-pressed="true"] { border-color: var(--tun); color: var(--tun); }
 .chip.zone[aria-disabled="true"] { cursor: not-allowed; }
-.rules-cats .card-h .aside { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
 .cat {
 	display: grid;
 	grid-template-columns: minmax(0, 1fr) auto;
@@ -612,12 +612,34 @@
 .stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
 @container (max-width: 600px) { .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 
-/* Поля параметров сеткой; длинные (пакеты-приманки) — на всю ширину. */
-.fields { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 10px; }
-.fields .wide { grid-column: 1 / -1; }
+/* Параметры AmneziaWG группами: подпись группы и пояснение слева, поля справа — числа по четыре в строке узкими
+   полями, строки (приманки, AWG 3.1) по две. На телефоне подпись над полями, числа по два (мусорные — по три). */
+.awg-g { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 8px 24px; padding: 12px 0 0; border-top: 1px solid var(--bd); }
+.awg-l b { display: block; font-weight: 500; }
+.awg-l .mu { display: block; margin-top: 2px; font-size: 11px; }
+.awg-f { display: grid; grid-template-columns: repeat(4, minmax(0, 150px)); align-items: start; gap: 10px 12px; }
+.awg-f.txt { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.awg-f .kv { align-self: end; padding-bottom: 4px; }
+.tr .awg-f .field + .mu { margin-top: 4px; font-size: 11px; }
+@container (max-width: 600px) {
+	.awg-g { grid-template-columns: minmax(0, 1fr); }
+	.awg-f { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+	.awg-f.n3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+	.awg-f.txt { grid-template-columns: minmax(0, 1fr); }
+}
 
-/* Импорт файла: пунктирная зона (перетащить или нажать и выбрать), под ней — поле для вставки текста. */
-.drop { display: grid; gap: 8px; margin: 12px 0 0; }
+/* Импорт файла: пунктирная зона (перетащить или нажать и выбрать) и рядом, той же высоты, — поле для вставки
+   текста, под ним «Импорт». На телефоне — одно под другим. */
+.drop { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 12px; margin: 12px 0 0; }
+.drop .acts { grid-column: 2; }
+.drop .err-text { grid-column: 1 / -1; }
+@container (max-width: 600px) {
+	.drop { grid-template-columns: minmax(0, 1fr); }
+	.drop .acts { grid-column: auto; }
+}
+/* В половине ширины (Туннель не настроен — импорт в «Подключении к Трубе») тоже одно под другим. */
+.peer .drop { grid-template-columns: minmax(0, 1fr); }
+.peer .drop .acts { grid-column: auto; }
 .drop .zone {
 	position: relative;
 	display: flex;
@@ -682,7 +704,8 @@
 .state .stats { margin: 0 0 12px; }
 .spark-empty { display: flex; align-items: center; justify-content: center; height: 70px; border-radius: 8px; background: var(--chip); }
 /* С .tr — сильнее «.tr p { margin: 0 }»: абзацы карточки — с отступом. */
-.state .kv, .conn-f, .tt-res, .wd .cols, .fields + .fields, .tr .tt-hint, .tr .fields + .mu, .tr .peer > p.mu { margin-top: 10px; }
+.state .kv, .conn-f, .tt-res, .wd .cols, .tr .tt-hint { margin-top: 10px; }
+.awg .fold-b { gap: 12px; }
 .peer .kv { margin-bottom: 4px; }
 .ks { margin: 14px 0 0; padding: 10px 0 0; border-top: 1px solid var(--bd); }
 .ks .mu { margin: 4px 0 0; }
@@ -710,7 +733,6 @@
 @container (max-width: 600px) { .ups-add { flex-direction: column; } .ups-add input { flex: none; } }
 
 /* ---- «Входящие» ---- */
-.nat .card-h .aside { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
 .nat .kv + .mu, .nat .fold + .mu { margin-top: 8px; }
 .nat-srv, .upnp-rows { margin: 0; padding: 0; list-style: none; font-size: 12px; }
 .nat-srv li { overflow-wrap: anywhere; }
