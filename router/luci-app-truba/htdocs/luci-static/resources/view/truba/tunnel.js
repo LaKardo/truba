@@ -246,11 +246,11 @@ function Page({ store, view, iface }) {
 return view.extend({
 	load: function() {
 		return Promise.all([ app.load(), common.loadSchema() ]).then(() => Promise.all([
-			common.callStatus(), uci.load('truba'), uci.load('network'), uci.load('firewall') ]));
+			common.callStatus().catch(() => null), uci.load('truba'), uci.load('network'), uci.load('firewall') ]));
 	},
 
 	render: function(data) {
-		const store = app.store({ status: data[0] });
+		const store = app.store({ status: data[0], offline: data[0] == null });
 		app.poll(store, () => common.callStatus().then((s) => ({ status: s })), POLL);
 		return app.mount(this, Page, { store, iface: common.tunnelIface() });
 	},

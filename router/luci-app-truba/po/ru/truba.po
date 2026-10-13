@@ -1245,3 +1245,6 @@ msgstr "Пробросов из Туннеля пока нет."
 
 msgid "More options: Network → Firewall"
 msgstr "Другие параметры: Сеть → Межсетевой экран"
+
+msgid "The changes were not saved: %s"
+msgstr "Изменения не сохранены: %s"

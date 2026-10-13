@@ -119,8 +119,9 @@ const COPIES = [
 	[ /== 'truba'/, 'имя зоны truba' ],
 	[ /UPSTREAM_SCHEMES = \[/, 'схемы адресов DNS' ],
 ];
-// Строки с пометкой «// опция network» — поля интерфейса AmneziaWG: это не настройки Трубы.
-for (const f of files.filter((f) => rel(f).includes('/view/truba/'))) {
+// Строки с пометкой «// опция network» — поля интерфейса AmneziaWG: это не настройки Трубы. Проверяются представления,
+// компоненты ui/ и awg.js — копия значения в общем компоненте так же расходилась бы со службой.
+for (const f of files.filter((f) => /\/(view\/truba|truba\/ui)\/|\/truba\/awg\.js$/.test(rel(f)))) {
 	readFileSync(f, 'utf8').split('\n').forEach((line, i) => {
 		if (line.includes('// опция network'))
 			return;
@@ -687,6 +688,63 @@ for (const [s, f] of strings) {
 }
 for (const s of translated.keys())
 	if (!strings.has(s)) console.log(`warn  лишняя строка в po: ${s}`);
+
+// ---- Отложенные мелочи этапа 1 (этап 7) ----
+
+// (a) Ошибку ubus (нет прав, нет объекта) rpc LuCI отдаёт пустым объектом: callStatus её не выдаёт за
+// «служба остановлена» — отклоняется, и страница показывает «нет связи». Без данных — «нет данных».
+{
+	const st = (reply) => new Function('baseclass', 'rpc', 'uci', '_', 'L', 'E', 'document', commonSrc)(
+		baseclass, { declare: (o) => () => Promise.resolve(o.method == 'status' ? reply : {}) }, devUci, (s) => s, stub, stub, { querySelector: () => true });
+	const empty = await st({}).callStatus().then(() => 'resolved', () => 'rejected');
+	const stopped = await st({ service: false }).callStatus().then((x) => x.service === false ? 'resolved' : '?', () => 'rejected');
+	check(empty == 'rejected' && stopped == 'resolved', `common.callStatus: ответ без service — ошибка, { service: false } — ответ (${empty}, ${stopped})`);
+	check(cdev.tunnelState?.({})?.[0] === '', `common.tunnelState({}): без данных — не «служба остановлена» (${cdev.tunnelState?.({})})`);
+}
+
+// (b) Строки — при отрисовке (spec §3.7): верхний уровень модулей представлений и ui/ не вызывает _().
+// Общие таблицы common.js — при загрузке модуля (каталог LuCI уже загружен), они здесь не проверяются.
+{
+	const any = new Proxy(function () {}, {
+		get: (t, k) => (k === 'extend') ? (x) => x : (k === Symbol.toPrimitive) ? () => '' : any,
+		apply: () => any, construct: () => any
+	});
+	for (const f of files.filter((f) => /\/(view\/truba|truba\/ui)\//.test(rel(f)))) {
+		const src = readFileSync(f, 'utf8');
+		let calls = 0;
+		const deps = { _: (s) => { calls++; return s; }, L: any, E: any, window: any, document: any };
+		for (const m of src.matchAll(/^'require ([\w.]+)(?: as (\w+))?';/gm))
+			deps[m[2] || m[1].split('.').pop()] = any;
+		try {
+			new Function(...Object.keys(deps), src)(...Object.values(deps));
+		} catch (e) {
+			check(false, `${rel(f)}: верхний уровень не выполнился с заглушками — ${e.message}`);
+			continue;
+		}
+		check(!calls, `${rel(f)}: _() на верхнем уровне модуля (${calls}) — строки переводятся при отрисовке (spec §3.7)`);
+	}
+}
+
+// (c) vendor.mjs: та же строка VERSIONS (пакет@версия) с другой суммой — ошибка, а не новая сумма молча.
+{
+	const vpath = fileURLToPath(new URL('./vendor.mjs', import.meta.url));
+	if (!/export function record\(/.test(readFileSync(vpath, 'utf8')))
+		check(false, 'vendor.mjs: нет record(line, sum) — сверки суммы с VERSIONS');
+	else {
+		const { record } = await import(new URL('./vendor.mjs', import.meta.url));
+		const A = 'a'.repeat(64), B = 'b'.repeat(64);
+		let threw = false;
+		try { record(`f.js p@1 x/y.js ${A}`, B); } catch (e) { threw = true; }
+		check(threw && record('f.js p@1 x/y.js', A) == `f.js p@1 x/y.js ${A}` && record(`f.js p@1 x/y.js ${A}`, A) == `f.js p@1 x/y.js ${A}`,
+			'vendor.record: новая сумма — записывается, та же — остаётся, другая при той же версии — ошибка');
+	}
+}
+
+// (d) Пробелы покрытия: яркость color(srgb …) (так её отдают некоторые темы).
+if (app) {
+	check(app.luminance('color(srgb 0 0 0)') === 0 && Math.abs(app.luminance('color(srgb 1 1 1)') - 1) < 1e-3 &&
+		app.luminance('color(srgb 1 1 1 / 0.3)') === null, 'app.luminance: color(srgb …), почти прозрачный — null');
+}
 
 // ---- Остатки прежнего интерфейса (spec §3.3, этап 7) ----
 

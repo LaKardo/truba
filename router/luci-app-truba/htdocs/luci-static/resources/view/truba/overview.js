@@ -38,17 +38,14 @@ function setHistory(h) {
 // Места значений в точке: к устройствам, от устройств, новых соединений в минуту.
 const COLS = { tunnel: { down: 1, up: 2, conn: 7 }, direct: { down: 3, up: 4, conn: 8 }, inbound: { down: 5, up: 6, conn: 9 } };
 
-// Сроки графика; выбранный запоминается в браузере. Больше часа — поминутные средние.
-const SPANS = [
-	{ span: 600, label: _('10 min') },
-	{ span: 3600, label: _('1 h') },
-	{ span: 86400, label: _('24 h') }
-];
+// Сроки графика; выбранный запоминается в браузере. Больше часа — поминутные средние. Подписи — при отрисовке.
+const SPANS = [ 600, 3600, 86400 ];
+const spanLabel = (s) => ({ 600: _('10 min'), 3600: _('1 h'), 86400: _('24 h') })[s];
 const SPAN_KEY = 'truba.span';
 let span = 600;
 try {
 	const s = +localStorage.getItem(SPAN_KEY);
-	if (SPANS.some((x) => x.span == s))
+	if (SPANS.includes(s))
 		span = s;
 }
 catch (e) { }
@@ -229,7 +226,7 @@ function TunnelCard({ st, iface }) {
 }
 
 // Ряды графика: к устройствам — линией с заливкой, от устройств — пунктиром.
-const SERIES = [
+const SERIES = () => [
 	{ i: COLS.tunnel.down, label: _('Tunnel') + ' ↓', color: 'tun' },
 	{ i: COLS.tunnel.up, label: _('Tunnel') + ' ↑', color: 'tun', dash: true },
 	{ i: COLS.direct.down, label: _('Direct') + ' ↓', color: 'dir' },
@@ -251,15 +248,16 @@ function SpeedCard({ st }) {
 	const now = hist.now ?? Date.now() / 1000;
 	const h = ring();
 	const pts = chart.gaps(h.points.filter((p) => p[0] > now - span), h.step);
-	const data = [ pts.map((p) => p[0]), ...SERIES.map((s) => pts.map((p) => p[s.i] ?? null)) ];
+	const series = SERIES();
+	const data = [ pts.map((p) => p[0]), ...series.map((s) => pts.map((p) => p[s.i] ?? null)) ];
 	// Истории нет — пояснение поверх приглушённого графика: старые точки ещё видны, но не мешают читать.
 	const rec = latest() != null;
 	const tr = st.traffic || {}, since = st.applied?.counters_since;
 	const b = (k, d) => common.fmtBytes(tr[k]?.[d]);
 	return html`<${kit.Card} cls="w3" title=${_('Speed')}
-			aside=${html`<${kit.Segmented} label=${_('Period')} items=${SPANS.map((x) => [ x.span, x.label ])} value=${span} onChange=${onSpan} />`}>
+			aside=${html`<${kit.Segmented} label=${_('Period')} items=${SPANS.map((s) => [ s, spanLabel(s) ])} value=${span} onChange=${onSpan} />`}>
 		<div class=${'chart' + (rec ? '' : ' stale')}>
-			<${chart.TimeChart} series=${SERIES} data=${data} from=${now - span} to=${now} />
+			<${chart.TimeChart} series=${series} data=${data} from=${now - span} to=${now} />
 			${rec ? '' : html`<div class="chart-note">${_('Speed is not being recorded: the Truba service is not running.')}</div>`}
 		</div>
 		<div class="mu">${(since ? _('Since %s').format(common.fmtTime(since)) + ': ' : '')
@@ -374,15 +372,15 @@ return view.extend({
 		// Сроки истории — из схемы службы: без них fetchHistory не знает, сколько точек просить.
 		return Promise.all([ app.load(), common.loadSchema() ]).then(([ , s ]) => {
 			setHistory(s.consts.history);
-			return Promise.all([ common.callStatus(), uci.load('network'), uci.load('truba'), uci.load('firewall'), fetchHistory(),
+			return Promise.all([ common.callStatus().catch(() => null), uci.load('network'), uci.load('truba'), uci.load('firewall'), fetchHistory(),
 				fetchDevices() ]);
 		});
 	},
 
 	render: function(data) {
-		const store = app.store({ status: data[0], now: hist.now, devices: data[5] });
+		const store = app.store({ status: data[0], devices: data[5], offline: data[0] == null });
 		app.poll(store, () => Promise.all([ common.callStatus(), fetchHistory(), fetchDevices() ])
-			.then(([ st, , dv ]) => ({ status: st, now: hist.now, devices: dv })), POLL);
+			.then(([ st, , dv ]) => ({ status: st, devices: dv })), POLL);
 		return app.mount(this, Page, { store, iface: common.tunnelIface() });
 	},
 

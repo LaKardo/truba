@@ -288,12 +288,12 @@ function Page({ store, snap, timing, view }) {
 return view.extend({
 	load: function() {
 		return Promise.all([ app.load(), common.loadSchema() ]).then(() => Promise.all([
-			common.callCategories(), common.callLists(), common.callStatus(), common.callSets().catch(() => null),
+			common.callCategories(), common.callLists(), common.callStatus().catch(() => null), common.callSets().catch(() => null),
 			uci.load('truba'), uci.load('firewall') ]));
 	},
 
 	render: function(data) {
-		const store = app.store({ cats: data[0], lists: data[1], status: data[2], sets: data[3] });
+		const store = app.store({ cats: data[0], lists: data[1], status: data[2], sets: data[3], offline: data[2] == null });
 		// Действия при загрузке страницы — для точки «изменено»: секции rule удаляются и заводятся заново,
 		// поэтому несохранённое у секции не говорит, другое ли Действие.
 		const snap = { all: common.ruleActions('all'), selective: common.ruleActions('selective') };

@@ -3,7 +3,7 @@
 'require rpc';
 'require uci';
 
-const callStatus = rpc.declare({ object: 'truba', method: 'status', expect: { '': {} } });
+const callStatusRaw = rpc.declare({ object: 'truba', method: 'status', expect: { '': {} } });
 const callLists = rpc.declare({ object: 'truba', method: 'lists', expect: { '': {} } });
 const callCategories = rpc.declare({ object: 'truba', method: 'categories', expect: { '': {} } });
 const callSets = rpc.declare({ object: 'truba', method: 'sets', expect: { '': {} } });
@@ -169,6 +169,16 @@ function setResult(s) {
 	return s.ok
 		? '%s, %s'.format(s.changed ? _('updated') : _('no changes'), VIA_LABELS[s.via] || s.via)
 		: _('failed — %s').format((s.errors || []).map(setError).join('; ') || '?');
+}
+
+// Состояние службы. Ошибку ubus (нет прав, нет объекта truba) rpc LuCI отдаёт пустым объектом, а у ответа
+// службы service есть всегда: пустой — ошибка, и страница показывает «нет связи», а не «служба остановлена».
+function callStatus() {
+	return callStatusRaw().then((st) => {
+		if (!st || !('service' in st))
+			throw new Error('truba.status: no answer');
+		return st;
+	});
 }
 
 // ---- Схема настроек и константы службы (truba.schema, ADR 0015) ----
@@ -630,6 +640,8 @@ function handshakeLevel(age, verdict, max, grace) {
 // Состояние Туннеля по status: [уровень, текст] — для плитки «Обзора» и вкладки «Туннель».
 function tunnelState(st) {
 	const t = st.tunnel || {}, h = st.health || {};
+	if (!('service' in st))
+		return [ '', _('no data') ];
 	if (!st.service)
 		return [ 'err', _('service stopped') ];
 	if (!t.configured)
