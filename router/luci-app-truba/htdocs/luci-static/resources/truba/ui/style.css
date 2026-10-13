@@ -604,3 +604,71 @@
 	.vers .vl { display: inline; }
 	.vers b:not(:first-of-type) { margin-top: 6px; }
 }
+
+/* ---- «Туннель» и «Журнал» ---- */
+
+/* Плитки «подпись — число» в ряд: на узком месте по две. */
+.stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+@container (max-width: 600px) { .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+/* Поля параметров сеткой; длинные (пакеты-приманки) — на всю ширину. */
+.fields { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 10px; }
+.fields .wide { grid-column: 1 / -1; }
+
+/* Импорт файла: пунктирная зона (перетащить или нажать и выбрать), под ней — поле для вставки текста. */
+.drop { display: grid; gap: 8px; margin: 12px 0 0; }
+.drop .zone {
+	position: relative;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	gap: 8px;
+	padding: 16px;
+	border: 1.5px dashed var(--bd);
+	border-radius: 8px;
+	color: var(--mu);
+	font-size: 12px;
+	text-align: center;
+	cursor: pointer;
+}
+.drop .zone.over, .drop .zone:hover, .drop .zone:focus-within { border-color: var(--tun); color: var(--tx); }
+/* Поле выбора файла — под зоной целиком, прозрачное: нажатие и фокус — его, вид — зоны. */
+.drop input[type="file"] { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
+.drop textarea {
+	min-width: 0;
+	padding: 6px 10px;
+	border: 1px solid var(--bd);
+	border-radius: 7px;
+	background: var(--pg);
+	color: var(--tx);
+	font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+	resize: vertical;
+}
+.drop .acts { display: flex; justify-content: flex-end; }
+
+/* Итог «Проверить Туннель»: размер пакета, ответы, задержка. */
+.tt-res table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.tt-res th { color: var(--mu); font-weight: 400; text-align: left; }
+.tt-res th, .tt-res td { padding: 4px 8px 4px 0; border-top: 1px solid var(--bd); }
+.tt-res .verdict { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 8px 0 0; font-size: 12px; }
+
+/* Журнал: время, источник, текст; длинная строка переносится, а не растягивает страницу. */
+.log-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 10px; }
+.log-bar .end { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+.loglines { font: 11.5px/1.7 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.loglines .ln {
+	display: grid;
+	grid-template-columns: 7.5em 8em minmax(0, 1fr);
+	gap: 8px;
+	padding: 1px 0;
+	border-top: 1px solid var(--bd);
+}
+.loglines .ln > span { min-width: 0; overflow-wrap: anywhere; }
+.loglines .ln > span:not(:last-child) { color: var(--mu); }
+.loglines .ln.warn, .loglines .ln.warn > span { color: var(--warn); }
+.loglines .ln.err, .loglines .ln.err > span { color: var(--blk); }
+@container (max-width: 600px) {
+	/* Как в макете: на телефоне без колонки источника — цвет строки всё равно говорит об уровне. */
+	.loglines .ln { grid-template-columns: 7.5em minmax(0, 1fr); }
+	.loglines .ln > span:nth-child(2) { display: none; }
+}

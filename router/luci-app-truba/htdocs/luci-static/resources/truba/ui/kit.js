@@ -79,11 +79,13 @@ function Segmented({ items, value, onChange, label, disabled }) {
 	</div>`;
 }
 
-// Фильтры-чипы: items — [ [ значение, подпись, число ], … ], нажат один.
+// Фильтры-чипы: items — [ [ значение, подпись, число ], … ], нажат один; value — массив: нажаты все его
+// значения (источники «Журнала»), onChange получает нажатое и решает сам.
 function Chips({ items, value, onChange, label }) {
 	const { html } = app.lib;
+	const on = (v) => Array.isArray(value) ? value.includes(v) : v == value;
 	return html`<div class="chips" role="group" aria-label=${label}>
-		${items.map(([ v, l, n ]) => html`<button type="button" class="chip" aria-pressed=${String(v == value)}
+		${items.map(([ v, l, n ]) => html`<button type="button" class="chip" aria-pressed=${String(on(v))}
 			onClick=${() => onChange(v)}>${l}${(n != null) ? html` <span class="n">${n}</span>` : ''}</button>`)}
 	</div>`;
 }
@@ -146,16 +148,18 @@ function ActionPicker({ value, onChange, label }) {
 // Поле опции по схеме (spec §3.6): подсказка — умолчание службы, ошибка — под полем. Верное значение
 // пишется в UCI браузера (пустое — опция удаляется, служба берёт умолчание), неверное — нет: оно только
 // помечает поле неверным, и «Применить» недоступна. name — опция (не key: его Preact забирает себе),
-// sid — для секций без имени.
-function Field({ sec, name, sid, label, hint, msg, disabled }) {
+// sid — для секций без имени. Опции не Трубы (network: MTU, AWG) — config, своя проверка check(v) → текст
+// или null и своя подсказка placeholder: в схеме службы их нет.
+function Field({ config, sec, name, sid, label, hint, msg, disabled, check, placeholder }) {
 	const { html, useState, useEffect, useRef } = app.lib;
 	const ref = useRef(null);
-	const s = sid || sec, opt = 'truba.%s.%s'.format(s, name);
-	const saved = () => uci.get('truba', s, name) ?? '';
+	const c = config || 'truba', s = sid || sec, opt = '%s.%s.%s'.format(c, s, name);
+	const saved = () => uci.get(c, s, name) ?? '';
+	const errOf = (x) => check ? check(x) : common.fieldError(sec, name, x);
 	const [ v, setV ] = useState(saved);
 	// Выключенное поле не проверяется и показывает то, что в настройках: неверный ввод в нём не держит «Применить».
 	useEffect(() => { if (disabled) setV(saved()); }, [ disabled ]);
-	const err = disabled ? null : common.fieldError(sec, name, v.trim());
+	const err = disabled ? null : errOf(v.trim());
 	// Ошибка видна после паузы в наборе (или ухода из поля), а не на каждое нажатие: на «1» из «12:00» экранный
 	// чтец объявлял бы её. «Применить» недоступна сразу — по err.
 	const [ quiet, setQuiet ] = useState(false);
@@ -177,12 +181,12 @@ function Field({ sec, name, sid, label, hint, msg, disabled }) {
 		setQuiet(true);
 		clearTimeout(timer.current);
 		timer.current = setTimeout(settle, 800);
-		if (!common.fieldError(sec, name, x.trim()) && x.trim() !== saved())
-			app.set('truba', s, name, x.trim() === '' ? null : x.trim());
+		if (!errOf(x.trim()) && x.trim() !== saved())
+			app.set(c, s, name, x.trim() === '' ? null : x.trim());
 	};
-	const def = common.schema().sections?.[sec]?.[name]?.def;
-	const changed = uci.state?.changes?.truba?.[s]?.[name] !== undefined;
-	const id = 'f-' + s + '-' + name;
+	const def = (placeholder != null) ? placeholder : (c == 'truba') ? common.schema().sections?.[sec]?.[name]?.def : null;
+	const changed = uci.state?.changes?.[c]?.[s]?.[name] !== undefined;
+	const id = 'f-' + c + '-' + s + '-' + name;
 	return html`<div class=${'field' + (shown ? ' bad' : '')} ref=${ref}>
 		<label for=${id}>${label}${changed ? html` <${Dot} level="warn" label=${_('changed, not applied yet')} />` : ''}</label>
 		<input id=${id} data-opt=${opt} autocomplete="off" value=${v} disabled=${!!disabled}
@@ -197,6 +201,31 @@ function Field({ sec, name, sid, label, hint, msg, disabled }) {
 function Fold({ title, open, children }) {
 	const { html } = app.lib;
 	return html`<details class="fold" open=${!!open}><summary>${title}</summary><div class="fold-b">${children}</div></details>`;
+}
+
+// Файл или текст для импорта (router.conf): файл перетаскивают в зону или выбирают нажатием на неё, текст
+// вставляют в поле под ней — на телефоне вставить можно только в поле ввода. onText получает текст;
+// error — почему он не подошёл, под зоной.
+function DropZone({ label, accept, placeholder, error, onText }) {
+	const { html, useState } = app.lib;
+	const [ over, setOver ] = useState(false), [ text, setText ] = useState('');
+	const read = (f) => { if (f) f.text().then(onText); };
+	const drop = (ev) => {
+		ev.preventDefault();
+		setOver(false);
+		read(ev.dataTransfer?.files?.[0]);
+	};
+	return html`<div class="drop">
+		<label class=${'zone' + (over ? ' over' : '')} onDragOver=${(ev) => { ev.preventDefault(); setOver(true); }}
+				onDragLeave=${() => setOver(false)} onDrop=${drop}>
+			<${Icon} name="file-up" /><span>${label}</span>
+			<input type="file" accept=${accept} onChange=${(ev) => { read(ev.target.files[0]); ev.target.value = ''; }} />
+		</label>
+		<textarea name="conf" rows="3" autocomplete="off" spellcheck="false" placeholder=${placeholder} value=${text}
+			onInput=${(ev) => setText(ev.target.value)}></textarea>
+		<div class="acts"><button type="button" class="btn" data-act="import" disabled=${!text.trim()} onClick=${() => onText(text)}>${_('Import')}</button></div>
+		${error ? html`<div class="err-text" role="alert">${error}</div>` : ''}
+	</div>`;
 }
 
 // Подтверждение: родной <dialog> в верхнем слое — не зависит от container-type у .tr, фокус внутри
@@ -324,4 +353,4 @@ function ChangesBar({ view }) {
 }
 
 return baseclass.extend({ Card, Stat, Badge, Dot, Icon, Switch, Segmented, Chips, ActionTag, ShareBar, KV, Busy, Empty, Go, ChangesBar, step,
-	ActionPicker, Field, Fold, Dialog, Toast, Check });
+	ActionPicker, Field, Fold, DropZone, Dialog, Toast, Check });

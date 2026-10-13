@@ -536,6 +536,54 @@ function tunnelState(st) {
 	return [ 'ok', _('working') ];
 }
 
+// ---- Журнал (truba.log) ----
+
+// Строка logread: «Wed Oct  7 22:47:05 2026 daemon.notice truba: текст»; у mosdns текст —
+// «2026-10-07T17:59:32.409Z<TAB>WARN<TAB>сообщение<TAB>{поля}». mosdns пишет всё в stderr,
+// поэтому syslog помечает каждую его строку как ошибку: уровень берётся из самой строки.
+const LOG_RE = /^\w{3} (\w{3}) +(\d+) (\d\d:\d\d:\d\d) \d{4} \w+\.(\w+) ([\w.-]+?)(?:\[\d+\])?: (.*)$/;
+const MONTHS = { Jan: 1, Feb: 2, Mar: 3, Apr: 4, May: 5, Jun: 6, Jul: 7, Aug: 8, Sep: 9, Oct: 10, Nov: 11, Dec: 12 };
+
+// Источник строки на «Журнале» — по тегу: у watchdog свой (truba-watchdog), строки интерфейса Туннеля
+// пишут netifd и ядро. Остальное, что отдаёт truba.log (Труба, её переустановка, cron с её задачей), — Труба.
+const LOG_SOURCES = { mosdns: 'mosdns', 'truba-watchdog': 'watchdog', netifd: 'awg', kernel: 'awg' };
+
+function logSource(src) {
+	return LOG_SOURCES[src] || 'truba';
+}
+
+// Строки журнала по порядку текста: время, тег, источник, уровень, текст и исходная строка (для «Скачать»).
+function parseLog(text) {
+	return (text || '').split('\n').filter((l) => l).map((l) => {
+		const m = l.match(LOG_RE);
+		if (!m)
+			return { time: '', src: '', source: 'truba', level: 'info', text: l, raw: l };
+		let level = /^(emerg|alert|crit|err)$/.test(m[4]) ? 'err' : /^warn/.test(m[4]) ? 'warn' : 'info';
+		let msg = m[6];
+		// busybox crond пишет каждый запуск задачи (обновление списков) с уровнем ошибки.
+		if (m[5] == 'crond' && /^USER \S+ pid \d+ cmd /.test(msg))
+			level = 'info';
+		if (m[5] == 'mosdns') {
+			const p = msg.split('\t');
+			if (p.length >= 3 && /^\d{4}-\d\d-\d\dT/.test(p[0])) {
+				const lv = p[1].toUpperCase();
+				level = /ERROR|FATAL|PANIC/.test(lv) ? 'err' : lv == 'WARN' ? 'warn' : 'info';
+				msg = p.slice(2).join(' ');
+			}
+			// Дампа кэша нет после каждой загрузки Роутера (он в памяти) — это не ошибка.
+			if (/failed to load cache dump.*no such file/.test(msg))
+				level = 'info';
+		}
+		return { time: '%02d.%02d %s'.format(+m[2], MONTHS[m[1]] || 0, m[3]), src: m[5], source: logSource(m[5]), level, text: msg, raw: l };
+	});
+}
+
+// Строки под фильтром «Журнала»: уровень — порог (warn — предупреждения и ошибки, err — только ошибки),
+// sources — включённые источники.
+function logShown(lines, level, sources) {
+	return lines.filter((l) => (level == 'all' || (level == 'err' ? l.level == 'err' : l.level != 'info')) && sources.includes(l.source));
+}
+
 // Вкладки Трубы: адрес и название — для ссылок из плиток и предупреждений «Обзора».
 const TABS = {
 	devices: _('Devices'),
@@ -543,7 +591,7 @@ const TABS = {
 	tunnel: _('Tunnel'),
 	dns: _('DNS'),
 	inbound: _('Inbound'),
-	diagnostics: _('Diagnostics')
+	log: _('Log')
 };
 function tabUrl(tab) {
 	return L.url('admin/services/truba/' + tab);
@@ -554,7 +602,7 @@ return baseclass.extend({
 	callSchema, loadSchema, schema, get, field, fieldError, handshakeLevel, callDevices, callConnections,
 	ACTIVE_SPAN, devRate, devShare, devActive, deviceSections, deviceSection, devicePolicy, normMac, connLabel,
 	RULE_ACTIONS, ruleKey, ruleOf, ruleSections, ruleActions, ruleAction, catRows, catsDue, listsDue, checkErrorText,
-	runNatTest, runTunnelTest,
+	runNatTest, runTunnelTest, parseLog, logSource, logShown,
 	ACTION_LABELS, ACTION_LEVELS, REASON_LABELS, VIA_LABELS, WARNINGS, NAT_ERRORS, CHECK_ERRORS, UPNP_MISSING, NBSP, TABS,
 	fmtBytes, fmtRate, fmtAge, fmtTime, fmtDate, fmtNum, missingText,
 	pill, busy, empty, span, svgEl, kvTable, table, row, chips,

@@ -1,6 +1,34 @@
 msgid ""
 msgstr "Content-Type: text/plain; charset=UTF-8"
 
+#: htdocs/luci-static/resources/truba/awg.js
+msgid "No PrivateKey in the [Interface] section"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/awg.js
+msgid "No [Peer] section with PublicKey"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/awg.js
+msgid "Enter a whole number from %d to %d"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/awg.js
+msgid "A number or a range «from-to» within 0–%d"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/awg.js
+msgid "Leave empty with random trailers: the module would use the padding instead of them"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/awg.js
+msgid "Enter a whole number"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/awg.js
+msgid "With header protection S1–S4 must be at least 12"
+msgstr ""
+
 #: htdocs/luci-static/resources/truba/common.js
 msgid "By mode"
 msgstr ""
@@ -190,10 +218,6 @@ msgid "Enter 0 or a whole number from %d to %d"
 msgstr ""
 
 #: htdocs/luci-static/resources/truba/common.js
-msgid "Enter a whole number from %d to %d"
-msgstr ""
-
-#: htdocs/luci-static/resources/truba/common.js
 msgid "Invalid value"
 msgstr ""
 
@@ -245,8 +269,8 @@ msgstr ""
 msgid "Inbound"
 msgstr ""
 
-#: menu.d
-msgid "Diagnostics"
+#: htdocs/luci-static/resources/truba/common.js
+msgid "Log"
 msgstr ""
 
 #: htdocs/luci-static/resources/truba/ui/flow.js
@@ -271,6 +295,10 @@ msgstr ""
 
 #: htdocs/luci-static/resources/truba/ui/kit.js
 msgid "changed, not applied yet"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/ui/kit.js
+msgid "Import"
 msgstr ""
 
 #: htdocs/luci-static/resources/truba/ui/kit.js
@@ -571,6 +599,10 @@ msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/diagnostics.js
 msgid "Error: %s"
+msgstr ""
+
+#: menu.d
+msgid "Diagnostics"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/diagnostics.js
@@ -1450,23 +1482,11 @@ msgid "A number or a range «from-to» within 0–65535"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/tunnel.js
-msgid "No PrivateKey in the [Interface] section"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/tunnel.js
-msgid "No [Peer] section with PublicKey"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/tunnel.js
 msgid "Import tunnel configuration"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/tunnel.js
 msgid "Paste router.conf produced by install-vps.sh on the VPS, or choose the file."
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/tunnel.js
-msgid "Import"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/tunnel.js
@@ -1499,10 +1519,6 @@ msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/tunnel.js
 msgid "Not needed: the router connects to the Truba itself."
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/tunnel.js
-msgid "With header protection S1–S4 must be at least 12"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/tunnel.js
@@ -1543,10 +1559,6 @@ msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/tunnel.js
 msgid "AmneziaWG 3.1: random bytes added to data packets instead of padding to a multiple of 16, so packet lengths do not share one remainder; a range «from-to». May differ from the Truba; comes with router.conf."
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/tunnel.js
-msgid "Leave empty with random trailers: the module would use the padding instead of them"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/tunnel.js

@@ -1230,3 +1230,12 @@ msgstr "Проверить не удалось: %s"
 
 msgid "Show actions for mode"
 msgstr "Показать Действия Режима"
+
+msgid "A number or a range «from-to» within 0–%d"
+msgstr "Число или диапазон «от-до» в пределах 0–%d"
+
+msgid "Enter a whole number"
+msgstr "Введите целое число"
+
+msgid "Log"
+msgstr "Журнал"
