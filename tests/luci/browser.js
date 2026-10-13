@@ -273,6 +273,42 @@ async function waitApply(page) {
 	await sleep(1000);
 	const fadeLight = await schemeNow();
 	result(fadeDark == 'dark' && fadeLight == 'light', 'тема с переходом фона: режим по фону после перехода', `${fadeDark}/${fadeLight}`);
+
+	// Панель изменений на телефоне: ошибка сохранения переносит её на вторую строку — место под ней (--changes-h)
+	// растёт вместе с ней, панель устройства не заходит под неё.
+	await page.setViewport({ width: 375, height: 812 });
+	await page.goto(url('overview'), { waitUntil: 'networkidle2' });
+	await settled(page);
+	await (await shadowSel(page, 'input[data-opt="truba.main.routing"]')).click();
+	await sleep(200);
+	await sr(async () => {
+		const u = await L.require('uci');
+		window.__save = u.save;
+		u.save = () => Promise.reject(new Error('test save failed: the router did not answer in time'));
+	});
+	await tap('.changes [data-act="apply"]');
+	await sleep(500);
+	const barH = await sr(() => {
+		const r = document.querySelector('.truba-root').shadowRoot, bar = r.querySelector('.changes');
+		return { err: !!bar?.querySelector('.err-text'), h: bar ? bar.offsetHeight + 16 : 0, var: parseInt(getComputedStyle(r.querySelector('.tr')).getPropertyValue('--changes-h')) };
+	});
+	await sr(async () => { (await L.require('uci')).save = window.__save; });
+	result(barH.err && barH.var === barH.h, 'панель изменений 375: место под ней — по высоте вместе с ошибкой', JSON.stringify(barH));
+	await page.setViewport({ width: 1280, height: 900 });
+
+	// Поле, очищенное до умолчания (опция снимается), тоже отмечено точкой «изменено» (spec §3.6).
+	await page.goto(url('dns'), { waitUntil: 'networkidle2' });
+	await settled(page);
+	const portSaved = await sr(async () => (await L.require('uci')).get('truba', 'dns', 'port') ?? null);
+	// Порт — в свёрнутом «Дополнительно»: в закрытый блок фокус не попадает.
+	await (await el('input[data-opt="truba.dns.port"]'))?.evaluate((e) => { e.closest('details')?.setAttribute('open', ''); e.focus(); e.select(); });
+	await page.keyboard.press('Backspace');
+	await sleep(300);
+	const clearedDot = await sr(() => !!document.querySelector('.truba-root').shadowRoot.querySelector('input[data-opt="truba.dns.port"]')
+		?.closest('.field')?.querySelector('.dot.warn'));
+	result(!!portSaved && clearedDot, '«DNS»: очищенное поле — с точкой «изменено»', `${portSaved}/${clearedDot}`);
+	await page.goto(url('overview'), { waitUntil: 'networkidle2' });
+	await settled(page);
 	await page.goto(url('overview'), { waitUntil: 'networkidle2' });
 	await settled(page);
 
@@ -1111,6 +1147,12 @@ async function waitApply(page) {
 		return { taPrevented: ev.defaultPrevented, err: drop.querySelector('.err-text')?.textContent || '', label: ta?.getAttribute('aria-label') || '' };
 	});
 	result(dz.taPrevented && /large/.test(dz.err) && !!dz.label, '«Туннель»: импорт — предел размера, drop на поле текста, имя поля', JSON.stringify(dz));
+	// После ошибки файла вставка текста показывает свою ошибку, а не прежнюю «слишком большой».
+	await (await el('.card.peer .drop textarea'))?.type('[Peer]\nPublicKey = x');
+	await tap('.card.peer .drop [data-act="import"]');
+	await sleep(300);
+	const dzErr = await page.evaluate(() => document.querySelector('.truba-root').shadowRoot.querySelector('.card.peer .drop .err-text')?.textContent || '');
+	result(/No PrivateKey/.test(dzErr), '«Туннель»: после ошибки файла — ошибка вставленного текста', dzErr);
 	// Фокус с клавиатуры на выборе файла виден рамкой фокуса у зоны.
 	await page.evaluate(() => document.querySelector('.truba-root').shadowRoot.querySelector('.card.peer [data-act="tunnel-test"]')?.focus());
 	let zoneRing = null;

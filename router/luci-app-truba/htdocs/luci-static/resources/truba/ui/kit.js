@@ -199,7 +199,8 @@ function Field({ config, sec, name, sid, label, hint, msg, disabled, check, plac
 	};
 	// Подсказка опции Трубы (без config) — умолчание схемы службы.
 	const def = (placeholder != null) ? placeholder : !config ? common.schema().sections?.[sec]?.[name]?.def : null;
-	const changed = uci.state?.changes?.[c]?.[s]?.[name] !== undefined;
+	// Изменено — и когда опция снята (поле очищено до умолчания): она в deletes, а не в changes.
+	const changed = uci.state?.changes?.[c]?.[s]?.[name] !== undefined || (uci.state?.deletes?.[c]?.[s] || {})[name] !== undefined;
 	const id = 'f-' + c + '-' + s + '-' + name;
 	return html`<div class=${'field' + (shown ? ' bad' : '')} ref=${ref}>
 		<label for=${id}>${label}${changed ? html` <${Dot} level="warn" label=${_('changed, not applied yet')} />` : ''}</label>
@@ -344,8 +345,9 @@ function DropZone({ label, accept, placeholder, error, onText }) {
 			<input type="file" accept=${accept} onChange=${(ev) => { read(ev.target.files[0]); ev.target.value = ''; }} />
 		</label>
 		<textarea name="conf" rows="3" autocomplete="off" spellcheck="false" aria-label=${placeholder} placeholder=${placeholder} value=${text}
-			onInput=${(ev) => setText(ev.target.value)}></textarea>
-		<div class="acts"><button type="button" class="btn" data-act="import" disabled=${!text.trim()} onClick=${() => onText(text)}>${_('Import')}</button></div>
+			onInput=${(ev) => { setText(ev.target.value); setOwn(null); }}></textarea>
+		<div class="acts"><button type="button" class="btn" data-act="import" disabled=${!text.trim()}
+			onClick=${() => { setOwn(null); onText(text); }}>${_('Import')}</button></div>
 		${(own || error) ? html`<div class="err-text" role="alert">${own || error}</div>` : ''}
 	</div>`;
 }
@@ -473,7 +475,7 @@ function ChangesBar({ view }) {
 			return;
 		root.style.setProperty('--changes-h', (el.offsetHeight + 16) + 'px');
 		return () => root.style.removeProperty('--changes-h');
-	}, [ n, !!bad ]);
+	}, [ n, !!bad, err ]);
 	if (!n)
 		return null;
 	// К первому неверному полю: блок с ним раскрывается, фокус — в поле.

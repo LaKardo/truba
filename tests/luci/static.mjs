@@ -239,6 +239,11 @@ if (app) {
 	await pollFn?.();
 	await pollFn?.();
 	check(quietCalls === 1 && quiet.get().offline === false, `app.poll: пустой ответ — без оповещения, кроме первого (${quietCalls})`);
+	// Пустой шаг (на «Правилах» на шаге может не быть вызовов) — не ответ Роутера: «нет связи» он не снимает.
+	const down = app.store({ offline: true });
+	app.poll(down, () => Promise.resolve({}), 5);
+	await pollFn?.();
+	check(down.get().offline === true, 'app.poll: пустой шаг без вызовов не снимает «нет связи»');
 	uciStub.state = { creates: {}, changes: { truba: { main: { routing: '0' } }, network: { awg0: { disabled: '1' } } }, deletes: {}, reorder: {} };
 	check(app.changeCount() === 2, 'app.changeCount: две изменённые опции');
 	uciStub.state = { creates: { truba: { cfg01: {} } }, changes: {}, deletes: { firewall: { r1: true } }, reorder: { truba: true } };
@@ -608,6 +613,9 @@ if (cdev) {
 	check(cdev.parseLog?.(D + 'user.notice firewall: Reloading firewall due to ifup of truba (awg0)', 'awg0')?.[0]?.source === 'awg' &&
 		cdev.parseLog?.(D + 'cron.err crond[900]: USER root pid 1 cmd truba update-lists', 'awg0')?.[0]?.source === 'truba',
 		'common.parseLog: строка другой программы с именем интерфейса Туннеля — awg, cron с задачей Трубы — truba');
+	check(cdev.parseLog?.(D + 'user.notice firewall: Reloading firewall due to ifup of vpn (wg)', 'wg')?.[0]?.source === 'awg' &&
+		cdev.parseLog?.(D + 'user.notice uhttpd: wget https://example.org/x', 'wg')?.[0]?.source === 'truba',
+		'common.parseLog: имя интерфейса — словом, а не частью другого («wg» не в «wget»)');
 	const l7 = PL('garbage');
 	check(l7.time === '' && l7.source === 'truba' && l7.level === 'info' && l7.text === 'garbage' && l7.raw === 'garbage',
 		`common.parseLog: неразобранная строка — как есть (${JSON.stringify(l7)})`);
@@ -807,8 +815,11 @@ check(!existsSync(join(res, 'truba/truba.css')), 'truba/truba.css удалён (
 	check(JSON.stringify(rTabs) == JSON.stringify(want), `README «Как пользоваться»: вкладки ${rTabs.join(', ')} — нужно ${want.join(', ')}`);
 	check(JSON.stringify(aTabs) == JSON.stringify(want), `architecture.md §5.2: вкладки ${aTabs.join(', ')} — нужно ${want.join(', ')}`);
 	const OLD = [ /Диагностик/, /Маршрутизация →/, /вкладк\S*\s+[«*]+Маршрутизаци/, /^\d+\. \*\*Маршрутизация\*\*/, /вкладк\S*\s+[«*]+DNS и списк/,
-		/на [«*]+DNS и списках/, /\*\*DNS и списки\*\*/, /truba\.css/ ];
-	const docs = [ 'README.md', 'CONTEXT.md', 'docs/architecture.md', 'docs/roadmap.md', 'vps/install-vps.sh' ];
+		/на [«*]+DNS и списках/, /\*\*DNS и списки\*\*/, /truba\.css/, /DNS и списк/, /\b6 вкладок/,
+		// На «DNS» порядка серверов нет — запрос идёт ко всем сразу: «поставьте первым» не сделать.
+		/поставьте (его )?первым/, /первый сервер «Туннеля» на вкладке/ ];
+	const docs = [ 'README.md', 'CONTEXT.md', 'docs/architecture.md', 'docs/roadmap.md', 'vps/install-vps.sh',
+		...readdirSync(join(repo, 'tests/router')).map((f) => 'tests/router/' + f) ];
 	(function walkTruba(d) {
 		for (const f of readdirSync(join(repo, d))) {
 			const p = d + '/' + f;

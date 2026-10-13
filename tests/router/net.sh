@@ -23,7 +23,7 @@ check "rc.local: переустановка после sysupgrade — одной
 section "применение (Маршрутизация вкл)"
 check "без ошибки" no_error
 check "ubus truba.schema через rpcd: умолчание iface" eval '[ "$(ubus call truba schema | jsonfilter -e @.sections.main.iface.def)" = awg0 ]'
-check "подсети geoip:ru — в gi_direct4, их число — для «DNS и списки»" eval 'in_set gi_direct4 "[[:space:]{,]5\.[0-9]" && [ "$(truba sets | jsonfilter -e "@.geoip.direct")" -gt 0 ]'
+check "подсети geoip:ru — в gi_direct4, их число — для «Правил»" eval 'in_set gi_direct4 "[[:space:]{,]5\.[0-9]" && [ "$(truba sets | jsonfilter -e "@.geoip.direct")" -gt 0 ]'
 check "bypass4: IP Трубы и подсеть Туннеля" eval 'nft get element inet truba bypass4 "{ 198.51.100.2 }" && in_set bypass4 10.77.77.0/30'
 check "lan_if = br-lan" in_set lan_if br-lan
 check "ip rule: метка Туннеля и oif awg0 → 77" eval 'ip rule show | grep -q "fwmark 0x1000000/0xf000000 lookup 77" && ip rule show | grep -q "oif awg0 lookup 77"'
@@ -191,7 +191,7 @@ done
 check "свои сокеты службы (0x80000) — мимо Туннеля" eval 'ip route get 203.0.113.77 mark 0x80000 | grep -q "dev inet0"'
 
 section "mesh-VPN — зона Маршрутизации (ADR 0014)"
-# Зона mesh выбрана в «Маршрутизация → Зоны»: перенаправление mesh → truba заводит сама Труба, узлы
+# Зона mesh выбрана в «Правила → Зоны»: перенаправление mesh → truba заводит сама Труба, узлы
 # сети идут по Категориям, как домашняя сеть. Адрес ms0 — /32: для dnsmasq с --local-service узлы
 # чужие, и он им не отвечает; перехват Трубы подменяет им источник на адрес Роутера.
 mesh_tunnel() { ip netns exec meshhost ucode /repo/tests/lib/tcp_probe.uc client 100.64.0.2 1.2.3.5 48081; }

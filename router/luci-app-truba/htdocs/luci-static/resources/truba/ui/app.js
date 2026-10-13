@@ -127,12 +127,15 @@ const scheme = store({ scheme: 'light' });
 
 // Опрос службы: ошибка не стирает данные — страница показывает последние и значок «нет связи».
 // Пустой ответ (на «Правилах» lists и status приходят не на каждом шаге) ничего не меняет — без
-// оповещения: иначе страница перерисовывалась бы на каждом шаге опроса.
+// оповещения: иначе страница перерисовывалась бы на каждом шаге опроса. Шаг без вызовов — и не ответ
+// Роутера: «нет связи» он не снимает, только задаёт offline, пока его ещё нет.
 function pollStore(s, fetchFn, interval) {
 	poll.add(() => fetchFn().then(
 		(patch) => {
-			if (Object.keys(patch || {}).length || s.get().offline !== false)
+			if (Object.keys(patch || {}).length)
 				s.set(Object.assign({}, patch, { offline: false }));
+			else if (s.get().offline === undefined)
+				s.set({ offline: false });
 		},
 		() => s.set({ offline: true })), interval);
 }

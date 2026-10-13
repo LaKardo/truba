@@ -671,7 +671,9 @@ const LOG_SOURCES = { mosdns: 'mosdns', 'truba-watchdog': 'watchdog', netifd: 'a
 function logSource(src, text, iface) {
 	if (LOG_SOURCES[src])
 		return LOG_SOURCES[src];
-	return (iface && !/^truba/.test(src) && src != 'crond' && String(text).includes(iface)) ? 'awg' : 'truba';
+	// Имя интерфейса — словом: «wg» не находится в «wget».
+	const word = iface && new RegExp('(^|[^\\w.-])' + iface.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '($|[^\\w.-])');
+	return (word && !/^truba/.test(src) && src != 'crond' && word.test(String(text))) ? 'awg' : 'truba';
 }
 
 // Строки журнала по порядку текста: время, тег, источник, уровень, текст и исходная строка (для «Скачать»).
