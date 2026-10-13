@@ -369,13 +369,20 @@ const devSecs = [
 	{ '.name': 'r6', '.type': 'rule', mode: 'odd', set: 'geoip', tag: 'private', action: 'block' },
 	{ '.name': 'r7', '.type': 'rule', tag: 'x', action: 'tunnel' },
 	{ '.name': 'r8', '.type': 'rule', set: 'geoip', action: 'block' },
+	// Пробросы «Входящих»: секции firewall и network (поле '.conf'; без него — truba). fw2 — из другой зоны,
+	// fw3 — выключен и без протокола (умолчание fw4 — tcp udp).
+	{ '.name': 'fw1', '.type': 'redirect', '.conf': 'firewall', src: 'truba', name: 'web', proto: 'tcp', src_dport: '8000-8100', dest_ip: '192.168.1.10', dest_port: '80' },
+	{ '.name': 'fw2', '.type': 'redirect', '.conf': 'firewall', src: 'wan', src_dport: '22' },
+	{ '.name': 'fw3', '.type': 'redirect', '.conf': 'firewall', src: 'truba', src_dport: '9000', dest_ip: '192.168.1.11', enabled: '0' },
+	{ '.name': 'z1', '.type': 'zone', '.conf': 'firewall', name: 'lan', network: [ 'lan' ] },
+	{ '.name': 'lan', '.type': 'interface', '.conf': 'network', proto: 'static', ipaddr: '192.168.1.1', netmask: '255.255.255.0' },
 ];
 const devSchema = { sections: {
 	device: { enabled: { type: 'bool', def: true }, policy: { type: 'enum', values: [ 'tunnel', 'direct', 'rules' ], def: 'tunnel' } },
 	lists: { update_utc: { type: 'pattern', re: '^([01]?[0-9]|2[0-3]):[0-5][0-9]$', def: '12:00' }, geoip_url: { type: 'string', def: 'https://x' } },
 	dns: { set_timeout: { type: 'int', def: 86400, lo: 0, hi: 604800, min: 600 } },
 	watchdog: { probe: { type: 'ipv4', def: '' } }
-}, upstream_schemes: [ 'udp', 'tcp', 'tcp+pipeline', 'tls', 'tls+pipeline', 'https', 'h3', 'quic', 'doq' ], consts: {} };
+}, upstream_schemes: [ 'udp', 'tcp', 'tcp+pipeline', 'tls', 'tls+pipeline', 'https', 'h3', 'quic', 'doq' ], consts: { fw_zone: 'truba' } };
 // String.prototype.format задаёт luci.js; в Node — замена для текстов ошибок полей и времени строк журнала (%02d).
 String.prototype.format ??= function(...a) {
 	let i = 0;
@@ -385,8 +392,10 @@ let cdev = null;
 try {
 	cdev = new Function('baseclass', 'rpc', 'uci', '_', 'L', 'E', 'document', commonSrc)(
 		baseclass, { declare: (o) => () => Promise.resolve(o.method == 'schema' ? devSchema : {}) },
-		{ sections: (c, t) => devSecs.filter((s) => s['.type'] == t), get: (c, sid, o) => devSecs.find((s) => s['.name'] == sid)?.[o] },
-		(s) => s, stub, stub, { querySelector: () => true });
+		{ sections: (c, t) => devSecs.filter((s) => (s['.conf'] || 'truba') == c && s['.type'] == t),
+			get: (c, sid, o) => devSecs.find((s) => (s['.conf'] || 'truba') == c && s['.name'] == sid)?.[o] },
+		(s) => s, new Proxy(stub, { get: (t, k) => (k === 'toArray') ? (x) => (x == null) ? [] : Array.isArray(x) ? x : String(x).split(/\s+/) : stub }),
+		stub, { querySelector: () => true });
 	await cdev.loadSchema();
 } catch (e) {
 	console.log(`FAIL  common.js с заглушкой uci: ${e.message}`);
@@ -457,6 +466,25 @@ if (cdev) {
 		{ proto: 'TCP', ext_port: 51413, ip: '192.168.1.9', port: 51413, expires: 0, descr: '' } ], [ { ip: '192.168.1.50', name: 'pc' } ]) || [];
 	check(ur.length === 2 && ur[0].who === 'pc' && ur[1].who === '192.168.1.9' && ur[1].descr === '—' && ur[0].expires === 'no expiry',
 		'common.upnpRows: имя устройства по IP, без описания — «—»');
+	// Пробросы из Туннеля: только зона Туннеля; проверка формы; зона назначения; значения секции.
+	const FR = cdev.forwardRows?.([ { ip: '192.168.1.10', name: 'nas' } ]) || [];
+	check(FR.length === 2 && FR[0].who === 'nas' && FR[0].proto === 'tcp' && FR[1].proto === 'tcp udp' && FR[1].on === false && FR[1].port === '9000',
+		'common.forwardRows: только из зоны Туннеля, имя устройства, протокол по умолчанию, выключенный');
+	const PE = (v, o) => cdev.portError?.(v, o);
+	check([ '1', '65535', '8000-8100' ].every((v) => PE(v) === null) && PE('', true) === null &&
+		[ '', '0', '65536', '100-50', 'a', '1-2-3' ].every((v) => /1–65535/.test(PE(v) || '')), 'common.portError: порт и диапазон 1–65535');
+	const FE2 = (f) => cdev.forwardErrors?.({ sid: null, name: '', proto: 'tcp', ext: '', ip: '', port: '', ...f }) || {};
+	check(/already forwarded/.test(FE2({ ext: '8050', ip: '192.168.1.20' }).ext || '') && !FE2({ ext: '8050', proto: 'udp', ip: '192.168.1.20' }).ext &&
+		!FE2({ ext: '9000', ip: '192.168.1.20' }).ext && !FE2({ sid: 'fw1', ext: '8050', ip: '192.168.1.10' }).ext,
+		'common.forwardErrors: пересечение портов при общем протоколе; выключенный и свой — не в счёт');
+	check(/IPv4/.test(FE2({ ext: '1', ip: '1.2.3' }).ip || '') && /1–65535/.test(FE2({ ext: '1', ip: '192.168.1.5', port: '0' }).port || ''),
+		'common.forwardErrors: IP и внутренний порт');
+	const ZO = (ip, d) => cdev.zoneOfIp?.(ip, d || []);
+	check(ZO('192.168.1.77') === 'lan' && ZO('10.9.9.9') === null && ZO('100.64.0.9', [ { ip: '100.64.0.9', zone: 'mesh' } ]) === 'mesh',
+		'common.zoneOfIp: устройство, сеть со статическим адресом, неизвестно — null');
+	const FV = cdev.forwardValues?.({ name: '', proto: 'tcp udp', ext: '25565', ip: '10.9.9.9', port: '' }) || {};
+	check(FV.name === null && FV.proto === 'tcp udp' && FV.src_dport === '25565' && FV.dest_port === null && FV.dest === null && FV.dest_ip === '10.9.9.9',
+		'common.forwardValues: пустое — null, без зоны — без dest');
 
 	// «Правила»: Действие Категории — как его поймёт служба, по настройкам браузера.
 	const RA = (...a) => cdev.ruleAction?.(...a);

@@ -270,6 +270,90 @@ msgid "no queries yet"
 msgstr ""
 
 #: htdocs/luci-static/resources/truba/common.js
+msgid "yes"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/common.js
+msgid "no"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/common.js
+msgid "not run yet"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/common.js
+msgid "not checked: %s"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/common.js
+msgid "Truba layer OK"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/common.js
+msgid "problem"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/common.js
+msgid "name not resolved"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/common.js
+msgid "no answer"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/common.js
+msgid "External address"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/common.js
+msgid "External IP is the Truba IP"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/common.js
+msgid "Port preserved"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/common.js
+msgid "Same mapping for different servers"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/common.js
+msgid "nothing to compare: one server answered"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/common.js
+msgid "runs by itself after the tunnel comes up"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/common.js
+msgid "automatically after the tunnel came up"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/common.js
+msgid "manually"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/common.js
+msgid "%d ms"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/common.js
+msgid "UPnP is enabled, but miniupnpd is not running."
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/common.js
+msgid "no expiry"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/common.js
+msgid "Enter a port or a range «from-to» within 1–65535"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/common.js
+msgid "This external port is already forwarded: %s"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/common.js
 msgid "service stopped"
 msgstr ""
 
@@ -678,22 +762,6 @@ msgid "NAT check"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/inbound.js
-msgid "External address"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/inbound.js
-msgid "External IP is the Truba IP"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/inbound.js
-msgid "Port preserved"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/inbound.js
-msgid "Same mapping for different servers"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/inbound.js
 msgid "Checked"
 msgstr ""
 
@@ -703,58 +771,6 @@ msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/inbound.js
 msgid "This checks the Truba layer only. For the full RFC 5780 test run NatTypeTester on a PC in the home network whose device policy is «All via tunnel»."
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/inbound.js
-msgid "yes"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/inbound.js
-msgid "no"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/inbound.js
-msgid "not run yet"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/inbound.js
-msgid "not checked: %s"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/inbound.js
-msgid "Truba layer OK"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/inbound.js
-msgid "problem"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/inbound.js
-msgid "nothing to compare: one server answered"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/inbound.js
-msgid "runs by itself after the tunnel comes up"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/inbound.js
-msgid "automatically after the tunnel came up"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/inbound.js
-msgid "manually"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/inbound.js
-msgid "name not resolved"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/inbound.js
-msgid "no answer"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/inbound.js
-msgid "%d ms"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/inbound.js
@@ -775,14 +791,6 @@ msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/inbound.js
 msgid "Package luci-app-upnp is not installed."
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/inbound.js
-msgid "UPnP is enabled, but miniupnpd is not running."
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/inbound.js
-msgid "no expiry"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/inbound.js

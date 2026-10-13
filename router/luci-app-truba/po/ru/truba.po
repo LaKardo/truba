@@ -1218,3 +1218,9 @@ msgstr "Для Категорий с Действием «Напрямую», д
 
 msgid "At least one valid server is needed"
 msgstr "Нужен хотя бы один верный сервер"
+
+msgid "Enter a port or a range «from-to» within 1–65535"
+msgstr "Введите порт или диапазон «от-до» в пределах 1–65535"
+
+msgid "This external port is already forwarded: %s"
+msgstr "Этот внешний порт уже пробрасывается: %s"

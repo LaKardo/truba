@@ -462,6 +462,111 @@ function upnpRows(leases, devices) {
 	}));
 }
 
+// Пробросы портов из Туннеля (spec §5.6) — секции firewall.redirect с src = зона Туннеля, по настройкам
+// браузера (с несохранёнными изменениями).
+function forwardSections() {
+	return uci.sections('firewall', 'redirect').filter((s) => s.src == schema().consts.fw_zone);
+}
+
+// Протоколы секции: без опции — tcp и udp, как у fw4; tcpudp, all, any — оба.
+function fwProtos(p) {
+	const l = L.toArray(p);
+	if (!l.length || l.some((x) => [ 'tcpudp', 'all', 'any', '*' ].includes(x)))
+		return [ 'tcp', 'udp' ];
+	return l;
+}
+
+// Протокол строкой, как его пишет форма LuCI: tcp, udp или «tcp udp».
+function fwProto(p) {
+	const l = fwProtos(p);
+	return (l.includes('tcp') && l.includes('udp')) ? 'tcp udp' : l.join(' ');
+}
+
+// Строки карточки: кто — имя устройства с этим IP, иначе IP; внутренний порт — без своего тот же, что внешний.
+function forwardRows(devices) {
+	const names = new Map((devices || []).filter((d) => d.ip && d.name).map((d) => [ d.ip, d.name ]));
+	return forwardSections().map((s) => ({
+		sid: s['.name'], name: s.name || '', proto: fwProto(s.proto), ext: s.src_dport || '', ip: s.dest_ip || '',
+		who: names.get(s.dest_ip) || s.dest_ip || '', port: s.dest_port || s.src_dport || '', on: s.enabled != '0'
+	}));
+}
+
+// Порт или диапазон «от-до» в 1–65535 → [ от, до ]; иначе null.
+function portRange(v) {
+	const m = /^(\d+)(?:[-:](\d+))?$/.exec(String(v ?? '').trim());
+	if (!m)
+		return null;
+	const a = +m[1], b = (m[2] != null) ? +m[2] : a;
+	return (a >= 1 && b <= 65535 && a <= b) ? [ a, b ] : null;
+}
+
+// Ошибка поля порта или null; optional — пустое можно (внутренний порт: тот же, что внешний).
+function portError(v, optional) {
+	const t = String(v ?? '').trim();
+	if (t === '' && optional)
+		return null;
+	return (/^\d+(-\d+)?$/.test(t) && portRange(t)) ? null : _('Enter a port or a range «from-to» within 1–65535');
+}
+
+// Ошибки формы проброса: { ext, ip, port } — только неверные. Внешний порт, который уже пробрасывает другой
+// включённый проброс Туннеля по тому же протоколу, — ошибка: иначе второй молча не работал бы.
+function forwardErrors(f) {
+	const e = {};
+	const ext = portError(f.ext);
+	if (ext)
+		e.ext = ext;
+	else {
+		const [ a, b ] = portRange(f.ext), mine = fwProtos(f.proto);
+		const other = forwardSections().find((s) => s['.name'] != f.sid && s.enabled != '0' && fwProtos(s.proto).some((p) => mine.includes(p)) &&
+			((r) => r && r[0] <= b && a <= r[1])(portRange(s.src_dport)));
+		if (other)
+			e.ext = _('This external port is already forwarded: %s').format(other.name || other.src_dport);
+	}
+	if (!IPV4.test(String(f.ip ?? '').trim()))
+		e.ip = _('Enter an IPv4 address');
+	const port = portError(f.port, true);
+	if (port)
+		e.port = port;
+	return e;
+}
+
+// IPv4 → число; null — не IPv4.
+function ip4(v) {
+	return IPV4.test(v) ? String(v).split('.').reduce((n, x) => n * 256 + +x, 0) : null;
+}
+
+// Зона межсетевого экрана для IP: у устройства — его зона (служба знает её по интерфейсу), иначе — зона сети
+// со статическим адресом, в которую IP входит. Не нашлась — null: fw4 пробросит порт и без dest, а неверная
+// зона хуже никакой.
+function zoneOfIp(ip, devices) {
+	const d = (devices || []).find((x) => x.ip == ip && x.zone);
+	if (d)
+		return d.zone;
+	const n = ip4(ip);
+	if (n == null)
+		return null;
+	for (let s of uci.sections('network', 'interface')) {
+		if (s.proto != 'static')
+			continue;
+		const inside = L.toArray(s.ipaddr).some((a) => {
+			const [ addr, len ] = String(a).split('/');
+			const mask = (len != null) ? (len > 0 ? (~0 << (32 - len)) >>> 0 : 0) : ip4(s.netmask || '255.255.255.255');
+			return ip4(addr) != null && mask != null && ((ip4(addr) & mask) >>> 0) == ((n & mask) >>> 0);
+		});
+		const z = inside && uci.sections('firewall', 'zone').find((z) => L.toArray(z.network).includes(s['.name']));
+		if (z)
+			return z.name || null;
+	}
+	return null;
+}
+
+// Значения секции из формы: пустое — null (опция снимается); dest — зона по IP.
+function forwardValues(f, devices) {
+	const t = (v) => { v = String(v ?? '').trim(); return (v === '') ? null : v; };
+	const ip = t(f.ip);
+	return { name: t(f.name), proto: f.proto || 'tcp udp', src_dport: t(f.ext), dest_ip: ip, dest_port: t(f.port), dest: ip ? zoneOfIp(ip, devices) : null };
+}
+
 // ---- Правила Категорий ----
 
 // Действия правила, которые служба принимает (const.uc, ACTIONS); остальные она пропускает.
@@ -687,6 +792,7 @@ return baseclass.extend({
 	ACTIVE_SPAN, devRate, devShare, devActive, deviceSections, deviceSection, devicePolicy, normMac, connLabel,
 	RULE_ACTIONS, ruleKey, ruleOf, ruleSections, ruleActions, ruleAction, catRows, catsDue, listsDue, checkErrorText,
 	runNatTest, runTunnelTest, parseLog, logSource, logShown, upstreamError, dnsStats, natSummary, upnpState, upnpRows,
+	forwardRows, fwProto, portError, forwardErrors, zoneOfIp, forwardValues,
 	ACTION_LABELS, ACTION_LEVELS, REASON_LABELS, VIA_LABELS, WARNINGS, NAT_ERRORS, CHECK_ERRORS, UPNP_MISSING, NBSP, TABS,
 	fmtBytes, fmtRate, fmtAge, fmtTime, fmtDate, fmtNum, missingText,
 	pill, busy, empty, span, svgEl, kvTable, table, row, chips,
