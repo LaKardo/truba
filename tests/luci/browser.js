@@ -105,6 +105,10 @@ async function waitApply(page) {
 			errors.push(`[${page.url()}] HTTP ${r.status()}: ${r.url()}`);
 	});
 
+	// Прежние общие стили (truba.css) удалены (этап 7): страница их не просит.
+	const oldCss = [];
+	page.on('request', (r) => { if (r.url().includes('/truba/truba.css')) oldCss.push(r.url()); });
+
 	// Вход: имя «root» уже в поле, пароль на чистом стенде пустой.
 	await page.goto(`${base}/cgi-bin/luci/`, { waitUntil: 'networkidle2' });
 	await page.$eval('input[name=luci_password]', (el) => { el.value = ''; });
@@ -129,14 +133,18 @@ async function waitApply(page) {
 	result(/192\.168\.1\.50/.test(devCard.text) && /\/admin\/services\/truba\/devices$/.test(devCard.link),
 		'«Обзор»: карточка «Устройства» — устройство и ссылка на вкладку', devCard.text.replace(/\s+/g, ' ').slice(0, 80));
 
+	// Вкладка построена: в тексте нет ошибок LuCI и есть корень страницы Трубы. «Loading view…» после ожидания —
+	// представление не отрисовалось: ошибку LuCI показывает над ним, вне #view. Страницу «не найдено» LuCI рисует
+	// без ошибок в тексте — её выдаёт только отсутствие корня.
+	const tabOk = async (text, p = page) => !/Unable to load|TypeError|ReferenceError|Error: |Authorization Required|Loading view/.test(text) &&
+		await p.evaluate(() => !!document.querySelector('.truba-root'));
 	for (const t of tabs) {
 		await page.goto(url(t), { waitUntil: 'networkidle2' });
 		await settled(page);
 		// #view — сама вкладка, без общих баннеров LuCI (например, «No password set»), плюс Shadow DOM.
 		const text = await pageText(page);
-		// «Loading view…» после ожидания — представление не отрисовалось: ошибку LuCI показывает над ним, вне #view.
-		result(!/Unable to load|TypeError|ReferenceError|Error: |Authorization Required|Loading view/.test(text), `вкладка ${t}`,
-			text.replace(/\s+/g, ' ').slice(0, 100));
+		result(await tabOk(text), `вкладка ${t}`, text.replace(/\s+/g, ' ').slice(0, 100));
+		result(!await page.evaluate(() => !!document.querySelector('link[data-truba]')), `вкладка ${t}: без link truba.css`);
 		fs.writeFileSync(`${out}/${t}.txt`, text);
 		await page.screenshot({ path: `${out}/${t}.png`, fullPage: true });
 		// Подсказки полей — из схемы службы (truba.schema, ADR 0015), а не из представления.
@@ -150,6 +158,15 @@ async function waitApply(page) {
 		}
 	}
 
+	result(!oldCss.length, 'вкладки не запрашивают truba.css', oldCss[0]);
+	// Контроль самой проверки вкладок: адрес без страницы (LuCI «Page not found») её не проходит. Во второй вкладке
+	// браузера: ответ 404 здесь ожидаем и не должен попасть в ошибки страниц Трубы.
+	const p404 = await browser.newPage();
+	await p404.goto(url('nosuch'), { waitUntil: 'networkidle2' });
+	await settled(p404);
+	result(!await tabOk(await pageText(p404), p404), 'проверка вкладок: адрес без страницы её не проходит');
+	await p404.close();
+
 	const el = async (sel) => (await shadowSel(page, sel)).asElement();
 	const tap = async (sel) => { const e = await el(sel); if (e) await e.click(); return !!e; };
 	const clickIn = (sel, re) => page.evaluate((sel, re) => [ ...document.querySelector('.truba-root').shadowRoot.querySelectorAll(sel) ]
@@ -157,6 +174,143 @@ async function waitApply(page) {
 	// Нажатый вариант группы сегментов.
 	const pressed = (sel) => page.evaluate((sel) => [ ...document.querySelector('.truba-root').shadowRoot.querySelectorAll(sel + ' button') ]
 		.find((b) => b.getAttribute('aria-pressed') == 'true')?.textContent, sel);
+
+	// ---- Отложенные мелочи этапа 1 (этап 7) ----
+	const sr = (fn, ...a) => page.evaluate(fn, ...a);
+	// (e) 900 точек — две колонки: в каждом ряду сетки карточки занимают всю ширину, пустой клетки нет.
+	await page.setViewport({ width: 900, height: 900 });
+	await page.goto(url('overview'), { waitUntil: 'networkidle2' });
+	await settled(page);
+	const holes = await sr(() => {
+		const g = document.querySelector('.truba-root').shadowRoot.querySelector('.grid');
+		const gr = g.getBoundingClientRect(), rows = {};
+		for (const c of g.children) {
+			const r = c.getBoundingClientRect();
+			const k = Math.round(r.top);
+			rows[k] = rows[k] || { l: Infinity, r: -Infinity };
+			rows[k].l = Math.min(rows[k].l, r.left);
+			rows[k].r = Math.max(rows[k].r, r.right);
+		}
+		return Object.values(rows).filter((x) => x.l > gr.left + 2 || x.r < gr.right - 2).length;
+	});
+	result(holes === 0, '«Обзор» 900: в рядах сетки нет пустых клеток', String(holes));
+	await page.setViewport({ width: 1280, height: 900 });
+	await page.goto(url('overview'), { waitUntil: 'networkidle2' });
+	await settled(page);
+
+	// (f) Наведение на график скорости: в легенде видно время точки.
+	const cv = await el('.card .chart-box canvas');
+	if (cv) {
+		const b = await cv.boundingBox();
+		await page.mouse.move(b.x + b.width * 0.8, b.y + b.height / 2);
+		await sleep(300);
+	}
+	const legendTime = await sr(() => {
+		const r = document.querySelector('.truba-root').shadowRoot.querySelector('.chart-box .u-legend .u-series');
+		return r && getComputedStyle(r).display != 'none' ? r.innerText : '';
+	});
+	result(/\d\d:\d\d/.test(legendTime), '«Обзор»: при наведении на график в легенде видно время', legendTime.replace(/\s+/g, ' '));
+	await page.mouse.move(0, 0);
+
+	// (h) Фокус с клавиатуры не меняет форму переключателя: рамка фокуса — outline, а не border-radius.
+	await sr(() => document.querySelector('.truba-root').shadowRoot.querySelector('.hero input[data-opt^="network."]')?.focus());
+	await page.keyboard.press('Tab');
+	const focusShape = await sr(() => {
+		const i = document.querySelector('.truba-root').shadowRoot.activeElement;
+		return i ? { opt: i.dataset.opt, fv: i.matches(':focus-visible'), r: getComputedStyle(i).borderRadius } : null;
+	});
+	result(focusShape?.fv && focusShape.r == '9px', 'фокус с клавиатуры: у переключателя прежняя форма', JSON.stringify(focusShape));
+	await sr(() => document.querySelector('.truba-root').shadowRoot.activeElement?.blur());
+
+	// (j) Нет связи с Роутером: запросы ubus обрываются — значок; связь вернулась — значка нет.
+	const badge = () => sr(() => /No connection to the router/.test(document.querySelector('.truba-root').shadowRoot.querySelector('.head')?.innerText || ''));
+	const until = async (fn, ms) => { for (let i = 0; i < ms / 250; i++) { if (await fn()) return true; await sleep(250); } return false; };
+	let cut = false;
+	const onReq = (r) => (cut && r.url().includes('/ubus')) ? r.abort() : r.continue();
+	await page.setRequestInterception(true);
+	page.on('request', onReq);
+	cut = true;
+	const offShown = await until(badge, 12000);
+	cut = false;
+	const offGone = await until(async () => !await badge(), 12000);
+	page.off('request', onReq);
+	await page.setRequestInterception(false);
+	result(offShown && offGone, '«Обзор»: значок «нет связи» — пока запросы не проходят', `${offShown}/${offGone}`);
+
+	// (k) Страницу, которую LuCI так и не вставил в документ, mount не ждёт вечно.
+	const rafs = await sr(async () => {
+		const app = await L.require('truba.ui.app');
+		const raf = window.requestAnimationFrame;
+		let n = 0;
+		window.requestAnimationFrame = (f) => { if (f.name == 'first') n++; return raf(f); };
+		app.mount({}, () => null, {});
+		await new Promise((r) => setTimeout(r, 1500));
+		const a = n;
+		await new Promise((r) => setTimeout(r, 600));
+		window.requestAnimationFrame = raf;
+		return [ a, n ];
+	});
+	result(rafs[0] > 0 && rafs[0] == rafs[1], 'mount: ожидание вставки страницы кончается', JSON.stringify(rafs));
+
+	// (l) Тема с плавной сменой фона: режим — по фону после перехода, а не в его середине.
+	const fade = (dark) => sr((dark) => {
+		const host = document.querySelector('.truba-root');
+		let a = host.parentElement;
+		while (a && !/^rgb\(|^rgba\([^)]*,\s*1\)/.test(getComputedStyle(a).backgroundColor))
+			a = a.parentElement;
+		if (!document.getElementById('tt-fade')) {
+			(a || document.body).setAttribute('data-tt', '');
+			document.head.appendChild(Object.assign(document.createElement('style'), { id: 'tt-fade',
+				textContent: '[data-tt] { transition: background-color .4s linear !important; } html.tt-dark [data-tt] { background-color: #111 !important; }' }));
+		}
+		document.documentElement.classList.toggle('tt-dark', dark);
+	}, dark);
+	const schemeNow = () => sr(() => document.querySelector('.truba-root').shadowRoot.querySelector('.tr').dataset.scheme);
+	await fade(true);
+	await sleep(1000);
+	const fadeDark = await schemeNow();
+	await fade(false);
+	await sleep(1000);
+	const fadeLight = await schemeNow();
+	result(fadeDark == 'dark' && fadeLight == 'light', 'тема с переходом фона: режим по фону после перехода', `${fadeDark}/${fadeLight}`);
+
+	// Панель изменений на телефоне: ошибка сохранения переносит её на вторую строку — место под ней (--changes-h)
+	// растёт вместе с ней, панель устройства не заходит под неё.
+	await page.setViewport({ width: 375, height: 812 });
+	await page.goto(url('overview'), { waitUntil: 'networkidle2' });
+	await settled(page);
+	await (await shadowSel(page, 'input[data-opt="truba.main.routing"]')).click();
+	await sleep(200);
+	await sr(async () => {
+		const u = await L.require('uci');
+		window.__save = u.save;
+		u.save = () => Promise.reject(new Error('test save failed: the router did not answer in time'));
+	});
+	await tap('.changes [data-act="apply"]');
+	await sleep(500);
+	const barH = await sr(() => {
+		const r = document.querySelector('.truba-root').shadowRoot, bar = r.querySelector('.changes');
+		return { err: !!bar?.querySelector('.err-text'), h: bar ? bar.offsetHeight + 16 : 0, var: parseInt(getComputedStyle(r.querySelector('.tr')).getPropertyValue('--changes-h')) };
+	});
+	await sr(async () => { (await L.require('uci')).save = window.__save; });
+	result(barH.err && barH.var === barH.h, 'панель изменений 375: место под ней — по высоте вместе с ошибкой', JSON.stringify(barH));
+	await page.setViewport({ width: 1280, height: 900 });
+
+	// Поле, очищенное до умолчания (опция снимается), тоже отмечено точкой «изменено» (spec §3.6).
+	await page.goto(url('dns'), { waitUntil: 'networkidle2' });
+	await settled(page);
+	const portSaved = await sr(async () => (await L.require('uci')).get('truba', 'dns', 'port') ?? null);
+	// Порт — в свёрнутом «Дополнительно»: в закрытый блок фокус не попадает.
+	await (await el('input[data-opt="truba.dns.port"]'))?.evaluate((e) => { e.closest('details')?.setAttribute('open', ''); e.focus(); e.select(); });
+	await page.keyboard.press('Backspace');
+	await sleep(300);
+	const clearedDot = await sr(() => !!document.querySelector('.truba-root').shadowRoot.querySelector('input[data-opt="truba.dns.port"]')
+		?.closest('.field')?.querySelector('.dot.warn'));
+	result(!!portSaved && clearedDot, '«DNS»: очищенное поле — с точкой «изменено»', `${portSaved}/${clearedDot}`);
+	await page.goto(url('overview'), { waitUntil: 'networkidle2' });
+	await settled(page);
+	await page.goto(url('overview'), { waitUntil: 'networkidle2' });
+	await settled(page);
 
 	// Старые адреса «Маршрутизации» и списков открывают «Правила» (spec §3.1).
 	for (const old of [ 'routing', 'lists' ]) {
@@ -912,6 +1066,12 @@ async function waitApply(page) {
 			sw: r.querySelector('input[data-opt="network.awg0.disabled"]')?.disabled };
 	});
 	result(/not configured yet/.test(nc.text) && nc.drop && nc.sw === true, '«Туннель»: не настроен — пояснение, импорт, переключатель недоступен', JSON.stringify(nc));
+	// Импорт после удаления секции в браузере: интерфейс снова есть, карточка — с адресом из файла.
+	await (await el('.card.peer .drop input[type="file"]'))?.uploadFile(`${out}/router.conf`);
+	const reimp = await page.waitForFunction(() => /198\.51\.100\.7:40243/.test(document.querySelector('.truba-root')?.shadowRoot?.querySelector('.card.peer')?.innerText || ''),
+		{ timeout: 5000 }).then(() => true).catch(() => false);
+	const reProto = await page.evaluate(async () => (await L.require('uci')).get('network', 'awg0', 'proto') ?? null);
+	result(reimp && reProto == 'amneziawg', '«Туннель»: импорт после удаления секции в браузере — интерфейс снова есть', `${reimp}/${reProto}`);
 	await Promise.all([ page.waitForNavigation({ waitUntil: 'networkidle2' }).catch(() => {}), tap('.changes [data-act="reset"]') ]);
 	await settled(page);
 	// Вёрстка (видна на Роутере): поля соседних колонок — на одной высоте, хоть у одного и есть подсказка; описание
@@ -945,6 +1105,68 @@ async function waitApply(page) {
 	result(await applied(t0, (st) => st.killswitch === !ksOn), '«Применить» на «Туннеле»: Аварийная блокировка → действует');
 	await ubus('uci', 'set', { config: 'truba', section: 'main', values: { killswitch: ksOn ? '1' : '0' } });
 	await ubus('uci', 'commit', { config: 'truba' });
+
+	await page.goto(url('tunnel'), { waitUntil: 'networkidle2' });
+	await settled(page);
+	// ---- Отложенные мелочи этапа 4 (этап 7) ----
+	// «Состояние» — то, что действует у службы: сторож, выключенный в браузере и не применённый, ещё работает.
+	// Строка «Сторож Туннеля» до и после переключения в браузере — одна и та же.
+	const stateWd = () => page.evaluate(() => document.querySelector('.truba-root').shadowRoot.querySelector('.card.state .kv dd')?.innerText || '');
+	const wdUci = await page.evaluate(async () => (await L.require('uci')).get('truba', 'watchdog', 'enabled'));
+	const wdBefore = await stateWd();
+	await tap('input[data-opt="truba.watchdog.enabled"]');
+	await sleep(300);
+	const wdToggled = await stateWd();
+	await tap('input[data-opt="truba.watchdog.enabled"]');
+	await sleep(300);
+	result(!!wdBefore && wdToggled == wdBefore, '«Туннель»: «Состояние» — сторож службы, а не неприменённый переключатель',
+		JSON.stringify({ wdUci, wdBefore, wdToggled }));
+	// Откат неверного ввода — к значению на начало правки: верное значение прошлой правки остаётся в UCI браузера.
+	const mtuH = await el('input[data-opt="network.awg0.mtu"]');
+	await retypeIn(mtuH, '1400');
+	await page.keyboard.press('Tab');
+	await retypeIn(mtuH, '14a');
+	await sleep(300);
+	const mtuKept = await uciMtu();
+	await page.keyboard.press('Tab');
+	result(mtuKept === '1400', '«Туннель»: неверный ввод откатывается к значению на начало правки, а не к сохранённому', String(mtuKept));
+	// Подсказки — то, что значит пустое поле: MTU — 1420 (умолчание ядра), Keepalive — без него.
+	const hints = await page.evaluate(() => {
+		const r = document.querySelector('.truba-root').shadowRoot, ka = r.querySelector('input[data-opt$=".persistent_keepalive"]');
+		return { mtu: r.querySelector('input[data-opt="network.awg0.mtu"]')?.placeholder, ka: ka?.placeholder, kaHint: ka?.closest('.field')?.innerText || '' };
+	});
+	result(hints.mtu === '1420' && !hints.ka && /[Ee]mpty/.test(hints.kaHint), '«Туннель»: подсказки MTU и Keepalive — что значит пустое поле', JSON.stringify(hints));
+	// Импорт: файл больше 64 КиБ — ошибка; файл, брошенный на поле текста, не открывается во вкладке; у поля — имя.
+	const dz = await page.evaluate(async () => {
+		const r = document.querySelector('.truba-root').shadowRoot, drop = r.querySelector('.drop'), ta = drop?.querySelector('textarea');
+		const dt = (n) => { const d = new DataTransfer(); d.items.add(new File([ 'x'.repeat(n) ], 'big.conf', { type: 'text/plain' })); return d; };
+		const ev = new DragEvent('drop', { bubbles: true, cancelable: true, composed: true, dataTransfer: dt(10) });
+		ta.dispatchEvent(ev);
+		drop.querySelector('.zone').dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, composed: true, dataTransfer: dt(70 * 1024) }));
+		await new Promise((res) => setTimeout(res, 300));
+		return { taPrevented: ev.defaultPrevented, err: drop.querySelector('.err-text')?.textContent || '', label: ta?.getAttribute('aria-label') || '' };
+	});
+	result(dz.taPrevented && /large/.test(dz.err) && !!dz.label, '«Туннель»: импорт — предел размера, drop на поле текста, имя поля', JSON.stringify(dz));
+	// После ошибки файла вставка текста показывает свою ошибку, а не прежнюю «слишком большой».
+	await (await el('.card.peer .drop textarea'))?.type('[Peer]\nPublicKey = x');
+	await tap('.card.peer .drop [data-act="import"]');
+	await sleep(300);
+	const dzErr = await page.evaluate(() => document.querySelector('.truba-root').shadowRoot.querySelector('.card.peer .drop .err-text')?.textContent || '');
+	result(/No PrivateKey/.test(dzErr), '«Туннель»: после ошибки файла — ошибка вставленного текста', dzErr);
+	// Фокус с клавиатуры на выборе файла виден рамкой фокуса у зоны.
+	await page.evaluate(() => document.querySelector('.truba-root').shadowRoot.querySelector('.card.peer [data-act="tunnel-test"]')?.focus());
+	let zoneRing = null;
+	for (let i = 0; i < 12 && !zoneRing?.file; i++) {
+		await page.keyboard.press('Tab');
+		zoneRing = await page.evaluate(() => {
+			const r = document.querySelector('.truba-root').shadowRoot, a = r.activeElement;
+			return { file: a?.type == 'file', outline: a?.type == 'file' ? getComputedStyle(a.closest('.zone')).outlineStyle : null };
+		});
+	}
+	result(zoneRing?.file && zoneRing.outline == 'solid', '«Туннель»: фокус на выборе файла — рамка у зоны', JSON.stringify(zoneRing));
+	await page.evaluate(() => document.querySelector('.truba-root').shadowRoot.activeElement?.blur());
+	await Promise.all([ page.waitForNavigation({ waitUntil: 'networkidle2' }).catch(() => {}), tap('.changes [data-act="reset"]') ]);
+	await settled(page);
 
 	// «Журнал» (spec §5.7): строки Трубы, её watchdog, mosdns и интерфейса Туннеля — новые сверху; уровень,
 	// источники, «Следить» и «Скачать». На стенде есть строки netifd об awg0 — источник awg.
@@ -991,10 +1213,15 @@ async function waitApply(page) {
 	// «Следить»: строки после reload службы («применено: …») приходят сами; выключено — журнал не спрашивается.
 	const follow = await page.evaluate(() => document.querySelector('.truba-root').shadowRoot.querySelector('.log-bar .sw input')?.checked);
 	const top1 = (await logState()).top;
+	// Строки с ключом: новые сверху не пересоздают прежние — выделенный текст в журнале не сбрасывается.
+	await page.evaluate(() => { const r = document.querySelector('.truba-root').shadowRoot.querySelector('.loglines .ln'); if (r) r.__keep = r.textContent; });
 	t0 = await time();
 	await ubus('rc', 'init', { name: 'truba', action: 'reload' });
 	const fresh = await page.waitForFunction((t) => (document.querySelector('.truba-root').shadowRoot.querySelector('.loglines .ln')?.textContent || '') != t,
 		{ timeout: 20000 }, top1).then(() => true).catch(() => false);
+	const kept = await page.evaluate(() => [ ...document.querySelector('.truba-root').shadowRoot.querySelectorAll('.loglines .ln') ]
+		.some((x) => x.__keep && x.__keep == x.textContent));
+	result(fresh && kept, '«Журнал»: новые строки не пересоздают прежние (выделение не сбрасывается)', `${fresh}/${kept}`);
 	await applied(t0, () => true);
 	await tap('.log-bar .sw input');
 	await sleep(500);
@@ -1005,6 +1232,20 @@ async function waitApply(page) {
 	await sleep(12000);
 	const top3 = (await logState()).top;
 	result(follow === true && fresh && top3 === top2, '«Журнал»: «Следить» — новые строки сами, выключено — без опроса', JSON.stringify({ follow, fresh, same: top3 === top2 }));
+	// Значок «нет связи» — пока «Следить» включено и запросы не проходят; «Следить» выключено — значка нет.
+	await tap('.log-bar .sw input');
+	cut = false;
+	await page.setRequestInterception(true);
+	page.on('request', onReq);
+	cut = true;
+	const logOff = await until(badge, 12000);
+	await tap('.log-bar .sw input');
+	await sleep(300);
+	const logOffGone = !await badge();
+	cut = false;
+	page.off('request', onReq);
+	await page.setRequestInterception(false);
+	result(logOff && logOffGone, '«Журнал»: значок «нет связи» снимается вместе со «Следить»', `${logOff}/${logOffGone}`);
 	// «Скачать»: показанные строки в .txt; сама загрузка подменена — нужны только содержимое и имя файла.
 	await page.evaluate(() => {
 		window.__blob = null;
@@ -1141,6 +1382,30 @@ async function waitApply(page) {
 		return r.top >= 0 && r.bottom <= window.innerHeight;
 	});
 	result(inView, 'панель изменений на 1280×900 — в пределах экрана');
+	// (g) Несохранённое изменение переключателя отмечено точкой «изменено», как у полей (spec §3.6).
+	const heroDot = () => shadowHas(page, '.hero .sw .dot.warn');
+	const dot1 = await heroDot();
+	await (await shadowSel(page, 'input[data-opt="truba.main.routing"]')).click();
+	await sleep(200);
+	const dot0 = await heroDot();
+	await (await shadowSel(page, 'input[data-opt="truba.main.routing"]')).click();
+	await sleep(200);
+	result(dot1 && !dot0 && await heroDot(), '«Обзор»: у изменённого переключателя — точка «изменено»', `${dot1}/${dot0}`);
+	// (i) Панель изменений: пока идёт сохранение, второе нажатие «Применить» его не повторяет; отказ — текстом на панели.
+	await sr(async () => {
+		const u = await L.require('uci');
+		window.__save = u.save;
+		window.__saves = 0;
+		u.save = () => { window.__saves++; return new Promise((res, rej) => setTimeout(() => rej(new Error('test save failed')), 300)); };
+	});
+	const ap = await el('.changes [data-act="apply"]');
+	await ap.click();
+	await ap.click().catch(() => {});
+	await sleep(800);
+	const guard = await sr(() => ({ n: window.__saves, text: document.querySelector('.truba-root').shadowRoot.querySelector('.changes')?.innerText || '' }));
+	await sr(async () => { (await L.require('uci')).save = window.__save; });
+	result(guard.n === 1 && /test save failed/.test(guard.text), 'панель изменений: одно сохранение на два нажатия, отказ — на панели',
+		JSON.stringify(guard).replace(/\s+/g, ' '));
 	await (await shadowSel(page, '.changes [data-act="apply"]')).click();
 	await waitApply(page);
 	result(await applied(t0, (st) => st.routing === false && st.mosdns === false),

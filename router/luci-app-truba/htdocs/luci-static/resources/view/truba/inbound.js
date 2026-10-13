@@ -23,7 +23,7 @@ function NatCard({ st }) {
 		common.runNatTest().then((n) => setMine({ n, base }), (e) => setMine({ n: { time: Date.now() / 1000, error: e.message }, base }))
 			.finally(() => setBusy(false));
 	};
-	const s = common.natSummary(common.natPick(st.nat, mine), common.get('watchdog', 'enabled'));
+	const s = common.natSummary(common.natPick(st.nat, mine), !!st.watchdog);
 	const aside = html`${busy ? html`<${kit.Busy} text=${_('Testing…')} />` : html`<${kit.Badge} level=${s.level}>${s.text}</${kit.Badge}>`}
 		<button type="button" class="btn" data-act="nat-test" disabled=${busy} onClick=${run}>${_('Check NAT')}</button>`;
 	return html`<${kit.Card} cls="nat" title=${_('NAT check')} aside=${aside}>
@@ -158,7 +158,7 @@ function FwdCard({ devices }) {
 				<span class="num">${'%s %s → %s:%s'.format(PROTOS[r.proto] || r.proto, r.ext, r.who || '?', r.port)}</span>
 			</button>
 			<${kit.Switch} label=${_('Enabled')} aria=${'%s: %s'.format(r.name || '%s %s'.format(PROTOS[r.proto] || r.proto, r.ext), _('Enabled'))}
-				opt=${'firewall.' + r.sid + '.enabled'} checked=${r.on} onChange=${(on) => toggle(r.sid, on)} />
+				opt=${'firewall.' + r.sid + '.enabled'} dot=${false} checked=${r.on} onChange=${(on) => toggle(r.sid, on)} />
 		</li>`)}</ul>` : html`<${kit.Empty} text=${_('No port forwards from the tunnel yet.')} />`}
 		<div><${kit.Go} href=${L.url('admin/network/firewall/forwards')} label=${_('More options: Network → Firewall')} /></div>
 		${edit ? html`<${FwdDialog} key=${edit.n} row=${edit.row} devices=${devices} onClose=${() => setEdit(null)} onDeleted=${deleted} />` : ''}
@@ -190,12 +190,12 @@ function Page({ store, view, devices }) {
 return view.extend({
 	load: function() {
 		return Promise.all([ app.load(), common.loadSchema() ]).then(() => Promise.all([
-			common.callStatus(), common.callDevices().catch(() => null), uci.load('truba'), uci.load('firewall'), uci.load('network') ]));
+			common.callStatus().catch(() => null), common.callDevices().catch(() => null), uci.load('truba'), uci.load('firewall'), uci.load('network') ]));
 	},
 
 	// Устройства — один раз при открытии: имена в строках и список для выбора; опрос — только status.
 	render: function(data) {
-		const store = app.store({ status: data[0] });
+		const store = app.store({ status: data[0], offline: data[0] == null });
 		app.poll(store, () => common.callStatus().then((s) => ({ status: s })), POLL);
 		return app.mount(this, Page, { store, devices: data[1]?.devices || [] });
 	},

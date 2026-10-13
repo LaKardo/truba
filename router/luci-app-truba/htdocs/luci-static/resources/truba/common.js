@@ -3,7 +3,7 @@
 'require rpc';
 'require uci';
 
-const callStatus = rpc.declare({ object: 'truba', method: 'status', expect: { '': {} } });
+const callStatusRaw = rpc.declare({ object: 'truba', method: 'status', expect: { '': {} } });
 const callLists = rpc.declare({ object: 'truba', method: 'lists', expect: { '': {} } });
 const callCategories = rpc.declare({ object: 'truba', method: 'categories', expect: { '': {} } });
 const callSets = rpc.declare({ object: 'truba', method: 'sets', expect: { '': {} } });
@@ -22,22 +22,12 @@ const callSchema = rpc.declare({ object: 'truba', method: 'schema', expect: { ''
 const callDevices = rpc.declare({ object: 'truba', method: 'devices', expect: { '': {} } });
 const callConnections = rpc.declare({ object: 'truba', method: 'connections', params: [ 'ip' ], expect: { '': {} } });
 
-// Общие стили — один раз на страницу; ?v= — как у модулей LuCI.
-if (!document.querySelector('link[data-truba]'))
-	document.head.appendChild(E('link', {
-		'rel': 'stylesheet', 'data-truba': '',
-		'href': L.resource('truba/truba.css') + (L.env.resource_version ? '?v=' + L.env.resource_version : '')
-	}));
-
 const ACTION_LABELS = {
 	mode: _('By mode'),
 	direct: _('Direct'),
 	tunnel: _('Tunnel'),
 	block: _('Block')
 };
-
-// Цвет Действия — один на всех вкладках: значки, точки, график.
-const ACTION_LEVELS = { tunnel: 'info', direct: 'ok', block: 'err' };
 
 const REASON_LABELS = {
 	local: _('local network or the Truba itself — never routed'),
@@ -159,88 +149,6 @@ function fmtNum(n) {
 	return (+n || 0).toLocaleString();
 }
 
-// ---- Элементы страниц ----
-
-// Значок состояния. level: ok / warn / err / info или '' (нейтральный).
-function pill(level, text) {
-	return E('span', { 'class': 'truba-badge ' + (level || '') }, text);
-}
-
-// Пустой span под значение, которое опрос потом обновляет.
-function span(cls) {
-	return E('span', cls ? { 'class': cls } : {});
-}
-
-const SVGNS = 'http://www.w3.org/2000/svg';
-function svgEl(tag, attrs) {
-	const el = document.createElementNS(SVGNS, tag);
-	for (let k in attrs)
-		el.setAttribute(k, attrs[k]);
-	return el;
-}
-
-// Таблица «название — значение»: rows — [ [ название, значение ], … ].
-function kvTable(rows) {
-	return E('table', { 'class': 'truba-kv' }, rows.map(([ label, value ]) =>
-		E('tr', {}, [ E('th', { 'scope': 'row' }, label), E('td', {}, value) ])));
-}
-
-// Таблица LuCI: заголовки колонок и строки из row().
-function table(headers, rows) {
-	return E('table', { 'class': 'table' }, [
-		E('tr', { 'class': 'tr table-titles' }, headers.map((h) => E('th', { 'class': 'th' }, h))),
-		...rows
-	]);
-}
-
-// Строка таблицы LuCI: ячейки и, если нужно, свои атрибуты строки.
-function row(cells, attrs) {
-	return E('tr', { 'class': 'tr', ...attrs }, cells.map((c) => E('td', { 'class': 'td' }, c)));
-}
-
-// Кнопки-фильтры, нажата одна: items — [ [ значение, содержимое кнопки ], … ].
-function chips(items, initial, onSelect) {
-	const buttons = items.map(([ value, content ], k) => E('button', {
-		'class': 'truba-chip', 'type': 'button', 'aria-pressed': String(value == initial),
-		'click': () => {
-			buttons.forEach((b, j) => b.setAttribute('aria-pressed', String(j == k)));
-			onSelect(value);
-		}
-	}, content));
-	return buttons;
-}
-
-// Идёт загрузка или проверка.
-function busy(text) {
-	return E('em', { 'class': 'spinning' }, text);
-}
-
-// Пустой список или нет данных.
-function empty(text) {
-	return E('em', { 'class': 'truba-muted' }, text);
-}
-
-// Обновить текст, только если он изменился: без лишних перерисовок.
-function setText(el, text) {
-	text = (text == null) ? '' : String(text);
-	if (el.textContent !== text)
-		el.textContent = text;
-}
-
-// Уровень значка, точки или сводки (ok / warn / err / info, '' — нейтральный): меняются только
-// классы уровня, остальные классы элемента остаются.
-const LEVELS = [ 'ok', 'warn', 'err', 'info' ];
-function setLevel(el, level) {
-	for (let l of LEVELS)
-		el.classList.toggle(l, l == level);
-}
-
-// Значок или точка: уровень и текст.
-function setState(el, level, text) {
-	setLevel(el, level);
-	setText(el, text);
-}
-
 // Неразрывный пробел: пустая строка ячейки сохраняет высоту.
 const NBSP = ' ';
 
@@ -261,6 +169,16 @@ function setResult(s) {
 	return s.ok
 		? '%s, %s'.format(s.changed ? _('updated') : _('no changes'), VIA_LABELS[s.via] || s.via)
 		: _('failed — %s').format((s.errors || []).map(setError).join('; ') || '?');
+}
+
+// Состояние службы. Ошибку ubus (нет прав, нет объекта truba) rpc LuCI отдаёт пустым объектом, а у ответа
+// службы service есть всегда: пустой — ошибка, и страница показывает «нет связи», а не «служба остановлена».
+function callStatus() {
+	return callStatusRaw().then((st) => {
+		if (!st || !('service' in st))
+			throw new Error('truba.status: no answer');
+		return st;
+	});
 }
 
 // ---- Схема настроек и константы службы (truba.schema, ADR 0015) ----
@@ -310,40 +228,6 @@ function get(sec, key, sid) {
 	default:
 		return v;
 	}
-}
-
-// Поле формы по схеме: умолчание, подсказка и проверка. msg — текст ошибки поля с шаблоном.
-function field(o, sec, key, msg) {
-	const s = schemaOpt(sec, key);
-	if (!s)
-		return o;
-	switch (s.type) {
-	case 'bool':
-		o.default = s.def ? '1' : '0';
-		break;
-	case 'enum':
-	case 'list':
-	case 'upstreams':
-		o.default = s.def;
-		break;
-	case 'int':
-		o.placeholder = String(s.def);
-		o.datatype = s.min ? 'or(range(0,0),range(%d,%d))'.format(s.min, s.hi) : 'range(%d,%d)'.format(s.lo, s.hi);
-		break;
-	case 'pattern': {
-		const re = new RegExp(s.re);
-		o.placeholder = s.def;
-		o.validate = (sid, v) => (!v || re.test(v)) ? true : msg;
-		break;
-	}
-	case 'string':
-		o.placeholder = s.def;
-		break;
-	case 'ipv4':
-		o.datatype = 'ip4addr';
-		break;
-	}
-	return o;
 }
 
 // Текст ошибки поля по схеме или null — та же проверка, что у службы (conf.uc, check_value): неверное
@@ -756,6 +640,8 @@ function handshakeLevel(age, verdict, max, grace) {
 // Состояние Туннеля по status: [уровень, текст] — для плитки «Обзора» и вкладки «Туннель».
 function tunnelState(st) {
 	const t = st.tunnel || {}, h = st.health || {};
+	if (!('service' in st))
+		return [ '', _('no data') ];
 	if (!st.service)
 		return [ 'err', _('service stopped') ];
 	if (!t.configured)
@@ -778,15 +664,21 @@ const LOG_RE = /^\w{3} (\w{3}) +(\d+) (\d\d:\d\d:\d\d) \d{4} \w+\.(\w+) ([\w.-]+
 const MONTHS = { Jan: 1, Feb: 2, Mar: 3, Apr: 4, May: 5, Jun: 6, Jul: 7, Aug: 8, Sep: 9, Oct: 10, Nov: 11, Dec: 12 };
 
 // Источник строки на «Журнале» — по тегу: у watchdog свой (truba-watchdog), строки интерфейса Туннеля
-// пишут netifd и ядро. Остальное, что отдаёт truba.log (Труба, её переустановка, cron с её задачей), — Труба.
+// пишут netifd и ядро. truba.log отдаёт и строки других программ с именем интерфейса (межсетевой экран при
+// его подъёме) — они тоже об интерфейсе. Остальное (Труба, её переустановка, cron с её задачей) — Труба.
 const LOG_SOURCES = { mosdns: 'mosdns', 'truba-watchdog': 'watchdog', netifd: 'awg', kernel: 'awg' };
 
-function logSource(src) {
-	return LOG_SOURCES[src] || 'truba';
+function logSource(src, text, iface) {
+	if (LOG_SOURCES[src])
+		return LOG_SOURCES[src];
+	// Имя интерфейса — словом: «wg» не находится в «wget».
+	const word = iface && new RegExp('(^|[^\\w.-])' + iface.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '($|[^\\w.-])');
+	return (word && !/^truba/.test(src) && src != 'crond' && word.test(String(text))) ? 'awg' : 'truba';
 }
 
 // Строки журнала по порядку текста: время, тег, источник, уровень, текст и исходная строка (для «Скачать»).
-function parseLog(text) {
+// iface — интерфейс Туннеля: строки других программ с его именем — источник awg.
+function parseLog(text, iface) {
 	return (text || '').split('\n').filter((l) => l).map((l) => {
 		const m = l.match(LOG_RE);
 		if (!m)
@@ -807,7 +699,7 @@ function parseLog(text) {
 			if (/failed to load cache dump.*no such file/.test(msg))
 				level = 'info';
 		}
-		return { time: '%02d.%02d %s'.format(+m[2], MONTHS[m[1]] || 0, m[3]), src: m[5], source: logSource(m[5]), level, text: msg, raw: l };
+		return { time: '%02d.%02d %s'.format(+m[2], MONTHS[m[1]] || 0, m[3]), src: m[5], source: logSource(m[5], msg, iface), level, text: msg, raw: l };
 	});
 }
 
@@ -832,13 +724,12 @@ function tabUrl(tab) {
 
 return baseclass.extend({
 	callStatus, callLists, callCategories, callSets, callCheck, callUpdateLists, callRollbackLists, callRates, callLog,
-	callSchema, loadSchema, schema, get, field, fieldError, handshakeLevel, callDevices, callConnections,
-	ACTIVE_SPAN, devRate, devShare, devActive, deviceSections, deviceSection, devicePolicy, normMac, connLabel,
-	RULE_ACTIONS, ruleKey, ruleOf, ruleSections, ruleActions, ruleAction, catRows, catsDue, listsDue, checkErrorText,
-	runNatTest, runTunnelTest, parseLog, logSource, logShown, upstreamError, dnsStats, natSummary, upnpState, upnpRows,
-	forwardRows, fwProto, fwEnabled, portError, forwardErrors, zoneOfIp, forwardValues, natPick,
-	ACTION_LABELS, ACTION_LEVELS, REASON_LABELS, VIA_LABELS, WARNINGS, NAT_ERRORS, CHECK_ERRORS, UPNP_MISSING, NBSP, TABS,
+	loadSchema, schema, get, fieldError, handshakeLevel, callDevices, callConnections,
+	devRate, devShare, devActive, deviceSections, deviceSection, devicePolicy, normMac, connLabel,
+	ruleKey, ruleOf, ruleSections, ruleActions, ruleAction, catRows, catsDue, listsDue, checkErrorText,
+	runNatTest, runTunnelTest, parseLog, logShown, upstreamError, dnsStats, natSummary, upnpState, upnpRows,
+	forwardRows, fwEnabled, portError, forwardErrors, zoneOfIp, forwardValues, natPick,
+	ACTION_LABELS, REASON_LABELS, VIA_LABELS, WARNINGS, NAT_ERRORS, CHECK_ERRORS, UPNP_MISSING, NBSP, TABS,
 	fmtBytes, fmtRate, fmtAge, fmtTime, fmtDate, fmtNum, missingText,
-	pill, busy, empty, span, svgEl, kvTable, table, row, chips,
-	setText, setState, setResult, setError, tunnelIface, tunnelState, tabUrl, invalidTab
+	setResult, setError, tunnelIface, tunnelState, tabUrl, invalidTab
 });

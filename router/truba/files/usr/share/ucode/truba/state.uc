@@ -80,7 +80,7 @@ function health_state() {
 	return U.read_json(C.HEALTH_FILE, null);
 }
 
-// sums — с контрольной суммой: она нужна только вкладке «DNS и списки».
+// sums — с контрольной суммой: она нужна только вкладке «Правила».
 function list_info(dir, file, sums) {
 	let p = dir + '/' + file;
 	let st = stat(p);
@@ -122,8 +122,9 @@ function neighbours() {
 
 // Работает ли служба procd (или её инстанс) — по ubus, без pidof. mosdns — инстанс
 // службы truba: чужой mosdns, запущенный отдельно, за Трубу не считается.
-function running(ub, service, instance) {
-	let r = ub?.call('service', 'list', { name: service });
+// r — готовый ответ service list, если он уже есть (status спрашивает его один раз на оба экземпляра).
+function running(ub, service, instance, r) {
+	r ??= ub?.call('service', 'list', { name: service });
 	for (let name, inst in r?.[service]?.instances ?? {})
 		if ((instance == null || name == instance) && inst.running)
 			return true;
@@ -216,10 +217,13 @@ export function status() {
 	let st = N.iface_up(cfg.iface, ub);
 	let applied = U.read_json(C.APPLIED_FILE, null);
 	let raw = counters_raw();
+	let svc = ub?.call('service', 'list', { name: 'truba' });
 	let res = {
 		routing: cfg.routing,
 		mode: cfg.mode,
 		killswitch: cfg.killswitch,
+		// Работает ли сторож Туннеля: «Состояние» показывает его, а не переключатель в браузере.
+		watchdog: running(ub, 'truba', 'watchdog', svc),
 		service: applied != null,
 		applied,
 		tunnel: {
@@ -244,7 +248,7 @@ export function status() {
 		traffic: traffic(raw),
 		neighbours: neighbours(),
 		upnp: upnp_info(cfg, ub),
-		mosdns: running(ub, 'truba', 'mosdns'),
+		mosdns: running(ub, 'truba', 'mosdns', svc),
 		// Адрес API — тот, с которым mosdns запущена (его может не быть, если порт занят).
 		dns_cache: (cfg.routing && applied?.dns_api) ? dns_cache(applied.dns_api, cfg) : null,
 		// Итог последней «Проверки NAT» — кнопкой или watchdog после подъёма Туннеля.
@@ -261,7 +265,7 @@ export function status() {
 	return res;
 };
 
-// Версии Наборов правил для вкладки «DNS и списки»: текущие и предыдущие, с контрольными суммами.
+// Версии Наборов правил для вкладки «Правила»: текущие и предыдущие, с контрольными суммами.
 export function lists() {
 	return {
 		geoip: list_info(C.LISTS_DIR, C.DAT_FILES.geoip, true),

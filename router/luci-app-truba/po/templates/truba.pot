@@ -354,6 +354,10 @@ msgid "This external port is already forwarded: %s"
 msgstr ""
 
 #: htdocs/luci-static/resources/truba/common.js
+msgid "no data"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/common.js
 msgid "service stopped"
 msgstr ""
 
@@ -414,11 +418,11 @@ msgid "block: %s"
 msgstr ""
 
 #: htdocs/luci-static/resources/truba/ui/kit.js
-msgid "Tunnel %d%%, direct %d%%"
+msgid "changed, not applied yet"
 msgstr ""
 
 #: htdocs/luci-static/resources/truba/ui/kit.js
-msgid "changed, not applied yet"
+msgid "Tunnel %d%%, direct %d%%"
 msgstr ""
 
 #: htdocs/luci-static/resources/truba/ui/kit.js
@@ -451,6 +455,14 @@ msgstr ""
 
 #: htdocs/luci-static/resources/truba/ui/kit.js
 msgid "Add server"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/ui/kit.js
+msgid "The file is too large for router.conf: %d KiB"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/ui/kit.js
+msgid "The file cannot be read: %s"
 msgstr ""
 
 #: htdocs/luci-static/resources/truba/ui/kit.js
@@ -511,6 +523,10 @@ msgstr ""
 
 #: htdocs/luci-static/resources/truba/ui/kit.js
 msgid "Apply"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/ui/kit.js
+msgid "The changes were not saved: %s"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/devices.js
@@ -982,6 +998,10 @@ msgid "Everything works"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/overview.js
+msgid "handshake %s"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/overview.js
 msgid "the watchdog is off"
 msgstr ""
 
@@ -1410,10 +1430,6 @@ msgid "lost"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/tunnel.js
-msgid "no data"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/tunnel.js
 msgid "Tunnel watchdog"
 msgstr ""
 
@@ -1594,7 +1610,7 @@ msgid "Keepalive, s"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/tunnel.js
-msgid "Keeps the provider NAT mapping open so inbound connections via the Truba IP reach the router. A range «from-to» (AmneziaWG 3.1) gives a random period, so an idle tunnel has no steady rhythm."
+msgid "Keeps the provider NAT mapping open so inbound connections via the Truba IP reach the router. A range «from-to» (AmneziaWG 3.1) gives a random period, so an idle tunnel has no steady rhythm. Empty — no keepalive."
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/tunnel.js

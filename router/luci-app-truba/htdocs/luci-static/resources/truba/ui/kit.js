@@ -42,13 +42,17 @@ function Icon({ name }) {
 }
 
 // Переключатель опции UCI. opt — «конфиг.секция.опция»: по нему тесты находят элемент. aria — имя для экранного
-// чтеца, когда подписи мало (одинаковые переключатели в строках списка).
-function Switch({ label, checked, disabled, opt, aria, onChange }) {
+// чтеца, когда подписи мало (одинаковые переключатели в строках списка). Несохранённое изменение опции отмечено
+// точкой, как у полей (spec §3.6); dot=false — у строки уже своя точка.
+function Switch({ label, checked, disabled, opt, aria, dot, onChange }) {
 	const { html } = app.lib;
+	const [ c, s, o ] = (opt || '').split('.');
+	const st = uci.state || {};
+	const changed = dot !== false && !!o && (st.changes?.[c]?.[s]?.[o] !== undefined || (st.deletes?.[c]?.[s] || {})[o] !== undefined);
 	return html`<label class="sw">
 		<input type="checkbox" data-opt=${opt} aria-label=${aria} checked=${!!checked} disabled=${!!disabled}
 			onChange=${(ev) => onChange(ev.target.checked)} />
-		<span>${label}</span>
+		<span>${label}</span>${changed ? html`<${Dot} level="warn" label=${_('changed, not applied yet')} />` : ''}
 	</label>`;
 }
 
@@ -158,7 +162,7 @@ function Field({ config, sec, name, sid, label, hint, msg, disabled, check, plac
 	const saved = () => uci.get(c, s, name) ?? '';
 	const errOf = (x) => check ? check(x) : common.fieldError(sec, name, x);
 	const [ v, setV ] = useState(saved);
-	const base = useRef(saved());   // значение, с которым поле появилось на странице
+	const base = useRef(saved());   // значение на начало правки: при появлении поля и при каждом фокусе
 	// Выключенное поле не проверяется и показывает то, что в настройках: неверный ввод в нём не держит «Применить».
 	useEffect(() => { if (disabled) setV(saved()); }, [ disabled ]);
 	const err = disabled ? null : errOf(v.trim());
@@ -189,18 +193,21 @@ function Field({ config, sec, name, sid, label, hint, msg, disabled, check, plac
 				app.set(c, s, name, t === '' ? null : t);
 		}
 		// Неверное не пишется, а верное, набранное по пути к нему («900» на пути к «9000»), снимается: в настройках
-		// остаётся то, с чем поле появилось, — иначе «Сохранить» LuCI незаметно отправил бы промежуточное.
+		// остаётся то, что было на начало правки, — иначе «Сохранить» LuCI незаметно отправил бы промежуточное.
 		else if (saved() !== base.current)
 			app.set(c, s, name, base.current === '' ? null : base.current);
 	};
-	const def = (placeholder != null) ? placeholder : (c == 'truba') ? common.schema().sections?.[sec]?.[name]?.def : null;
-	const changed = uci.state?.changes?.[c]?.[s]?.[name] !== undefined;
+	// Подсказка опции Трубы (без config) — умолчание схемы службы.
+	const def = (placeholder != null) ? placeholder : !config ? common.schema().sections?.[sec]?.[name]?.def : null;
+	// Изменено — и когда опция снята (поле очищено до умолчания): она в deletes, а не в changes.
+	const changed = uci.state?.changes?.[c]?.[s]?.[name] !== undefined || (uci.state?.deletes?.[c]?.[s] || {})[name] !== undefined;
 	const id = 'f-' + c + '-' + s + '-' + name;
 	return html`<div class=${'field' + (shown ? ' bad' : '')} ref=${ref}>
 		<label for=${id}>${label}${changed ? html` <${Dot} level="warn" label=${_('changed, not applied yet')} />` : ''}</label>
 		<input id=${id} data-opt=${opt} autocomplete="off" value=${v} disabled=${!!disabled}
 			placeholder=${(def != null && typeof def != 'object') ? String(def) : ''}
-			aria-invalid=${err ? 'true' : undefined} aria-describedby=${shown ? id + '-e' : undefined} onInput=${onInput} onBlur=${settle} />
+			aria-invalid=${err ? 'true' : undefined} aria-describedby=${shown ? id + '-e' : undefined} onInput=${onInput} onBlur=${settle}
+			onFocus=${() => { if (!err) base.current = saved(); }} />
 		${shown ? html`<div class="err-text" id=${id + '-e'} role="alert">${msg || err}</div>` : ''}
 		${hint ? html`<div class="mu">${hint}</div>` : ''}
 	</div>`;
@@ -309,25 +316,39 @@ function UpstreamList({ sec, name, label }) {
 // Файл или текст для импорта (router.conf): файл перетаскивают в зону или выбирают нажатием на неё, текст
 // вставляют в поле под ней — на телефоне вставить можно только в поле ввода. onText получает текст;
 // error — почему он не подошёл, под зоной.
+const DROP_MAX = 64 * 1024;   // router.conf — меньше 1 КиБ; файл больше — не он
+
 function DropZone({ label, accept, placeholder, error, onText }) {
 	const { html, useState } = app.lib;
-	const [ over, setOver ] = useState(false), [ text, setText ] = useState('');
-	const read = (f) => { if (f) f.text().then(onText); };
+	const [ over, setOver ] = useState(false), [ text, setText ] = useState(''), [ own, setOwn ] = useState(null);
+	const read = (f) => {
+		if (!f)
+			return;
+		if (f.size > DROP_MAX) {
+			setOwn(_('The file is too large for router.conf: %d KiB').format(Math.ceil(f.size / 1024)));
+			return;
+		}
+		setOwn(null);
+		f.text().then(onText, (e) => setOwn(_('The file cannot be read: %s').format(e?.message || e)));
+	};
 	const drop = (ev) => {
 		ev.preventDefault();
 		setOver(false);
 		read(ev.dataTransfer?.files?.[0]);
 	};
-	return html`<div class="drop">
+	// Файл, брошенный мимо зоны (на поле текста), браузер открыл бы вместо страницы.
+	const block = (ev) => { if (ev.dataTransfer?.types?.includes?.('Files')) ev.preventDefault(); };
+	return html`<div class="drop" onDragOver=${block} onDrop=${block}>
 		<label class=${'zone' + (over ? ' over' : '')} onDragOver=${(ev) => { ev.preventDefault(); setOver(true); }}
 				onDragLeave=${() => setOver(false)} onDrop=${drop}>
 			<${Icon} name="file-up" /><span>${label}</span>
 			<input type="file" accept=${accept} onChange=${(ev) => { read(ev.target.files[0]); ev.target.value = ''; }} />
 		</label>
-		<textarea name="conf" rows="3" autocomplete="off" spellcheck="false" placeholder=${placeholder} value=${text}
-			onInput=${(ev) => setText(ev.target.value)}></textarea>
-		<div class="acts"><button type="button" class="btn" data-act="import" disabled=${!text.trim()} onClick=${() => onText(text)}>${_('Import')}</button></div>
-		${error ? html`<div class="err-text" role="alert">${error}</div>` : ''}
+		<textarea name="conf" rows="3" autocomplete="off" spellcheck="false" aria-label=${placeholder} placeholder=${placeholder} value=${text}
+			onInput=${(ev) => { setText(ev.target.value); setOwn(null); }}></textarea>
+		<div class="acts"><button type="button" class="btn" data-act="import" disabled=${!text.trim()}
+			onClick=${() => { setOwn(null); onText(text); }}>${_('Import')}</button></div>
+		${(own || error) ? html`<div class="err-text" role="alert">${own || error}</div>` : ''}
 	</div>`;
 }
 
@@ -430,16 +451,31 @@ function Check({ mac, full }) {
 // Высота панели — в --changes-h у корня страницы: на телефоне панель устройства, тоже прилипшая к низу
 // экрана, поднимается над ней, а не прячется под ней.
 function ChangesBar({ view }) {
-	const { html, useRef, useLayoutEffect } = app.lib;
+	const { html, useRef, useLayoutEffect, useState } = app.lib;
 	const { n, bad } = app.use(app.changes);
 	const ref = useRef(null);
+	// Пока изменения сохраняются, кнопки недоступны: второе нажатие запустило бы второе применение. Отказ
+	// сохранения — текстом на панели, а не необработанной ошибкой. busy — и ref: два нажатия в одном кадре
+	// приходят раньше перерисовки.
+	const busy = useRef(false), [ , setBusy ] = useState(false), [ err, setErr ] = useState(null);
+	const run = (fn) => {
+		if (busy.current)
+			return;
+		busy.current = true;
+		setBusy(true);
+		setErr(null);
+		Promise.resolve().then(fn).catch((e) => setErr(e?.message || String(e))).finally(() => {
+			busy.current = false;
+			setBusy(false);
+		});
+	};
 	useLayoutEffect(() => {
 		const el = ref.current, root = el?.parentElement;
 		if (!el || !root)
 			return;
 		root.style.setProperty('--changes-h', (el.offsetHeight + 16) + 'px');
 		return () => root.style.removeProperty('--changes-h');
-	}, [ n, !!bad ]);
+	}, [ n, !!bad, err ]);
 	if (!n)
 		return null;
 	// К первому неверному полю: блок с ним раскрывается, фокус — в поле.
@@ -451,8 +487,10 @@ function ChangesBar({ view }) {
 	return html`<div class="changes" role="status" ref=${ref}>
 		<${Icon} name="pencil" />
 		<span>${_('Unapplied changes: %d').format(n)}${bad ? html` · <button type="button" class="link" data-act="show-bad" onClick=${showBad}>${_('Fix the highlighted fields')}</button>` : ''}</span>
-		<button type="button" class="btn" data-act="reset" onClick=${() => view.handleReset()}>${_('Reset')}</button>
-		<button type="button" class="btn p" data-act="apply" disabled=${!!bad} onClick=${() => view.handleSaveApply(null, '0')}>${_('Apply')}</button>
+		<button type="button" class="btn" data-act="reset" disabled=${busy.current} onClick=${() => run(() => view.handleReset())}>${_('Reset')}</button>
+		<button type="button" class="btn p" data-act="apply" disabled=${!!bad || busy.current}
+			onClick=${() => run(() => view.handleSaveApply(null, '0'))}>${_('Apply')}</button>
+		${err ? html`<span class="err-text" role="alert">${_('The changes were not saved: %s').format(err)}</span>` : ''}
 	</div>`;
 }
 

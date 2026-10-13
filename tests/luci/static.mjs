@@ -119,8 +119,9 @@ const COPIES = [
 	[ /== 'truba'/, 'имя зоны truba' ],
 	[ /UPSTREAM_SCHEMES = \[/, 'схемы адресов DNS' ],
 ];
-// Строки с пометкой «// опция network» — поля интерфейса AmneziaWG: это не настройки Трубы.
-for (const f of files.filter((f) => rel(f).includes('/view/truba/'))) {
+// Строки с пометкой «// опция network» — поля интерфейса AmneziaWG: это не настройки Трубы. Проверяются представления,
+// компоненты ui/ и awg.js — копия значения в общем компоненте так же расходилась бы со службой.
+for (const f of files.filter((f) => /\/(view\/truba|truba\/ui)\/|\/truba\/awg\.js$/.test(rel(f)))) {
 	readFileSync(f, 'utf8').split('\n').forEach((line, i) => {
 		if (line.includes('// опция network'))
 			return;
@@ -136,17 +137,23 @@ if (existsSync(devView) && /\b3600\b|, 60\)/.test(readFileSync(devView, 'utf8'))
 	fails++;
 }
 
-// Интерфейс вызывает truba.schema, которой нет в службе до 1.1.0-r7: с более старой truba страницы не строятся.
-// Нижняя граница зависимости — не ниже неё и не выше версии truba из этого же репозитория.
-const SCHEMA_SINCE = '1.1.0-r7';
+// Интерфейс вызывает truba.devices и truba.connections (ADR 0018) и читает status.watchdog — их нет в службе до
+// 1.2.0-r1: с более старой truba вкладки «Обзор» и «Устройства» не строятся. Нижняя граница зависимости — не ниже
+// неё и не выше версии truba из этого же репозитория; версии пакетов выпускаются вместе (spec §6.4).
+const API_SINCE = '1.2.0-r1';
 const ver = (v) => v.split(/[.-]r?/).map(Number);
 const cmpVer = (a, b) => { const x = ver(a), y = ver(b); for (let i = 0; i < 4; i++) if (x[i] !== y[i]) return x[i] - y[i]; return 0; };
 const luciMk = readFileSync(join(root, 'Makefile'), 'utf8');
 const trubaMk = readFileSync(join(root, '../truba/Makefile'), 'utf8');
 const floor = luciMk.match(/LUCI_EXTRA_DEPENDS:=.*truba \(>=([0-9.]+-r\d+)\)/)?.[1];
-const trubaVer = `${trubaMk.match(/PKG_VERSION:=(\S+)/)[1]}-r${trubaMk.match(/PKG_RELEASE:=(\S+)/)[1]}`;
-if (!floor || cmpVer(floor, SCHEMA_SINCE) < 0 || cmpVer(floor, trubaVer) > 0) {
-	console.log(`FAIL  luci-app-truba зависит от truba (>=${floor || '?'}), нужно от ${SCHEMA_SINCE} до ${trubaVer}`);
+const mkVer = (mk) => `${mk.match(/PKG_VERSION:=(\S+)/)[1]}-r${mk.match(/PKG_RELEASE:=(\S+)/)[1]}`;
+const trubaVer = mkVer(trubaMk), luciVer = mkVer(luciMk);
+if (!floor || cmpVer(floor, API_SINCE) < 0 || cmpVer(floor, trubaVer) > 0) {
+	console.log(`FAIL  luci-app-truba зависит от truba (>=${floor || '?'}), нужно от ${API_SINCE} до ${trubaVer}`);
+	fails++;
+}
+if (luciVer !== trubaVer) {
+	console.log(`FAIL  версии пакетов разные: luci-app-truba ${luciVer}, truba ${trubaVer} — выпускаются вместе`);
 	fails++;
 }
 
@@ -232,6 +239,11 @@ if (app) {
 	await pollFn?.();
 	await pollFn?.();
 	check(quietCalls === 1 && quiet.get().offline === false, `app.poll: пустой ответ — без оповещения, кроме первого (${quietCalls})`);
+	// Пустой шаг (на «Правилах» на шаге может не быть вызовов) — не ответ Роутера: «нет связи» он не снимает.
+	const down = app.store({ offline: true });
+	app.poll(down, () => Promise.resolve({}), 5);
+	await pollFn?.();
+	check(down.get().offline === true, 'app.poll: пустой шаг без вызовов не снимает «нет связи»');
 	uciStub.state = { creates: {}, changes: { truba: { main: { routing: '0' } }, network: { awg0: { disabled: '1' } } }, deletes: {}, reorder: {} };
 	check(app.changeCount() === 2, 'app.changeCount: две изменённые опции');
 	uciStub.state = { creates: { truba: { cfg01: {} } }, changes: {}, deletes: { firewall: { r1: true } }, reorder: { truba: true } };
@@ -598,6 +610,12 @@ if (cdev) {
 	const l5 = PL(D + 'cron.err crond[900]: USER root pid 1 cmd truba update-lists');
 	check(l5.source === 'truba' && l5.level === 'info', 'common.parseLog: запуск задачи cron — не ошибка');
 	check(PL(D + "daemon.notice netifd: Interface 'awg0' is now up").source === 'awg', 'common.parseLog: netifd — источник awg');
+	check(cdev.parseLog?.(D + 'user.notice firewall: Reloading firewall due to ifup of truba (awg0)', 'awg0')?.[0]?.source === 'awg' &&
+		cdev.parseLog?.(D + 'cron.err crond[900]: USER root pid 1 cmd truba update-lists', 'awg0')?.[0]?.source === 'truba',
+		'common.parseLog: строка другой программы с именем интерфейса Туннеля — awg, cron с задачей Трубы — truba');
+	check(cdev.parseLog?.(D + 'user.notice firewall: Reloading firewall due to ifup of vpn (wg)', 'wg')?.[0]?.source === 'awg' &&
+		cdev.parseLog?.(D + 'user.notice uhttpd: wget https://example.org/x', 'wg')?.[0]?.source === 'truba',
+		'common.parseLog: имя интерфейса — словом, а не частью другого («wg» не в «wget»)');
 	const l7 = PL('garbage');
 	check(l7.time === '' && l7.source === 'truba' && l7.level === 'info' && l7.text === 'garbage' && l7.raw === 'garbage',
 		`common.parseLog: неразобранная строка — как есть (${JSON.stringify(l7)})`);
@@ -687,6 +705,134 @@ for (const [s, f] of strings) {
 }
 for (const s of translated.keys())
 	if (!strings.has(s)) console.log(`warn  лишняя строка в po: ${s}`);
+
+// ---- Отложенные мелочи этапа 1 (этап 7) ----
+
+// (a) Ошибку ubus (нет прав, нет объекта) rpc LuCI отдаёт пустым объектом: callStatus её не выдаёт за
+// «служба остановлена» — отклоняется, и страница показывает «нет связи». Без данных — «нет данных».
+{
+	const st = (reply) => new Function('baseclass', 'rpc', 'uci', '_', 'L', 'E', 'document', commonSrc)(
+		baseclass, { declare: (o) => () => Promise.resolve(o.method == 'status' ? reply : {}) }, devUci, (s) => s, stub, stub, { querySelector: () => true });
+	const empty = await st({}).callStatus().then(() => 'resolved', () => 'rejected');
+	const stopped = await st({ service: false }).callStatus().then((x) => x.service === false ? 'resolved' : '?', () => 'rejected');
+	check(empty == 'rejected' && stopped == 'resolved', `common.callStatus: ответ без service — ошибка, { service: false } — ответ (${empty}, ${stopped})`);
+	check(cdev.tunnelState?.({})?.[0] === '', `common.tunnelState({}): без данных — не «служба остановлена» (${cdev.tunnelState?.({})})`);
+}
+
+// (b) Строки — при отрисовке (spec §3.7): верхний уровень модулей представлений и ui/ не вызывает _().
+// Общие таблицы common.js — при загрузке модуля (каталог LuCI уже загружен), они здесь не проверяются.
+{
+	const any = new Proxy(function () {}, {
+		get: (t, k) => (k === 'extend') ? (x) => x : (k === Symbol.toPrimitive) ? () => '' : any,
+		apply: () => any, construct: () => any
+	});
+	for (const f of files.filter((f) => /\/(view\/truba|truba\/ui)\//.test(rel(f)))) {
+		const src = readFileSync(f, 'utf8');
+		let calls = 0;
+		const deps = { _: (s) => { calls++; return s; }, L: any, E: any, window: any, document: any };
+		for (const m of src.matchAll(/^'require ([\w.]+)(?: as (\w+))?';/gm))
+			deps[m[2] || m[1].split('.').pop()] = any;
+		try {
+			new Function(...Object.keys(deps), src)(...Object.values(deps));
+		} catch (e) {
+			check(false, `${rel(f)}: верхний уровень не выполнился с заглушками — ${e.message}`);
+			continue;
+		}
+		check(!calls, `${rel(f)}: _() на верхнем уровне модуля (${calls}) — строки переводятся при отрисовке (spec §3.7)`);
+	}
+}
+
+// (c) vendor.mjs: та же строка VERSIONS (пакет@версия) с другой суммой — ошибка, а не новая сумма молча.
+{
+	const vpath = fileURLToPath(new URL('./vendor.mjs', import.meta.url));
+	if (!/export function record\(/.test(readFileSync(vpath, 'utf8')))
+		check(false, 'vendor.mjs: нет record(line, sum) — сверки суммы с VERSIONS');
+	else {
+		const { record } = await import(new URL('./vendor.mjs', import.meta.url));
+		const A = 'a'.repeat(64), B = 'b'.repeat(64);
+		let threw = false;
+		try { record(`f.js p@1 x/y.js ${A}`, B); } catch (e) { threw = true; }
+		check(threw && record('f.js p@1 x/y.js', A) == `f.js p@1 x/y.js ${A}` && record(`f.js p@1 x/y.js ${A}`, A) == `f.js p@1 x/y.js ${A}`,
+			'vendor.record: новая сумма — записывается, та же — остаётся, другая при той же версии — ошибка');
+	}
+}
+
+// (d) Пробелы покрытия: яркость color(srgb …) (так её отдают некоторые темы).
+if (app) {
+	check(app.luminance('color(srgb 0 0 0)') === 0 && Math.abs(app.luminance('color(srgb 1 1 1)') - 1) < 1e-3 &&
+		app.luminance('color(srgb 1 1 1 / 0.3)') === null, 'app.luminance: color(srgb …), почти прозрачный — null');
+}
+
+// «Рукопожатие» — одним словом во всём русском интерфейсе: рядом с плиткой «Рукопожатие» не «handshake».
+{
+	const po = readFileSync(join(root, 'po/ru/truba.po'), 'utf8');
+	const latin = [ ...po.matchAll(/^msgstr "(.*handshake.*)"$/gm) ].map((m) => m[1]);
+	check(!latin.length, `ru/truba.po: «handshake» в переводе — ${latin.join(' | ')}`);
+	const lit = files.filter((f) => /(?<!_\()'handshake /.test(readFileSync(f, 'utf8'))).map(rel);
+	check(!lit.length, `«handshake» без перевода: ${lit.join(', ')}`);
+}
+
+// ---- Остатки прежнего интерфейса (spec §3.3, этап 7) ----
+
+// Общие стили прежних вкладок (truba.css) — только в Shadow DOM-стилях ui/style.css: файла нет, и его никто
+// не подключает.
+const res = join(root, 'htdocs/luci-static/resources');
+check(!existsSync(join(res, 'truba/truba.css')), 'truba/truba.css удалён (стили — в truba/ui/style.css)');
+(function walkRouter(d) {
+	for (const f of readdirSync(d)) {
+		const p = join(d, f);
+		if (statSync(p).isDirectory()) walkRouter(p);
+		else if (/\.(js|uc|json|sh|css|mk|po|pot)$|Makefile$/.test(f) && readFileSync(p, 'utf8').includes('truba.css'))
+			check(false, `${relative(join(root, '..'), p).split(sep).join('/')}: упоминает truba.css`);
+	}
+})(join(root, '..'));
+
+// Экспорт common.js — только то, что берут представления, ui/ и awg.js или проверяет этот файл: прежние
+// помощники DOM (kvTable, chips, pill…) и формы (field) не возвращаются незаметно.
+{
+	const exp = (commonSrc.match(/return baseclass\.extend\(\{([\s\S]*?)\}\);\s*$/)?.[1] || '').split(',').map((s) => s.trim()).filter(Boolean);
+	const users = [ ...files.filter((f) => /\/(view\/truba|truba\/ui)\/|\/truba\/awg\.js$/.test(rel(f))).map((f) => readFileSync(f, 'utf8')),
+		readFileSync(fileURLToPath(import.meta.url), 'utf8').split('\n').filter((l) => !l.includes('EXPORT-CHECK')).join('\n') ].join('\n');
+	const unused = exp.filter((n) => !new RegExp('\\.' + n + '\\b').test(users));   // EXPORT-CHECK
+	check(exp.length > 0 && !unused.length, `common.js: экспорт без пользователей — ${unused.join(', ')}`);   // EXPORT-CHECK
+}
+
+// ---- Документы — о тех же вкладках, что в меню (spec §9) ----
+// Таблица вкладок README («Как пользоваться») и docs/architecture.md §5.2 — подписи menu.d по-русски, в порядке меню.
+// Старых вкладок («Маршрутизация», «DNS и списки», «Диагностика») в документах, службе и скрипте VPS нет: CHANGELOG
+// и ADR — история, их это не касается. «Маршрутизация» как переключатель и функция остаётся.
+{
+	const repo = join(root, '../..');
+	const menu = JSON.parse(readFileSync(join(root, 'root/usr/share/luci/menu.d/luci-app-truba.json'), 'utf8'));
+	const want = Object.entries(menu).filter(([ k, v ]) => /^admin\/services\/truba\/\w+$/.test(k) && v.title)
+		.sort((a, b) => a[1].order - b[1].order).map(([ , v ]) => translated.get(v.title) || v.title);
+	const firstCol = (text) => [ ...text.matchAll(/^\| *([^|]+?) *\|/gm) ].map((m) => m[1].replace(/\*\*/g, ''))
+		.filter((c) => !/^-+$|^Вкладка/.test(c));
+	const section = (text, head, next) => text.slice(text.indexOf(head), text.indexOf(next, text.indexOf(head) + head.length));
+	const readme = readFileSync(join(repo, 'README.md'), 'utf8'), arch = readFileSync(join(repo, 'docs/architecture.md'), 'utf8');
+	const rTabs = firstCol(section(readme, '## Как пользоваться', '\n## '));
+	const aTabs = firstCol(section(arch, '### 5.2 ', '\n### '));
+	check(JSON.stringify(rTabs) == JSON.stringify(want), `README «Как пользоваться»: вкладки ${rTabs.join(', ')} — нужно ${want.join(', ')}`);
+	check(JSON.stringify(aTabs) == JSON.stringify(want), `architecture.md §5.2: вкладки ${aTabs.join(', ')} — нужно ${want.join(', ')}`);
+	const OLD = [ /Диагностик/, /Маршрутизация →/, /вкладк\S*\s+[«*]+Маршрутизаци/, /^\d+\. \*\*Маршрутизация\*\*/, /вкладк\S*\s+[«*]+DNS и списк/,
+		/на [«*]+DNS и списках/, /\*\*DNS и списки\*\*/, /truba\.css/, /DNS и списк/, /\b6 вкладок/,
+		// На «DNS» порядка серверов нет — запрос идёт ко всем сразу: «поставьте первым» не сделать.
+		/поставьте (его )?первым/, /первый сервер «Туннеля» на вкладке/ ];
+	const docs = [ 'README.md', 'CONTEXT.md', 'docs/architecture.md', 'docs/roadmap.md', 'vps/install-vps.sh',
+		...readdirSync(join(repo, 'tests/router')).map((f) => 'tests/router/' + f) ];
+	(function walkTruba(d) {
+		for (const f of readdirSync(join(repo, d))) {
+			const p = d + '/' + f;
+			if (statSync(join(repo, p)).isDirectory()) walkTruba(p);
+			else docs.push(p);
+		}
+	})('router/truba/files');
+	for (const f of docs)
+		readFileSync(join(repo, f), 'utf8').split('\n').forEach((line, i) => {
+			const re = OLD.find((r) => r.test(line));
+			if (re) check(false, `${f}:${i + 1}: прежняя вкладка (${re.source}) — ${line.trim().slice(0, 90)}`);
+		});
+}
 
 console.log(`${files.length} файлов, ${strings.size} строк`);
 console.log(fails ? `${fails} FAILED` : 'ALL OK');

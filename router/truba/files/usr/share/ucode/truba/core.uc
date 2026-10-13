@@ -594,7 +594,7 @@ export function reset_rules(mode) {
 	return { mode, rules: length(filter(P.STARTING, r => r.mode == mode)) };
 };
 
-// Категории и Действия для вкладки «Маршрутизация». busy — списки распаковывает apply.
+// Категории и Действия для вкладки «Правила». busy — списки распаковывает apply.
 export function categories() {
 	let cfg = F.load();
 	let dat = D.cached();

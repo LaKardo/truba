@@ -127,12 +127,15 @@ const scheme = store({ scheme: 'light' });
 
 // Опрос службы: ошибка не стирает данные — страница показывает последние и значок «нет связи».
 // Пустой ответ (на «Правилах» lists и status приходят не на каждом шаге) ничего не меняет — без
-// оповещения: иначе страница перерисовывалась бы на каждом шаге опроса.
+// оповещения: иначе страница перерисовывалась бы на каждом шаге опроса. Шаг без вызовов — и не ответ
+// Роутера: «нет связи» он не снимает, только задаёт offline, пока его ещё нет.
 function pollStore(s, fetchFn, interval) {
 	poll.add(() => fetchFn().then(
 		(patch) => {
-			if (Object.keys(patch || {}).length || s.get().offline !== false)
+			if (Object.keys(patch || {}).length)
 				s.set(Object.assign({}, patch, { offline: false }));
+			else if (s.get().offline === undefined)
+				s.set({ offline: false });
 		},
 		() => s.set({ offline: true })), interval);
 }
@@ -297,8 +300,10 @@ function mount(view, Page, props) {
 		if (scheme.get().scheme !== sch)
 			scheme.set({ scheme: sch });
 	};
-	// Фон предков известен, только когда LuCI вставит страницу в документ.
-	const first = () => host.isConnected ? apply() : requestAnimationFrame(first);
+	// Фон предков известен, только когда LuCI вставит страницу в документ. LuCI вставляет её сразу после render();
+	// страницу, которую так и не вставили (ошибка LuCI), не ждать вечно — не дольше 60 кадров.
+	let frames = 0;
+	const first = () => host.isConnected ? apply() : (++frames < 60) && requestAnimationFrame(first);
 	requestAnimationFrame(first);
 	// Тема или её режим сменились (Bootstrap «авто» меняет data-darkmode по системной настройке).
 	const later = () => requestAnimationFrame(apply);
@@ -306,6 +311,13 @@ function mount(view, Page, props) {
 	for (let el of [ document.documentElement, document.body ])
 		mo.observe(el, { attributes: true, attributeFilter: [ 'class', 'style', 'data-darkmode', 'data-theme' ] });
 	window.matchMedia(DARK).addEventListener('change', later);
+	// Тема с плавной сменой фона: в первом кадре после смены фон ещё прежний — режим проверяется ещё раз, когда
+	// переход фона у предка страницы закончится. Переходы внутри самой страницы (до document они доходят с
+	// target = host) не в счёт.
+	document.addEventListener('transitionend', (ev) => {
+		if (ev.propertyName == 'background-color' && ev.target != host && ev.target.contains?.(host))
+			later();
+	});
 
 	changes.set({ n: changeCount() });
 	lib.render(lib.html`<${Page} ...${props} view=${view} />`, wrap);

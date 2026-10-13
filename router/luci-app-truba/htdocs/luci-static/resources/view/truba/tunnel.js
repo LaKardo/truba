@@ -13,9 +13,9 @@
 
 const POLL = 5;   // состояние — раз в 5 с
 
-// Подсказки полей интерфейса: в схеме службы их нет — это опции network, а не Трубы.
-const MTU_HINT = '1380';           // опция network
-const KEEPALIVE_HINT = '15-25';    // опция network
+// Подсказка MTU — то, что значит пустое поле: умолчание ядра для WireGuard и AmneziaWG. Опция network, в схеме
+// службы её нет.
+const MTU_HINT = '1420';           // опция network
 
 // ---- Состояние ----
 
@@ -24,7 +24,8 @@ const KEEPALIVE_HINT = '15-25';    // опция network
 function StateCard({ st, iface }) {
 	const { html } = app.lib;
 	const t = st.tunnel || {}, a = t.awg || {}, h = st.health || {};
-	const wdOn = common.get('watchdog', 'enabled');
+	// Сторож — как у службы (status.watchdog): в UCI браузера бывает и неприменённый переключатель.
+	const wdOn = !!st.watchdog;
 	const [ level, text ] = common.tunnelState(st);
 	const on = awg.configured(iface);
 
@@ -186,8 +187,8 @@ function ConnCard({ iface, onImport }) {
 			<${kit.Field} config="network" sec=${iface} name="mtu" label=${_('MTU')} check=${awg.mtuError} placeholder=${MTU_HINT}
 				hint=${_('install-vps.sh picks it for the VPS network. If full-size packets do not get through (see State above), lower it on both sides.')} />
 			${peer ? html`<${kit.Field} config="network" sid=${peer} name="persistent_keepalive" label=${_('Keepalive, s')}
-				check=${(v) => awg.rangeError(v, 65535)} placeholder=${KEEPALIVE_HINT}
-				hint=${_('Keeps the provider NAT mapping open so inbound connections via the Truba IP reach the router. A range «from-to» (AmneziaWG 3.1) gives a random period, so an idle tunnel has no steady rhythm.')} />` : ''}
+				check=${(v) => awg.rangeError(v, 65535)} placeholder=""
+				hint=${_('Keeps the provider NAT mapping open so inbound connections via the Truba IP reach the router. A range «from-to» (AmneziaWG 3.1) gives a random period, so an idle tunnel has no steady rhythm. Empty — no keepalive.')} />` : ''}
 		</div>
 		${busy ? html`<${kit.Busy} text=${_('Checking… about 5 seconds')} />` : tt ? html`<${TestResult} r=${tt} />`
 			: html`<p class="mu tt-hint">${_('Pings the Truba inside the tunnel with packets of three sizes, up to the whole tunnel MTU. Shows loss of large packets that a normal ping does not see: with it pages open slowly and downloads stall.')}</p>`}
@@ -246,11 +247,11 @@ function Page({ store, view, iface }) {
 return view.extend({
 	load: function() {
 		return Promise.all([ app.load(), common.loadSchema() ]).then(() => Promise.all([
-			common.callStatus(), uci.load('truba'), uci.load('network'), uci.load('firewall') ]));
+			common.callStatus().catch(() => null), uci.load('truba'), uci.load('network'), uci.load('firewall') ]));
 	},
 
 	render: function(data) {
-		const store = app.store({ status: data[0] });
+		const store = app.store({ status: data[0], offline: data[0] == null });
 		app.poll(store, () => common.callStatus().then((s) => ({ status: s })), POLL);
 		return app.mount(this, Page, { store, iface: common.tunnelIface() });
 	},
