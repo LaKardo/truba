@@ -1,6 +1,34 @@
 msgid ""
 msgstr "Content-Type: text/plain; charset=UTF-8"
 
+#: htdocs/luci-static/resources/truba/awg.js
+msgid "No PrivateKey in the [Interface] section"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/awg.js
+msgid "No [Peer] section with PublicKey"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/awg.js
+msgid "Enter a whole number from %d to %d"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/awg.js
+msgid "A number or a range «from-to» within 0–%d"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/awg.js
+msgid "Leave empty with random trailers: the module would use the padding instead of them"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/awg.js
+msgid "Enter a whole number"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/awg.js
+msgid "With header protection S1–S4 must be at least 12"
+msgstr ""
+
 #: htdocs/luci-static/resources/truba/common.js
 msgid "By mode"
 msgstr ""
@@ -190,10 +218,6 @@ msgid "Enter 0 or a whole number from %d to %d"
 msgstr ""
 
 #: htdocs/luci-static/resources/truba/common.js
-msgid "Enter a whole number from %d to %d"
-msgstr ""
-
-#: htdocs/luci-static/resources/truba/common.js
 msgid "Invalid value"
 msgstr ""
 
@@ -246,7 +270,7 @@ msgid "Inbound"
 msgstr ""
 
 #: menu.d
-msgid "Diagnostics"
+msgid "Log"
 msgstr ""
 
 #: htdocs/luci-static/resources/truba/ui/flow.js
@@ -271,6 +295,10 @@ msgstr ""
 
 #: htdocs/luci-static/resources/truba/ui/kit.js
 msgid "changed, not applied yet"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/ui/kit.js
+msgid "Import"
 msgstr ""
 
 #: htdocs/luci-static/resources/truba/ui/kit.js
@@ -489,118 +517,6 @@ msgstr ""
 msgid "Select a device to see its traffic and policy."
 msgstr ""
 
-#: htdocs/luci-static/resources/view/truba/diagnostics.js
-msgid "Nothing to show."
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/diagnostics.js
-msgid "no address to ping"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/diagnostics.js
-msgid "no room for temporary files on the router"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/diagnostics.js
-msgid "no answer"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/diagnostics.js
-msgid "%d bytes — the whole MTU"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/diagnostics.js
-msgid "%d bytes"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/diagnostics.js
-msgid "%d of %d"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/diagnostics.js
-msgid "%d ms"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/diagnostics.js
-msgid "Full-size packets get through"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/diagnostics.js
-msgid "MTU %d suits the path to the Truba."
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/diagnostics.js
-msgid "No replies"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/diagnostics.js
-msgid "The Truba does not answer inside the tunnel: see the State on the Tunnel tab."
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/diagnostics.js
-msgid "Packets are lost"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/diagnostics.js
-msgid "If only the largest packets are lost, lower the tunnel MTU on both sides (Tunnel tab and install-vps.sh)."
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/diagnostics.js
-msgid "Packet size"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/diagnostics.js
-msgid "Replies"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/diagnostics.js
-msgid "Latency"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/diagnostics.js
-msgid "Checking… about 5 seconds"
-msgstr ""
-
-#: menu.d
-msgid "Truba"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/diagnostics.js
-msgid "Warnings and errors"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/diagnostics.js
-msgid "Error: %s"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/diagnostics.js
-msgid "Checks and the log. Nothing is configured on this tab."
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/diagnostics.js
-msgid "Tunnel check"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/diagnostics.js
-msgid "Pings the Truba inside the tunnel with packets of three sizes, up to the whole tunnel MTU. Shows loss of large packets that a normal ping does not see: with it pages open slowly and downloads stall."
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/diagnostics.js
-msgid "Check the tunnel"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/diagnostics.js
-msgid "Log: Truba and mosdns"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/diagnostics.js
-msgid "Log filter"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/diagnostics.js
-msgid "Refresh"
-msgstr ""
-
 #: htdocs/luci-static/resources/view/truba/dns.js
 msgid "Expected https://…, tls://…, quic://…, h3://…, tcp://… or udp://… (optionally «@IP»)"
 msgstr ""
@@ -806,6 +722,14 @@ msgid "name not resolved"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/inbound.js
+msgid "no answer"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/inbound.js
+msgid "%d ms"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/inbound.js
 msgid "Testing…"
 msgstr ""
 
@@ -895,6 +819,42 @@ msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/inbound.js
 msgid "Choose source zone «truba»."
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/log.js
+msgid "Truba, its watchdog, mosdns and the tunnel interface: the last %d lines, newest first."
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/log.js
+msgid "Level"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/log.js
+msgid "Warnings"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/log.js
+msgid "Errors"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/log.js
+msgid "Sources"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/log.js
+msgid "Follow"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/log.js
+msgid "Download"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/log.js
+msgid "Error: %s"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/log.js
+msgid "Nothing to show."
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/overview.js
@@ -1109,8 +1069,8 @@ msgstr ""
 msgid "NAT and port forwards"
 msgstr ""
 
-#: htdocs/luci-static/resources/view/truba/overview.js
-msgid "Warnings"
+#: menu.d
+msgid "Truba"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/overview.js
@@ -1362,51 +1322,7 @@ msgid "for all devices"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/tunnel.js
-msgid "Last handshake"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/tunnel.js
-msgid "Latency to the Truba"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/tunnel.js
-msgid "Packet loss"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/tunnel.js
-msgid "Full-size packets"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/tunnel.js
-msgid "Tunnel watchdog"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/tunnel.js
-msgid "Tunnel route table"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/tunnel.js
-msgid "Interface traffic"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/tunnel.js
-msgid "since the interface came up, including the router's own traffic"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/tunnel.js
-msgid "Points are the watchdog checks; a gap is a lost ping."
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/tunnel.js
-msgid "%d–%d ms"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/tunnel.js
-msgid "Latency over %d min"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/tunnel.js
-msgid "average %d ms"
+msgid "Latency"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/tunnel.js
@@ -1414,15 +1330,27 @@ msgid "no reply"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/tunnel.js
-msgid "%d%% over %d min"
+msgid "Handshake"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/tunnel.js
-msgid "get through · %d bytes, the whole MTU"
+msgid "Loss over %d min"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/tunnel.js
-msgid "lost (%d of %d) · %d bytes: lower the MTU"
+msgid "Full-size packets"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/tunnel.js
+msgid "get through"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/tunnel.js
+msgid "lost"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/tunnel.js
+msgid "Tunnel watchdog"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/tunnel.js
@@ -1431,6 +1359,10 @@ msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/tunnel.js
 msgid "down since"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/tunnel.js
+msgid "Tunnel route table"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/tunnel.js
@@ -1446,43 +1378,143 @@ msgid "fallback to direct (no tunnel route)"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/tunnel.js
-msgid "A number or a range «from-to» within 0–65535"
+msgid "Interface traffic"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/tunnel.js
-msgid "No PrivateKey in the [Interface] section"
+msgid "since the interface came up, including the router's own traffic"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/tunnel.js
-msgid "No [Peer] section with PublicKey"
+msgid "no address to ping"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/tunnel.js
-msgid "Import tunnel configuration"
+msgid "no room for temporary files on the router"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/tunnel.js
-msgid "Paste router.conf produced by install-vps.sh on the VPS, or choose the file."
+msgid "Full-size packets get through"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/tunnel.js
-msgid "Import"
+msgid "MTU %d suits the path to the Truba."
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/tunnel.js
-msgid "Interface"
+msgid "No replies"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/tunnel.js
-msgid "Obfuscation"
+msgid "The Truba does not answer inside the tunnel: see the State above."
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/tunnel.js
-msgid "Private key"
+msgid "Packets are lost"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/tunnel.js
-msgid "Tunnel address"
+msgid "If only the largest packets are lost, lower the MTU here and in install-vps.sh on the VPS."
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/tunnel.js
+msgid "Packet size"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/tunnel.js
+msgid "Replies"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/tunnel.js
+msgid "%d bytes — the whole MTU"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/tunnel.js
+msgid "%d bytes"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/tunnel.js
+msgid "%d of %d"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/tunnel.js
+msgid "Content padding"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/tunnel.js
+msgid "on"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/tunnel.js
+msgid "off"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/tunnel.js
+msgid "AmneziaWG parameters"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/tunnel.js
+msgid "H1–H4: a number or a range «from-to»; must match the Truba."
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/tunnel.js
+msgid "Decoy packets before the handshake (CPS format); may differ from the Truba."
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/tunnel.js
+msgid "AmneziaWG 3.1: random bytes added to data packets instead of padding to a multiple of 16, so packet lengths do not share one remainder; a range «from-to». May differ from the Truba; comes with router.conf."
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/tunnel.js
+msgid "Header protection key"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/tunnel.js
+msgid "set"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/tunnel.js
+msgid "not set"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/tunnel.js
+msgid "Random trailers"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/tunnel.js
+msgid "Disable cookies"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/tunnel.js
+msgid "Other interface settings"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/tunnel.js
+msgid "router.conf imported: apply the changes to use it."
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/tunnel.js
+msgid "Drop router.conf here or choose the file"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/tunnel.js
+msgid "…or paste its text"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/tunnel.js
+msgid "Check the tunnel"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/tunnel.js
+msgid "Connection to the Truba"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/tunnel.js
+msgid "The tunnel is not configured yet. Run install-vps.sh on the VPS and import the resulting router.conf."
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/tunnel.js
+msgid "Address"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/tunnel.js
@@ -1494,82 +1526,6 @@ msgid "install-vps.sh picks it for the VPS network. If full-size packets do not 
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/tunnel.js
-msgid "Listen port"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/tunnel.js
-msgid "Not needed: the router connects to the Truba itself."
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/tunnel.js
-msgid "With header protection S1–S4 must be at least 12"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/tunnel.js
-msgid "A number or a range «from-to»; must match the Truba."
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/tunnel.js
-msgid "Decoy packets before the handshake (CPS format); may differ from the Truba."
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/tunnel.js
-msgid "Header protection key"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/tunnel.js
-msgid "AmneziaWG 3.1: encrypts the header fields WireGuard is recognised by. Must match the Truba and needs S1–S4 of at least 12; comes with router.conf."
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/tunnel.js
-msgid "Disable cookies"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/tunnel.js
-msgid "AmneziaWG 3.1: no cookie replies under load. Not needed with a single peer, and their size is recognisable."
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/tunnel.js
-msgid "Random trailers"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/tunnel.js
-msgid "AmneziaWG 3.1, in reserve against DPI by packet sizes: pads packets to a random length, costly in traffic for small packets. Must match the Truba: after «install-vps.sh random-trailers on» or «off» on the VPS import router.conf again — it switches the content padding too."
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/tunnel.js
-msgid "Content padding"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/tunnel.js
-msgid "AmneziaWG 3.1: random bytes added to data packets instead of padding to a multiple of 16, so packet lengths do not share one remainder; a range «from-to». May differ from the Truba; comes with router.conf."
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/tunnel.js
-msgid "Leave empty with random trailers: the module would use the padding instead of them"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/tunnel.js
-msgid "Truba (peer)"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/tunnel.js
-msgid "Truba public key"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/tunnel.js
-msgid "Preshared key"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/tunnel.js
-msgid "Truba address"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/tunnel.js
-msgid "Truba port"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/tunnel.js
 msgid "Keepalive, s"
 msgstr ""
 
@@ -1578,11 +1534,27 @@ msgid "Keeps the provider NAT mapping open so inbound connections via the Truba 
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/tunnel.js
-msgid "Pings the Truba inside the tunnel and checks the handshake age; restarts the interface after repeated failures. Every tenth check also makes sure that full-size packets get through."
+msgid "Checking… about 5 seconds"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/tunnel.js
-msgid "Enabled"
+msgid "Pings the Truba inside the tunnel with packets of three sizes, up to the whole tunnel MTU. Shows loss of large packets that a normal ping does not see: with it pages open slowly and downloads stall."
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/tunnel.js
+msgid "Keys and parameters come from router.conf made by install-vps.sh on the VPS. To replace them, import a new file."
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/tunnel.js
+msgid "If the tunnel does not respond"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/tunnel.js
+msgid "Watchdog"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/tunnel.js
+msgid "Pings the Truba inside the tunnel and checks the handshake age; restarts the interface after repeated failures. Every tenth check also makes sure that full-size packets get through."
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/tunnel.js
@@ -1611,22 +1583,6 @@ msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/tunnel.js
 msgid "While the tunnel is down, traffic with action Tunnel is dropped instead of going direct."
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/tunnel.js
-msgid "Connection"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/tunnel.js
-msgid "Keys and parameters come from router.conf made by install-vps.sh on the VPS. To replace them, import a new file."
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/tunnel.js
-msgid "The tunnel is not configured yet. Run install-vps.sh on the VPS and import the resulting router.conf."
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/tunnel.js
-msgid "Import .conf"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/tunnel.js

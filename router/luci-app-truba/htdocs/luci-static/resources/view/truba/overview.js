@@ -131,7 +131,7 @@ function warnings(st) {
 		add(_('Invalid settings were skipped, defaults are used instead: %s').format(
 			a.invalid.map((x) => '%s = «%s»'.format(x.key, x.value)).join(', ')), common.invalidTab(a.invalid));
 	if (a.error)
-		add([ _('Error while applying rules: %s').format(a.error), fallbackText(a) ].filter((x) => x).join(' '), 'diagnostics');
+		add([ _('Error while applying rules: %s').format(a.error), fallbackText(a) ].filter((x) => x).join(' '), 'log');
 	if (nb.offload)
 		res.push({ text: _('Software flow offloading is on: packets of offloaded connections bypass the Truba counters, so device traffic is undercounted.'),
 			href: L.url('admin/network/firewall'), label: _('Firewall') });

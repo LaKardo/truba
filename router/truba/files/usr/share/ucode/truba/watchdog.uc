@@ -162,7 +162,7 @@ export function run() {
 		let table = N.routes(c, F.tunnel_info(c.iface));
 		U.log(next == 'healthy' ? 'notice' : 'warning',
 			sprintf('Туннель %s (%s); таблица Туннеля: %s',
-				next == 'healthy' ? 'восстановлен' : 'не отвечает', info, table));
+				next == 'healthy' ? 'восстановлен' : 'не отвечает', info, table), C.WATCHDOG_TAG);
 		system([ 'ubus', 'send', 'truba.tunnel', sprintf('%J', { state: next, info, table }) ]);
 	};
 
@@ -218,7 +218,7 @@ export function run() {
 				if (fails >= w.fails) {
 					set_state('down', why, rec);
 					if (fails % w.fails == 0) {
-						U.warn_log('перезапуск интерфейса ' + cfg.iface + ': ' + why);
+						U.log('warn', 'перезапуск интерфейса ' + cfg.iface + ': ' + why, C.WATCHDOG_TAG);
 						system([ 'ifup', cfg.iface ]);
 					}
 				}

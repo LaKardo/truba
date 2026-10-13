@@ -321,7 +321,7 @@ if (!existsSync(stylePath)) {
 // Иконки Lucide: у каждой, что берут компоненты, есть разметка.
 const icons = loadModule('truba/ui/icons.js', { baseclass });
 if (icons)
-	for (const n of [ 'circle-check', 'triangle-alert', 'circle-x', 'arrow-right', 'wifi-off', 'pencil' ])
+	for (const n of [ 'circle-check', 'triangle-alert', 'circle-x', 'arrow-right', 'wifi-off', 'pencil', 'file-up', 'download' ])
 		check(typeof icons[n] === 'string' && /<(path|circle|line|polyline|rect)/.test(icons[n]), `icons.js: иконка ${n}`);
 
 // Верх шкалы графика скорости и толщина веток схемы потоков.
@@ -370,8 +370,11 @@ const devSchema = { sections: {
 	dns: { set_timeout: { type: 'int', def: 86400, lo: 0, hi: 604800, min: 600 } },
 	watchdog: { probe: { type: 'ipv4', def: '' } }
 }, upstream_schemes: [], consts: {} };
-// String.prototype.format задаёт luci.js; в Node — замена для текстов ошибок полей.
-String.prototype.format ??= function(...a) { let i = 0; return this.replace(/%[sd]/g, () => String(a[i++])); };
+// String.prototype.format задаёт luci.js; в Node — замена для текстов ошибок полей и времени строк журнала (%02d).
+String.prototype.format ??= function(...a) {
+	let i = 0;
+	return this.replace(/%(0\d+)?([sd%])/g, (m, w, t) => (t == '%') ? '%' : w ? String(a[i++]).padStart(+w, '0') : String(a[i++]));
+};
 let cdev = null;
 try {
 	cdev = new Function('baseclass', 'rpc', 'uci', '_', 'L', 'E', 'document', commonSrc)(
@@ -471,6 +474,93 @@ if (cdev) {
 	check(r1?.rows.length === 100 && r1.total === 1700 && r2?.rows.length === 1700 && r3?.total === 100 && r3.rows.every((c) => actOf(c) == 'tunnel') &&
 		r4?.total === 11 && r5?.total === 0, 'common.catRows: не больше 100 строк, «Показать все», чип и поиск без учёта регистра',
 		JSON.stringify([ r1?.rows.length, r1?.total, r2?.rows.length, r3?.total, r4?.total, r5?.total ]));
+
+	// «Журнал» (spec §5.7): строки logread — время, источник по тегу (Решение 1), уровень из самой строки.
+	const PL = (s) => cdev.parseLog?.(s)?.[0] || {};
+	const D = 'Wed Oct  7 22:47:05 2026 ';
+	const l1 = PL(D + 'daemon.notice truba: x');
+	check(l1.time === '07.10 22:47:05' && l1.src === 'truba' && l1.source === 'truba' && l1.level === 'info' && l1.text === 'x' &&
+		l1.raw === D + 'daemon.notice truba: x', `common.parseLog: строка Трубы (${JSON.stringify(l1)})`);
+	const l2 = PL(D + 'daemon.warn truba-watchdog: x');
+	check(l2.source === 'watchdog' && l2.level === 'warn', `common.parseLog: watchdog — свой источник (${JSON.stringify(l2)})`);
+	const l3 = PL(D + 'daemon.err mosdns[812]: 2026-10-07T17:59:32.409Z\tWARN\tupstream error\t{}');
+	check(l3.source === 'mosdns' && l3.level === 'warn' && l3.text === 'upstream error {}', `common.parseLog: mosdns — уровень из строки (${JSON.stringify(l3)})`);
+	check(PL(D + 'daemon.err mosdns[812]: 2026-10-07T17:59:32.409Z\tERROR\tfailed to load cache dump: open x: no such file').level === 'info',
+		'common.parseLog: нет дампа кэша mosdns — не ошибка');
+	const l5 = PL(D + 'cron.err crond[900]: USER root pid 1 cmd truba update-lists');
+	check(l5.source === 'truba' && l5.level === 'info', 'common.parseLog: запуск задачи cron — не ошибка');
+	check(PL(D + "daemon.notice netifd: Interface 'awg0' is now up").source === 'awg', 'common.parseLog: netifd — источник awg');
+	const l7 = PL('garbage');
+	check(l7.time === '' && l7.source === 'truba' && l7.level === 'info' && l7.text === 'garbage' && l7.raw === 'garbage',
+		`common.parseLog: неразобранная строка — как есть (${JSON.stringify(l7)})`);
+	const LS = [ { level: 'info', source: 'truba' }, { level: 'warn', source: 'mosdns' }, { level: 'err', source: 'truba' } ];
+	const LSN = (lv, src) => cdev.logShown?.(LS, lv, src)?.length;
+	check(LSN('all', [ 'truba', 'mosdns' ]) === 3 && LSN('warn', [ 'truba', 'mosdns' ]) === 2 && LSN('err', [ 'truba', 'mosdns' ]) === 1 &&
+		LSN('all', [ 'mosdns' ]) === 1, 'common.logShown: уровень — порог, источники — несколько');
+	check(cdev.TABS.log === 'Log' && !('diagnostics' in cdev.TABS), 'common.TABS: «Журнал» вместо «Диагностики»');
+}
+
+// Туннель AmneziaWG (spec §5.4, Решения 4 и 7): router.conf, перенос его в network и проверки опций интерфейса.
+// Заглушка uci держит секции в net (имя → опции) и запоминает вызовы.
+const net = {}, uciCalls = [];
+const awgUci = {
+	get: (c, sid, o) => (sid == null) ? null : (o == null) ? (net[sid] ?? null) : (net[sid]?.[o] ?? null),
+	sections: (c, t) => Object.entries(net).filter(([ , s ]) => s['.type'] == t).map(([ n, s ]) => ({ '.name': n, ...s })),
+	add: (c, t, name) => { const n = name || 'cfg' + (100 + uciCalls.length); uciCalls.push([ 'add', c, t, n ]); net[n] = { '.type': t }; return n; },
+	set: (c, sid, o, v) => { uciCalls.push([ 'set', c, sid, o, v ]); (net[sid] ??= {})[o] = v; },
+	unset: (c, sid, o) => { uciCalls.push([ 'unset', c, sid, o ]); if (net[sid]) delete net[sid][o]; },
+	remove: (c, sid) => { uciCalls.push([ 'remove', c, sid ]); delete net[sid]; }
+};
+const awg = loadModule('truba/awg.js', { baseclass, uci: awgUci, _: (s) => s,
+	L: { toArray: (x) => (x == null) ? [] : Array.isArray(x) ? x : String(x).split(/\s+/) } });
+if (awg) {
+	const txt = (x) => typeof x === 'string' && x.length > 0;
+	let conf = null;
+	try {
+		conf = awg.parseConf('[Interface]\r\nPrivateKey = k\r\n# c\r\nAddress = 10.0.0.2/30, fd00::2/64\r\nJC = 4\r\n\r\n[Peer]\r\npublickey = p\r\nEndpoint = [2001:db8::1]:51820\r\n');
+	} catch (e) { }
+	check(conf?.iface.privatekey === 'k' && conf.iface.jc === '4' && conf.peers[0]?.publickey === 'p',
+		`awg.parseConf: CRLF, комментарии, ключи без учёта регистра (${JSON.stringify(conf)})`);
+	const throws = (t) => { try { awg.parseConf(t); return false; } catch (e) { return /PrivateKey|Peer/.test(e.message); } };
+	check(throws('[Peer]\nPublicKey = x') && throws('[Interface]\nPrivateKey = k\n'), 'awg.parseConf: без PrivateKey и без [Peer] с PublicKey — ошибка');
+	Object.assign(net, { old: { '.type': 'amneziawg_awg0', public_key: 'q' }, z1: { '.type': 'zone', name: 'tun', network: [ 'x' ] } });
+	if (conf)
+		awg.applyConf('awg0', conf, 'tun');
+	const unset = (k) => uciCalls.some((c) => c[0] == 'unset' && c[2] == 'awg0' && c[3] == k);
+	check(uciCalls.some((c) => c[0] == 'add' && c[2] == 'interface' && c[3] == 'awg0') && net.awg0?.proto === 'amneziawg' && net.awg0.awg_jc === '4' &&
+		[ ...Object.values(awg.IFACE_KEYS), ...Object.values(awg.IFACE_BOOL) ].every(unset) && JSON.stringify(net.awg0.addresses) === '["10.0.0.2/30","fd00::2/64"]',
+		`awg.applyConf: секция интерфейса заведена, прежние опции AWG сняты, новые заданы (${JSON.stringify(net.awg0)})`);
+	const peers = awgUci.sections('network', 'amneziawg_awg0');
+	check(!net.old && peers.length === 1 && peers[0].endpoint_host === '2001:db8::1' && peers[0].endpoint_port === '51820' &&
+		JSON.stringify(peers[0].allowed_ips) === '["0.0.0.0/0"]' && peers[0].route_allowed_ips === '0' && JSON.stringify(net.z1.network) === '["x","awg0"]',
+		`awg.applyConf: прежний пир удалён, новый — с адресом IPv6, интерфейс — в зоне Туннеля (${JSON.stringify(peers)})`);
+	check(awg.configured('awg0') === true && awg.configured('nope') === false && awg.peerSection('awg0') === peers[0]['.name'] && awg.peerSection('nope') === null,
+		'awg.configured и awg.peerSection');
+	check([ '575', '1501', 'abc' ].every((v) => txt(awg.mtuError(v))) && [ '', '576', '1500' ].every((v) => awg.mtuError(v) === null), 'awg.mtuError: 576–1500');
+	check(awg.rangeError('15-25', 65535) === null && awg.rangeError('4294967295', 4294967295) === null && txt(awg.rangeError('25-15', 65535)) &&
+		txt(awg.rangeError('65536', 65535)), 'awg.rangeError: число или «от-до» в пределах');
+	// Проверки параметров зависят от ключа защиты заголовков и RandomTrailers в настройках интерфейса.
+	net.t1 = { '.type': 'interface' };
+	const PE = (k, v) => awg.paramError('t1', k, v);
+	const s1Plain = PE('s1', '5');
+	net.t1.awg_header_protection_key = 'h';
+	check(s1Plain === null && /at least 12/.test(PE('s1', '5') || '') && PE('s1', '12') === null, 'awg.paramError: S1–S4 не меньше 12 — только с защитой заголовков');
+	const padPlain = PE('content_padding_addition', '10-20');
+	net.t1.awg_random_trailers = '1';
+	check(padPlain === null && txt(PE('content_padding_addition', '10-20')), 'awg.paramError: добавка к пакетам — пусто при RandomTrailers');
+	check(txt(PE('jc', 'x')) && PE('h1', '100-200') === null && PE('i1', '<r 2>') === null && PE('jc', '') === null,
+		'awg.paramError: Jc — целое, H — число или диапазон, I — без проверки, пусто — верно');
+	// Версия протокола — как её определяет install-vps.sh (awg_proto_supported).
+	const V = (opts, ka) => {
+		net.v = { '.type': 'interface', ...opts };
+		delete net.vp;
+		if (ka)
+			net.vp = { '.type': 'amneziawg_v', persistent_keepalive: ka };
+		return awg.version('v');
+	};
+	check(V({}) === null && V({ awg_jc: '4' }) === '1.0' && V({ awg_s3: '20' }) === '2.0' && V({ awg_h1: '1-2' }) === '2.0' && V({ awg_i1: '<r 2>' }) === '2.0' &&
+		V({ awg_header_protection_key: 'h' }) === '3.1' && V({ awg_jc: '4' }, '15-25') === '3.1' && V({ awg_jc: '4' }, '25') === '1.0',
+		'awg.version: 3.1, 2.0, 1.0 — как install-vps.sh; без параметров — нет');
 }
 
 const po = readFileSync(join(root, 'po/ru/truba.po'), 'utf8');
