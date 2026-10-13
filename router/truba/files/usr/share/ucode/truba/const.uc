@@ -19,8 +19,10 @@ export const FW_ZONE = 'truba';
 // (ADR 0014), <зона>_truba_no_ipv6 — правило, закрывающее зоне IPv6-интернет (ADR 0016).
 export const FW_FWD_SUFFIX = '_' + FW_ZONE;
 export const FW_NO6_SUFFIX = FW_FWD_SUFFIX + '_no_ipv6';
-// Тег журнала: под ним пишет служба, по нему «Диагностика» отбирает её строки.
+// Тег журнала: под ним пишет служба, по нему «Журнал» отбирает её строки. У watchdog свой тег: на «Журнале»
+// его строки — отдельный источник; в нём есть LOG_TAG, и logread -e находит их тем же выражением.
 export const LOG_TAG = 'truba';
+export const WATCHDOG_TAG = LOG_TAG + '-watchdog';
 
 // Команда службы и её init-скрипт.
 export const CLI  = '/usr/sbin/truba';
