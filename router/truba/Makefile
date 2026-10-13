@@ -1,8 +1,8 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=truba
-PKG_VERSION:=1.1.0
-PKG_RELEASE:=8
+PKG_VERSION:=1.2.0
+PKG_RELEASE:=1
 PKG_LICENSE:=Apache-2.0
 
 include $(INCLUDE_DIR)/package.mk

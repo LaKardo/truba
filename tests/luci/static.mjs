@@ -137,17 +137,23 @@ if (existsSync(devView) && /\b3600\b|, 60\)/.test(readFileSync(devView, 'utf8'))
 	fails++;
 }
 
-// Интерфейс вызывает truba.schema, которой нет в службе до 1.1.0-r7: с более старой truba страницы не строятся.
-// Нижняя граница зависимости — не ниже неё и не выше версии truba из этого же репозитория.
-const SCHEMA_SINCE = '1.1.0-r7';
+// Интерфейс вызывает truba.devices и truba.connections (ADR 0018) и читает status.watchdog — их нет в службе до
+// 1.2.0-r1: с более старой truba вкладки «Обзор» и «Устройства» не строятся. Нижняя граница зависимости — не ниже
+// неё и не выше версии truba из этого же репозитория; версии пакетов выпускаются вместе (spec §6.4).
+const API_SINCE = '1.2.0-r1';
 const ver = (v) => v.split(/[.-]r?/).map(Number);
 const cmpVer = (a, b) => { const x = ver(a), y = ver(b); for (let i = 0; i < 4; i++) if (x[i] !== y[i]) return x[i] - y[i]; return 0; };
 const luciMk = readFileSync(join(root, 'Makefile'), 'utf8');
 const trubaMk = readFileSync(join(root, '../truba/Makefile'), 'utf8');
 const floor = luciMk.match(/LUCI_EXTRA_DEPENDS:=.*truba \(>=([0-9.]+-r\d+)\)/)?.[1];
-const trubaVer = `${trubaMk.match(/PKG_VERSION:=(\S+)/)[1]}-r${trubaMk.match(/PKG_RELEASE:=(\S+)/)[1]}`;
-if (!floor || cmpVer(floor, SCHEMA_SINCE) < 0 || cmpVer(floor, trubaVer) > 0) {
-	console.log(`FAIL  luci-app-truba зависит от truba (>=${floor || '?'}), нужно от ${SCHEMA_SINCE} до ${trubaVer}`);
+const mkVer = (mk) => `${mk.match(/PKG_VERSION:=(\S+)/)[1]}-r${mk.match(/PKG_RELEASE:=(\S+)/)[1]}`;
+const trubaVer = mkVer(trubaMk), luciVer = mkVer(luciMk);
+if (!floor || cmpVer(floor, API_SINCE) < 0 || cmpVer(floor, trubaVer) > 0) {
+	console.log(`FAIL  luci-app-truba зависит от truba (>=${floor || '?'}), нужно от ${API_SINCE} до ${trubaVer}`);
+	fails++;
+}
+if (luciVer !== trubaVer) {
+	console.log(`FAIL  версии пакетов разные: luci-app-truba ${luciVer}, truba ${trubaVer} — выпускаются вместе`);
 	fails++;
 }
 
