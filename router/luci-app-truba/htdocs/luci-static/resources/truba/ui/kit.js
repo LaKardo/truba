@@ -41,11 +41,12 @@ function Icon({ name }) {
 		stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" dangerouslySetInnerHTML=${{ __html: icons[name] || '' }}></svg>`;
 }
 
-// Переключатель опции UCI. opt — «конфиг.секция.опция»: по нему тесты находят элемент.
-function Switch({ label, checked, disabled, opt, onChange }) {
+// Переключатель опции UCI. opt — «конфиг.секция.опция»: по нему тесты находят элемент. aria — имя для экранного
+// чтеца, когда подписи мало (одинаковые переключатели в строках списка).
+function Switch({ label, checked, disabled, opt, aria, onChange }) {
 	const { html } = app.lib;
 	return html`<label class="sw">
-		<input type="checkbox" data-opt=${opt} checked=${!!checked} disabled=${!!disabled}
+		<input type="checkbox" data-opt=${opt} aria-label=${aria} checked=${!!checked} disabled=${!!disabled}
 			onChange=${(ev) => onChange(ev.target.checked)} />
 		<span>${label}</span>
 	</label>`;

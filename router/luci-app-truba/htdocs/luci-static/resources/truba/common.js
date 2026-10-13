@@ -442,12 +442,21 @@ function natSummary(n, wdOn) {
 	};
 }
 
-// UPnP (status.upnp): переключатель доступен, пока miniupnpd установлен; предупреждение — включён, а служба
-// не установлена или не работает.
-function upnpState(up) {
+// Итог на карточке «Проверки NAT»: своя проверка (mine — { n, base }: её итог и время итога в status на момент
+// нажатия), пока опрос не принесёт другой итог. Время браузера с временем Роутера не сравнивается: часы могут
+// расходиться, а неудача в браузере (нет ответа за 20 с) помечена временем браузера.
+function natPick(polled, mine) {
+	return (mine && (polled?.time ?? null) === mine.base) ? mine.n : (polled || null);
+}
+
+// UPnP (status.upnp): переключатель доступен, пока miniupnpd установлен, а без него — только чтобы выключить
+// (иначе предупреждение не убрать); on — значение переключателя. Предупреждение — включён, а служба не
+// установлена или не работает.
+function upnpState(up, on) {
 	up = up || {};
 	return {
 		installed: up.installed !== false,
+		locked: up.installed === false && !on,
 		note: (up.enabled && !up.installed) ? UPNP_MISSING
 			: (up.enabled && !up.running) ? _('UPnP is enabled, but miniupnpd is not running.') : null
 	};
@@ -462,9 +471,10 @@ function upnpRows(leases, devices) {
 	}));
 }
 
-// Пробросы портов из Туннеля (spec §5.6) — секции firewall.redirect с src = зона Туннеля, по настройкам
-// браузера (с несохранёнными изменениями). Опции, удалённые в браузере (uci.unset), uci.sections не снимает —
-// их снимает здесь, как uci.get: иначе снова включённый проброс (enabled снят) оставался бы выключенным.
+// Пробросы портов из Туннеля (spec §5.6) — секции firewall.redirect с src = зона Туннеля, кроме правил SNAT
+// (их LuCI тоже не считает пробросами), по настройкам браузера (с несохранёнными изменениями). Опции,
+// удалённые в браузере (uci.unset), uci.sections не снимает — их снимает здесь, как uci.get: иначе снова
+// включённый проброс (enabled снят) оставался бы выключенным.
 function forwardSections() {
 	const del = uci.state?.deletes?.firewall || {};
 	return uci.sections('firewall', 'redirect').map((s) => {
@@ -475,7 +485,20 @@ function forwardSections() {
 		for (let o in d)
 			delete x[o];
 		return x;
-	}).filter((s) => s.src == schema().consts.fw_zone);
+	}).filter((s) => s.src == schema().consts.fw_zone && s.target != 'SNAT');
+}
+
+// enabled — как его читает fw4 (parse_bool): 0, off, false, no — выключен, остальное и без опции — включён.
+const FW_OFF = [ '0', 'off', 'false', 'no' ], FW_ON = [ '1', 'on', 'true', 'yes' ];
+
+function fwOn(v) {
+	return !FW_OFF.includes(v);
+}
+
+// Значение enabled от переключателя строки: из настроек, если оно уже значит нужное, — туда и обратно ноль
+// изменений; иначе выкл — '0', вкл — без опции.
+function fwEnabled(saved, on) {
+	return (saved != null && (on ? FW_ON : FW_OFF).includes(saved)) ? saved : on ? null : '0';
 }
 
 // Протоколы секции: без опции — tcp и udp, как у fw4; tcpudp, all, any — оба.
@@ -497,7 +520,7 @@ function forwardRows(devices) {
 	const names = new Map((devices || []).filter((d) => d.ip && d.name).map((d) => [ d.ip, d.name ]));
 	return forwardSections().map((s) => ({
 		sid: s['.name'], name: s.name || '', proto: fwProto(s.proto), ext: s.src_dport || '', ip: s.dest_ip || '',
-		who: names.get(s.dest_ip) || s.dest_ip || '', port: s.dest_port || s.src_dport || '', on: s.enabled != '0'
+		who: names.get(s.dest_ip) || s.dest_ip || '', port: s.dest_port || s.src_dport || '', on: fwOn(s.enabled)
 	}));
 }
 
@@ -528,7 +551,7 @@ function forwardErrors(f) {
 		e.ext = ext;
 	else {
 		const [ a, b ] = portRange(f.ext), mine = fwProtos(f.proto);
-		const other = forwardSections().find((s) => s['.name'] != f.sid && s.enabled != '0' && fwProtos(s.proto).some((p) => mine.includes(p)) &&
+		const other = forwardSections().find((s) => s['.name'] != f.sid && fwOn(s.enabled) && fwProtos(s.proto).some((p) => mine.includes(p)) &&
 			((r) => r && r[0] <= b && a <= r[1])(portRange(s.src_dport)));
 		if (other)
 			e.ext = _('This external port is already forwarded: %s').format(other.name || other.src_dport);
@@ -571,11 +594,21 @@ function zoneOfIp(ip, devices) {
 	return null;
 }
 
-// Значения секции из формы: пустое — null (опция снимается); dest — зона по IP.
-function forwardValues(f, devices) {
+// Значения секции из формы: пустое — null (опция снимается); dest — зона по IP. sid — правка сохранённой секции:
+// протокол того же смысла (список, tcpudp, без опции) остаётся как в настройках, а при том же IP dest не пишется —
+// зону могли задать в «Межсетевом экране».
+function forwardValues(f, devices, sid) {
 	const t = (v) => { v = String(v ?? '').trim(); return (v === '') ? null : v; };
 	const ip = t(f.ip);
-	return { name: t(f.name), proto: f.proto || 'tcp udp', src_dport: t(f.ext), dest_ip: ip, dest_port: t(f.port), dest: ip ? zoneOfIp(ip, devices) : null };
+	const v = { name: t(f.name), proto: f.proto || 'tcp udp', src_dport: t(f.ext), dest_ip: ip, dest_port: t(f.port), dest: ip ? zoneOfIp(ip, devices) : null };
+	if (sid) {
+		const proto = uci.get('firewall', sid, 'proto');
+		if (fwProto(proto) == v.proto)
+			v.proto = proto ?? null;
+		if (ip == (uci.get('firewall', sid, 'dest_ip') ?? null))
+			delete v.dest;
+	}
+	return v;
 }
 
 // ---- Правила Категорий ----
@@ -803,7 +836,7 @@ return baseclass.extend({
 	ACTIVE_SPAN, devRate, devShare, devActive, deviceSections, deviceSection, devicePolicy, normMac, connLabel,
 	RULE_ACTIONS, ruleKey, ruleOf, ruleSections, ruleActions, ruleAction, catRows, catsDue, listsDue, checkErrorText,
 	runNatTest, runTunnelTest, parseLog, logSource, logShown, upstreamError, dnsStats, natSummary, upnpState, upnpRows,
-	forwardRows, fwProto, portError, forwardErrors, zoneOfIp, forwardValues,
+	forwardRows, fwProto, fwEnabled, portError, forwardErrors, zoneOfIp, forwardValues, natPick,
 	ACTION_LABELS, ACTION_LEVELS, REASON_LABELS, VIA_LABELS, WARNINGS, NAT_ERRORS, CHECK_ERRORS, UPNP_MISSING, NBSP, TABS,
 	fmtBytes, fmtRate, fmtAge, fmtTime, fmtDate, fmtNum, missingText,
 	pill, busy, empty, span, svgEl, kvTable, table, row, chips,

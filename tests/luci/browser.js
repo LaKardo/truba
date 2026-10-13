@@ -675,7 +675,7 @@ async function waitApply(page) {
 		.filter((s) => s.src == 'truba');
 	const fwdRows = () => page.evaluate(() => [ ...document.querySelector('.truba-root').shadowRoot.querySelectorAll('.fwd li[data-sid]') ]
 		.map((li) => ({ sid: li.dataset.sid, text: li.innerText.replace(/\s+/g, ' '), dot: !!li.querySelector('.dot.warn'),
-			on: li.querySelector('input[type="checkbox"]')?.checked })));
+			on: li.querySelector('input[type="checkbox"]')?.checked, aria: li.querySelector('input[type="checkbox"]')?.getAttribute('aria-label') || '' })));
 	const dlg = () => page.evaluate(() => {
 		const d = document.querySelector('.truba-root').shadowRoot.querySelector('dialog.dlg[open]');
 		return d ? { title: d.querySelector('h3')?.textContent, errs: [ ...d.querySelectorAll('.err-text') ].map((e) => e.textContent),
@@ -717,7 +717,9 @@ async function waitApply(page) {
 	const rowsA = await fwdRows(), barA = await changesBar();
 	await applyFwd();
 	const fA = (await fwds()).find((s) => s.name == 'Test web') || {};
-	result(dA?.title == 'New port forward' && dA.save === false && !dA.del && rowsA.some((r) => /Test web/.test(r.text) && r.dot) && /Unapplied changes: 1/.test(barA) &&
+	// Переключатель строки называет свой проброс: экранный чтец иначе объявлял бы у всех одно «Enabled».
+	result(dA?.title == 'New port forward' && dA.save === false && !dA.del && rowsA.some((r) => /Test web/.test(r.text) && r.dot && /Test web/.test(r.aria)) &&
+		/Unapplied changes: 1/.test(barA) &&
 		fA.target == 'DNAT' && fA.src_dport == '8080' && fA.dest_ip == '192.168.1.50' && fA.dest_port == '80' && fA.dest == 'lan' && fA.proto == 'tcp',
 		'«Входящие»: новый проброс — строка с точкой, «Применить» пишет секцию firewall', JSON.stringify({ dA, rowsA, barA, fA }));
 	const sidA = fA['.name'];
@@ -789,9 +791,11 @@ async function waitApply(page) {
 	result(fF.dest_ip == '10.9.9.9' && !('dest' in fF) && fF.proto == 'tcp udp' && goneF, '«Входящие»: IP вручную — без зоны назначения; «Delete» — секции нет',
 		JSON.stringify({ fF, goneF }));
 
-	// (g) «Delete» проброса из (a).
+	// (g) «Delete» проброса из (a). Строки, открывшей окно, больше нет — фокус переходит на «Add», а не теряется.
 	await openDlg(`.fwd li[data-sid="${sidA}"] [data-act="fwd-edit"]`);
 	await tap('dialog.dlg[open] [data-act="fwd-delete"]');
+	await sleep(300);
+	const focusG = await page.evaluate(() => document.querySelector('.truba-root').shadowRoot.activeElement?.dataset?.act || null);
 	await applyFwd();
 	const left = await fwds(), rowsG = await fwdRows();
 	// Ссылка на «Межсетевой экран» — своей строкой под «нет пробросов», а не вплотную к нему.
@@ -800,8 +804,8 @@ async function waitApply(page) {
 		const e = c?.querySelector('.empty')?.getBoundingClientRect(), g = c?.querySelector('a.go')?.getBoundingClientRect();
 		return (e && g) ? g.top >= e.bottom - 1 : false;
 	});
-	result(!left.some((s) => s['.name'] == sidA) && !rowsG.length && /No port forwards from the tunnel yet/.test(await pageText(page)) && goBelow,
-		'«Входящие»: «Delete» — секции нет, на карточке — «нет пробросов», ссылка — своей строкой', JSON.stringify({ left, rowsG, goBelow }));
+	result(!left.some((s) => s['.name'] == sidA) && !rowsG.length && /No port forwards from the tunnel yet/.test(await pageText(page)) && goBelow && focusG == 'fwd-add',
+		'«Входящие»: «Delete» — фокус на «Add», секции нет, на карточке — «нет пробросов», ссылка — своей строкой', JSON.stringify({ left, rowsG, goBelow, focusG }));
 
 	// «Туннель» (spec §5.4): состояние, подключение к Трубе, контроль. На стенде awg0 — dummy с пиром
 	// 203.0.113.10:51820 (stand.sh).

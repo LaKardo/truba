@@ -487,6 +487,34 @@ if (cdev) {
 	check(FRd.find((r) => r.sid == 'fw3')?.on === true && /already forwarded/.test(FE2({ ext: '9000', ip: '192.168.1.20' }).ext || ''),
 		'common.forwardRows и forwardErrors: опция, удалённая в браузере, не действует (как у uci.get)');
 	devUci.state.deletes = {};
+	// fw4 (parse_bool): enabled 'off', 'no', 'false' — выключен; правило SNAT — не проброс (как у LuCI).
+	devSecs.push({ '.name': 'fw5', '.type': 'redirect', '.conf': 'firewall', src: 'truba', target: 'SNAT', src_dport: '7000' },
+		{ '.name': 'fw6', '.type': 'redirect', '.conf': 'firewall', src: 'truba', src_dport: '7100', dest_ip: '192.168.1.13', enabled: 'off' });
+	const FRs = cdev.forwardRows?.([]) || [];
+	check(!FRs.some((r) => r.sid == 'fw5') && FRs.find((r) => r.sid == 'fw6')?.on === false && !FE2({ ext: '7100', ip: '192.168.1.20' }).ext,
+		'common.forwardRows: SNAT — не проброс, enabled off — выключен');
+	devSecs.splice(-2);
+	// Переключатель строки: туда и обратно — значение из настроек (ноль изменений), какой бы записью оно ни было.
+	const EV = (saved, on) => cdev.fwEnabled?.(saved, on);
+	check(EV(undefined, false) === '0' && EV(undefined, true) === null && EV('1', true) === '1' && EV('yes', true) === 'yes' &&
+		EV('off', false) === 'off' && EV('off', true) === null && EV('0', false) === '0', 'common.fwEnabled: значение enabled переключателя');
+	// Правка сохранённого проброса: протокол того же смысла (список) и зона при том же IP — как в настройках.
+	devSecs.push({ '.name': 'fw7', '.type': 'redirect', '.conf': 'firewall', src: 'wan', proto: [ 'tcp', 'udp' ], src_dport: '5000',
+		dest_ip: '192.168.1.12', dest: 'guest' });
+	const FV7 = cdev.forwardValues?.({ name: '', proto: 'tcp udp', ext: '5000', ip: '192.168.1.12', port: '' }, [], 'fw7') || {};
+	const FV7b = cdev.forwardValues?.({ name: '', proto: 'tcp', ext: '5000', ip: '192.168.1.77', port: '' }, [], 'fw7') || {};
+	check(JSON.stringify(FV7.proto) === '["tcp","udp"]' && !('dest' in FV7) && FV7b.proto === 'tcp' && FV7b.dest === 'lan',
+		'common.forwardValues: правка — протокол-список и зона при том же IP остаются, другой IP — новая зона', JSON.stringify({ FV7, FV7b }));
+	devSecs.splice(-1);
+	// «Проверка NAT»: своя проверка — пока опрос не принесёт другой итог; время браузера с временем Роутера не сравнивается.
+	const NP = (pl, m) => cdev.natPick?.(pl, m);
+	const mineT = { n: { time: 5, error: 'timeout' }, base: 100 };
+	check(NP({ time: 100 }, mineT)?.error === 'timeout' && NP({ time: 130, ok: true }, mineT)?.time === 130 && NP(null, { n: mineT.n, base: null }) === mineT.n &&
+		NP({ time: 1 }, null)?.time === 1, 'common.natPick: своя проверка — до нового итога службы');
+	// UPnP без miniupnpd: включённый можно выключить (иначе предупреждение не убрать), выключенный не включить.
+	const US2 = (u, on) => cdev.upnpState?.(u, on) || {};
+	check(US2({ installed: false }, true).locked === false && US2({ installed: false }, false).locked === true && US2({ installed: true }, false).locked === false,
+		'common.upnpState: без miniupnpd включённый UPnP можно выключить');
 	const ZO = (ip, d) => cdev.zoneOfIp?.(ip, d || []);
 	check(ZO('192.168.1.77') === 'lan' && ZO('10.9.9.9') === null && ZO('100.64.0.9', [ { ip: '100.64.0.9', zone: 'mesh' } ]) === 'mesh',
 		'common.zoneOfIp: устройство, сеть со статическим адресом, неизвестно — null');

@@ -13,16 +13,17 @@ const POLL = 10;   // итог проверки NAT появляется сам 
 // ---- Проверка NAT ----
 
 // Итог — последняя проверка из status (её запускает и watchdog после подъёма Туннеля); своя проверка —
-// её итог, пока опрос не принесёт новее. Типа NAT нет: служба его не определяет.
+// её итог, пока опрос не принесёт другой (common.natPick). Типа NAT нет: служба его не определяет.
 function NatCard({ st }) {
 	const { html, useState } = app.lib;
 	const [ mine, setMine ] = useState(null), [ busy, setBusy ] = useState(false);
 	const run = () => {
+		const base = st.nat?.time ?? null;
 		setBusy(true);
-		common.runNatTest().then(setMine, (e) => setMine({ time: Date.now() / 1000, error: e.message })).finally(() => setBusy(false));
+		common.runNatTest().then((n) => setMine({ n, base }), (e) => setMine({ n: { time: Date.now() / 1000, error: e.message }, base }))
+			.finally(() => setBusy(false));
 	};
-	const polled = st.nat || null;
-	const s = common.natSummary((mine && !(polled?.time > mine.time)) ? mine : polled, common.get('watchdog', 'enabled'));
+	const s = common.natSummary(common.natPick(st.nat, mine), common.get('watchdog', 'enabled'));
 	const aside = html`${busy ? html`<${kit.Busy} text=${_('Testing…')} />` : html`<${kit.Badge} level=${s.level}>${s.text}</${kit.Badge}>`}
 		<button type="button" class="btn" data-act="nat-test" disabled=${busy} onClick=${run}>${_('Check NAT')}</button>`;
 	return html`<${kit.Card} cls="nat" title=${_('NAT check')} aside=${aside}>
@@ -39,10 +40,10 @@ function NatCard({ st }) {
 
 function UpnpCard({ st, devices }) {
 	const { html } = app.lib;
-	const up = st.upnp || {}, s = common.upnpState(up), rows = common.upnpRows(up.leases, devices);
+	const on = common.get('main', 'upnp'), up = st.upnp || {}, s = common.upnpState(up, on), rows = common.upnpRows(up.leases, devices);
 	return html`<${kit.Card} cls="upnp" title=${_('UPnP / NAT-PMP')}>
-		<${kit.Switch} label=${_('Enable UPnP and NAT-PMP on the tunnel')} opt="truba.main.upnp" checked=${common.get('main', 'upnp')}
-			disabled=${!s.installed} onChange=${(on) => app.set('truba', 'main', 'upnp', on ? '1' : '0')} />
+		<${kit.Switch} label=${_('Enable UPnP and NAT-PMP on the tunnel')} opt="truba.main.upnp" checked=${on}
+			disabled=${s.locked} onChange=${(on) => app.set('truba', 'main', 'upnp', on ? '1' : '0')} />
 		<p class="mu">${s.installed ? _('Devices open ports themselves; miniupnpd reports the Truba IP as the external address.')
 			: _('Package luci-app-upnp is not installed.')}</p>
 		${s.note ? html`<ul class="warns"><li><${kit.Dot} level="warn" /><span>${s.note}</span></li></ul>` : ''}
@@ -68,7 +69,7 @@ function devChoices(devices) {
 // (src_ip, reflection и другие из «Межсетевого экрана») остаются. Протокол того же смысла и зона при том же
 // IP — как в настройках. У нового проброса ошибка поля видна после ухода из него, у сохранённого — сразу:
 // неверное значение из настроек иначе держало бы «Save» без видимой причины. «Save» недоступна сразу.
-function FwdDialog({ row, devices, onClose }) {
+function FwdDialog({ row, devices, onClose, onDeleted }) {
 	const { html, useState } = app.lib;
 	const choices = devChoices(devices);
 	const [ v, setV ] = useState(() => row
@@ -88,16 +89,9 @@ function FwdDialog({ row, devices, onClose }) {
 	const touch = (k) => () => setTouched((t) => t[k] ? t : { ...t, [k]: true });
 
 	const save = () => {
-		const vals = common.forwardValues({ ...v, ip }, devices);
+		const vals = common.forwardValues({ ...v, ip }, devices, row?.sid);
 		let sid = row?.sid;
-		if (sid) {
-			const proto = uci.get('firewall', sid, 'proto');
-			if (common.fwProto(proto) == vals.proto)
-				vals.proto = proto ?? null;
-			if (ip == uci.get('firewall', sid, 'dest_ip'))
-				delete vals.dest;
-		}
-		else {
+		if (!sid) {
 			sid = app.add('firewall', 'redirect');
 			app.set('firewall', sid, 'src', common.schema().consts.fw_zone);
 			app.set('firewall', sid, 'target', 'DNAT');
@@ -108,6 +102,7 @@ function FwdDialog({ row, devices, onClose }) {
 	const del = (ev) => {
 		app.remove('firewall', row.sid);
 		ev.currentTarget.closest('dialog')?.close();
+		onDeleted();
 	};
 
 	// Поле окна: подпись, элемент, ошибка и подсказка — как у kit.Field.
@@ -147,23 +142,26 @@ function FwdDialog({ row, devices, onClose }) {
 // Выключение — enabled '0', включение — опция снимается (или '1', если так было в настройках): туда и обратно —
 // ноль изменений. Нажатие на строку — окно правки.
 function FwdCard({ devices }) {
-	const { html, useState } = app.lib;
+	const { html, useState, useRef } = app.lib;
+	const addRef = useRef(null);
 	const [ edit, setEdit ] = useState(null);   // { row, n } открытого окна: row null — новый проброс
 	const rows = common.forwardRows(devices);
 	const open = (row) => setEdit((e) => ({ row, n: (e?.n || 0) + 1 }));
-	const toggle = (sid, on) => app.set('firewall', sid, 'enabled',
-		on ? ((uci.state?.values?.firewall?.[sid]?.enabled == '1') ? '1' : null) : '0');
-	const aside = html`<button type="button" class="btn" data-act="fwd-add" onClick=${() => open(null)}><${kit.Icon} name="plus" />${_('Add')}</button>`;
+	const toggle = (sid, on) => app.set('firewall', sid, 'enabled', common.fwEnabled(uci.state?.values?.firewall?.[sid]?.enabled, on));
+	// Строки, открывшей окно, после «Delete» нет — фокус на «Add», а не на странице (после перерисовки).
+	const deleted = () => requestAnimationFrame(() => addRef.current?.focus());
+	const aside = html`<button type="button" class="btn" data-act="fwd-add" ref=${addRef} onClick=${() => open(null)}><${kit.Icon} name="plus" />${_('Add')}</button>`;
 	return html`<${kit.Card} cls="w3 fwd" title=${_('Port forwards from the tunnel')} aside=${aside}>
 		${rows.length ? html`<ul class="fwd-rows">${rows.map((r) => html`<li data-sid=${r.sid} class=${r.on ? '' : 'off'}>
 			<button type="button" class="fwd-b" data-act="fwd-edit" onClick=${() => open(r)}>
 				<b>${r.name || '—'}${app.pending('firewall', r.sid) ? html` <${kit.Dot} level="warn" label=${_('changed, not applied yet')} />` : ''}</b>
 				<span class="num">${'%s %s → %s:%s'.format(PROTOS[r.proto] || r.proto, r.ext, r.who || '?', r.port)}</span>
 			</button>
-			<${kit.Switch} label=${_('Enabled')} opt=${'firewall.' + r.sid + '.enabled'} checked=${r.on} onChange=${(on) => toggle(r.sid, on)} />
+			<${kit.Switch} label=${_('Enabled')} aria=${'%s: %s'.format(r.name || '%s %s'.format(PROTOS[r.proto] || r.proto, r.ext), _('Enabled'))}
+				opt=${'firewall.' + r.sid + '.enabled'} checked=${r.on} onChange=${(on) => toggle(r.sid, on)} />
 		</li>`)}</ul>` : html`<${kit.Empty} text=${_('No port forwards from the tunnel yet.')} />`}
 		<div><${kit.Go} href=${L.url('admin/network/firewall/forwards')} label=${_('More options: Network → Firewall')} /></div>
-		${edit ? html`<${FwdDialog} key=${edit.n} row=${edit.row} devices=${devices} onClose=${() => setEdit(null)} />` : ''}
+		${edit ? html`<${FwdDialog} key=${edit.n} row=${edit.row} devices=${devices} onClose=${() => setEdit(null)} onDeleted=${deleted} />` : ''}
 	</${kit.Card}>`;
 }
 

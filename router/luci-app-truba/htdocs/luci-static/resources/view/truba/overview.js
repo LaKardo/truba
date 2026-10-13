@@ -302,8 +302,7 @@ function InfoCard({ st }) {
 	const [ nLevel, nText ] = !n ? [ '', _('NAT not checked') ]
 		: n.error ? [ 'warn', _('NAT not checked') ]
 		: [ n.ok ? 'ok' : 'err', n.ok ? _('Truba layer OK') : _('NAT problem') ];
-	const zone = common.schema().consts.fw_zone;
-	const forwards = uci.sections('firewall', 'redirect').filter((x) => x.src == zone && x.enabled != '0').length;
+	const forwards = common.forwardRows([]).filter((r) => r.on).length;
 	const p = latest();
 
 	// Одна колонка рядом с карточкой «Устройства»: «DNS и списки» над «Входящими».
