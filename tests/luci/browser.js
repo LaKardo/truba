@@ -141,9 +141,9 @@ async function waitApply(page) {
 		await page.screenshot({ path: `${out}/${t}.png`, fullPage: true });
 		// Подсказки полей — из схемы службы (truba.schema, ADR 0015), а не из представления.
 		if (t == 'dns' || t == 'tunnel') {
-			// «Туннель» — на новом интерфейсе: поле в Shadow DOM.
-			const ph = await page.evaluate((t) => (t == 'dns') ? document.getElementById('widget.cbid.truba.dns.port')?.placeholder
-				: document.querySelector('.truba-root')?.shadowRoot?.querySelector('input[data-opt="truba.watchdog.handshake_max"]')?.placeholder, t);
+			// Обе на новом интерфейсе: поле в Shadow DOM.
+			const ph = await page.evaluate((t) => document.querySelector('.truba-root')?.shadowRoot?.querySelector(
+				(t == 'dns') ? 'input[data-opt="truba.dns.port"]' : 'input[data-opt="truba.watchdog.handshake_max"]')?.placeholder, t);
 			const sch = await ubus('truba', 'schema');
 			const want = String(t == 'dns' ? sch.sections.dns.port.def : sch.sections.watchdog.handshake_max.def);
 			result(ph === want, `вкладка ${t}: подсказка поля — умолчание схемы службы`, `${ph} / ${want}`);
@@ -404,12 +404,28 @@ async function waitApply(page) {
 		goodUtc.apply === false && goodUtc.uci == '05:30', '«Правила»: время обновления — неверное не пишется и держит «Применить»', JSON.stringify({ badUtc, goodUtc }));
 	await Promise.all([ page.waitForNavigation({ waitUntil: 'networkidle2' }).catch(() => {}), tap('.changes [data-act="reset"]') ]);
 
-	// «DNS» — только DNS: Наборов правил и полей lists.* там нет.
+	// «DNS» (spec §5.5): состояние mosdns и кэша — только то, что mosdns отдаёт (§6.3); поля кэша и порта; Наборов
+	// правил здесь нет. Числа плиток — с разделителями разрядов браузера или «—», не NaN.
 	await page.goto(url('dns'), { waitUntil: 'networkidle2' });
 	await settled(page);
-	const dnsPage = await page.evaluate(() => ({ h2: document.querySelector('#view h2')?.textContent, rs: /Rule sets/.test(document.querySelector('#view')?.innerText || ''),
-		lists: !!document.querySelector('#view [id*="cbid.truba.lists."]') }));
-	result(dnsPage.h2 == 'DNS' && !dnsPage.rs && !dnsPage.lists, '«DNS»: без Наборов правил', JSON.stringify(dnsPage));
+	const dns = await page.evaluate(() => { const r = document.querySelector('.truba-root').shadowRoot;
+		return { h2: r.querySelector('.head h2')?.textContent, tiles: r.querySelectorAll('.card.state .stat').length,
+			badge: r.querySelector('.card.state .badge')?.textContent, rs: /Rule sets/.test(r.textContent),
+			fields: [ 'cache_size', 'lazy_cache_ttl', 'ttl_max', 'set_timeout', 'port' ].filter((o) => r.querySelector(`input[data-opt="truba.dns.${o}"]`)).length,
+			vals: [ ...r.querySelectorAll('.card.state .stat b') ].map((b) => b.textContent) }; });
+	result(dns.h2 == 'DNS' && dns.tiles == 4 && dns.badge == 'mosdns running' && !dns.rs && dns.fields == 5 &&
+		dns.vals.every((v) => /^(—|\d[\d\s,. ]*%?)$/.test(v)), '«DNS»: состояние, 4 плитки без NaN, поля кэша и порта, без Наборов правил', JSON.stringify(dns));
+	// Перехват DNS: «Применить» доходит до настроек и службы; затем прежнее значение.
+	const hijack = async () => (await ubus('uci', 'get', { config: 'truba', section: 'main', option: 'dns_hijack' }).catch(() => ({}))).value;
+	for (const want of [ '0', '1' ]) {
+		t0 = await time();
+		await tap('input[data-opt="truba.main.dns_hijack"]');
+		await tap('.changes [data-act="apply"]');
+		await waitApply(page);
+		result(await applied(t0, async () => await hijack() == want), `«DNS»: перехват ${want == '0' ? 'выкл' : 'вкл'} — «Применить» дошло до службы`);
+		await page.goto(url('dns'), { waitUntil: 'networkidle2' });
+		await settled(page);
+	}
 
 	// «Туннель» (spec §5.4): состояние, подключение к Трубе, контроль. На стенде awg0 — dummy с пиром
 	// 203.0.113.10:51820 (stand.sh).
