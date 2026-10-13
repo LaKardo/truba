@@ -105,6 +105,10 @@ async function waitApply(page) {
 			errors.push(`[${page.url()}] HTTP ${r.status()}: ${r.url()}`);
 	});
 
+	// Прежние общие стили (truba.css) удалены (этап 7): страница их не просит.
+	const oldCss = [];
+	page.on('request', (r) => { if (r.url().includes('/truba/truba.css')) oldCss.push(r.url()); });
+
 	// Вход: имя «root» уже в поле, пароль на чистом стенде пустой.
 	await page.goto(`${base}/cgi-bin/luci/`, { waitUntil: 'networkidle2' });
 	await page.$eval('input[name=luci_password]', (el) => { el.value = ''; });
@@ -137,6 +141,7 @@ async function waitApply(page) {
 		// «Loading view…» после ожидания — представление не отрисовалось: ошибку LuCI показывает над ним, вне #view.
 		result(!/Unable to load|TypeError|ReferenceError|Error: |Authorization Required|Loading view/.test(text), `вкладка ${t}`,
 			text.replace(/\s+/g, ' ').slice(0, 100));
+		result(!await page.evaluate(() => !!document.querySelector('link[data-truba]')), `вкладка ${t}: без link truba.css`);
 		fs.writeFileSync(`${out}/${t}.txt`, text);
 		await page.screenshot({ path: `${out}/${t}.png`, fullPage: true });
 		// Подсказки полей — из схемы службы (truba.schema, ADR 0015), а не из представления.
@@ -149,6 +154,8 @@ async function waitApply(page) {
 			result(ph === want, `вкладка ${t}: подсказка поля — умолчание схемы службы`, `${ph} / ${want}`);
 		}
 	}
+
+	result(!oldCss.length, 'вкладки не запрашивают truba.css', oldCss[0]);
 
 	const el = async (sel) => (await shadowSel(page, sel)).asElement();
 	const tap = async (sel) => { const e = await el(sel); if (e) await e.click(); return !!e; };

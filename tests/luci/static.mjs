@@ -688,6 +688,31 @@ for (const [s, f] of strings) {
 for (const s of translated.keys())
 	if (!strings.has(s)) console.log(`warn  лишняя строка в po: ${s}`);
 
+// ---- Остатки прежнего интерфейса (spec §3.3, этап 7) ----
+
+// Общие стили прежних вкладок (truba.css) — только в Shadow DOM-стилях ui/style.css: файла нет, и его никто
+// не подключает.
+const res = join(root, 'htdocs/luci-static/resources');
+check(!existsSync(join(res, 'truba/truba.css')), 'truba/truba.css удалён (стили — в truba/ui/style.css)');
+(function walkRouter(d) {
+	for (const f of readdirSync(d)) {
+		const p = join(d, f);
+		if (statSync(p).isDirectory()) walkRouter(p);
+		else if (/\.(js|uc|json|sh|css|mk|po|pot)$|Makefile$/.test(f) && readFileSync(p, 'utf8').includes('truba.css'))
+			check(false, `${relative(join(root, '..'), p).split(sep).join('/')}: упоминает truba.css`);
+	}
+})(join(root, '..'));
+
+// Экспорт common.js — только то, что берут представления, ui/ и awg.js или проверяет этот файл: прежние
+// помощники DOM (kvTable, chips, pill…) и формы (field) не возвращаются незаметно.
+{
+	const exp = (commonSrc.match(/return baseclass\.extend\(\{([\s\S]*?)\}\);\s*$/)?.[1] || '').split(',').map((s) => s.trim()).filter(Boolean);
+	const users = [ ...files.filter((f) => /\/(view\/truba|truba\/ui)\/|\/truba\/awg\.js$/.test(rel(f))).map((f) => readFileSync(f, 'utf8')),
+		readFileSync(fileURLToPath(import.meta.url), 'utf8').split('\n').filter((l) => !l.includes('EXPORT-CHECK')).join('\n') ].join('\n');
+	const unused = exp.filter((n) => !new RegExp('\\.' + n + '\\b').test(users));   // EXPORT-CHECK
+	check(exp.length > 0 && !unused.length, `common.js: экспорт без пользователей — ${unused.join(', ')}`);   // EXPORT-CHECK
+}
+
 console.log(`${files.length} файлов, ${strings.size} строк`);
 console.log(fails ? `${fails} FAILED` : 'ALL OK');
 process.exit(fails ? 1 : 0);

@@ -22,22 +22,12 @@ const callSchema = rpc.declare({ object: 'truba', method: 'schema', expect: { ''
 const callDevices = rpc.declare({ object: 'truba', method: 'devices', expect: { '': {} } });
 const callConnections = rpc.declare({ object: 'truba', method: 'connections', params: [ 'ip' ], expect: { '': {} } });
 
-// Общие стили — один раз на страницу; ?v= — как у модулей LuCI.
-if (!document.querySelector('link[data-truba]'))
-	document.head.appendChild(E('link', {
-		'rel': 'stylesheet', 'data-truba': '',
-		'href': L.resource('truba/truba.css') + (L.env.resource_version ? '?v=' + L.env.resource_version : '')
-	}));
-
 const ACTION_LABELS = {
 	mode: _('By mode'),
 	direct: _('Direct'),
 	tunnel: _('Tunnel'),
 	block: _('Block')
 };
-
-// Цвет Действия — один на всех вкладках: значки, точки, график.
-const ACTION_LEVELS = { tunnel: 'info', direct: 'ok', block: 'err' };
 
 const REASON_LABELS = {
 	local: _('local network or the Truba itself — never routed'),
@@ -159,88 +149,6 @@ function fmtNum(n) {
 	return (+n || 0).toLocaleString();
 }
 
-// ---- Элементы страниц ----
-
-// Значок состояния. level: ok / warn / err / info или '' (нейтральный).
-function pill(level, text) {
-	return E('span', { 'class': 'truba-badge ' + (level || '') }, text);
-}
-
-// Пустой span под значение, которое опрос потом обновляет.
-function span(cls) {
-	return E('span', cls ? { 'class': cls } : {});
-}
-
-const SVGNS = 'http://www.w3.org/2000/svg';
-function svgEl(tag, attrs) {
-	const el = document.createElementNS(SVGNS, tag);
-	for (let k in attrs)
-		el.setAttribute(k, attrs[k]);
-	return el;
-}
-
-// Таблица «название — значение»: rows — [ [ название, значение ], … ].
-function kvTable(rows) {
-	return E('table', { 'class': 'truba-kv' }, rows.map(([ label, value ]) =>
-		E('tr', {}, [ E('th', { 'scope': 'row' }, label), E('td', {}, value) ])));
-}
-
-// Таблица LuCI: заголовки колонок и строки из row().
-function table(headers, rows) {
-	return E('table', { 'class': 'table' }, [
-		E('tr', { 'class': 'tr table-titles' }, headers.map((h) => E('th', { 'class': 'th' }, h))),
-		...rows
-	]);
-}
-
-// Строка таблицы LuCI: ячейки и, если нужно, свои атрибуты строки.
-function row(cells, attrs) {
-	return E('tr', { 'class': 'tr', ...attrs }, cells.map((c) => E('td', { 'class': 'td' }, c)));
-}
-
-// Кнопки-фильтры, нажата одна: items — [ [ значение, содержимое кнопки ], … ].
-function chips(items, initial, onSelect) {
-	const buttons = items.map(([ value, content ], k) => E('button', {
-		'class': 'truba-chip', 'type': 'button', 'aria-pressed': String(value == initial),
-		'click': () => {
-			buttons.forEach((b, j) => b.setAttribute('aria-pressed', String(j == k)));
-			onSelect(value);
-		}
-	}, content));
-	return buttons;
-}
-
-// Идёт загрузка или проверка.
-function busy(text) {
-	return E('em', { 'class': 'spinning' }, text);
-}
-
-// Пустой список или нет данных.
-function empty(text) {
-	return E('em', { 'class': 'truba-muted' }, text);
-}
-
-// Обновить текст, только если он изменился: без лишних перерисовок.
-function setText(el, text) {
-	text = (text == null) ? '' : String(text);
-	if (el.textContent !== text)
-		el.textContent = text;
-}
-
-// Уровень значка, точки или сводки (ok / warn / err / info, '' — нейтральный): меняются только
-// классы уровня, остальные классы элемента остаются.
-const LEVELS = [ 'ok', 'warn', 'err', 'info' ];
-function setLevel(el, level) {
-	for (let l of LEVELS)
-		el.classList.toggle(l, l == level);
-}
-
-// Значок или точка: уровень и текст.
-function setState(el, level, text) {
-	setLevel(el, level);
-	setText(el, text);
-}
-
 // Неразрывный пробел: пустая строка ячейки сохраняет высоту.
 const NBSP = ' ';
 
@@ -310,40 +218,6 @@ function get(sec, key, sid) {
 	default:
 		return v;
 	}
-}
-
-// Поле формы по схеме: умолчание, подсказка и проверка. msg — текст ошибки поля с шаблоном.
-function field(o, sec, key, msg) {
-	const s = schemaOpt(sec, key);
-	if (!s)
-		return o;
-	switch (s.type) {
-	case 'bool':
-		o.default = s.def ? '1' : '0';
-		break;
-	case 'enum':
-	case 'list':
-	case 'upstreams':
-		o.default = s.def;
-		break;
-	case 'int':
-		o.placeholder = String(s.def);
-		o.datatype = s.min ? 'or(range(0,0),range(%d,%d))'.format(s.min, s.hi) : 'range(%d,%d)'.format(s.lo, s.hi);
-		break;
-	case 'pattern': {
-		const re = new RegExp(s.re);
-		o.placeholder = s.def;
-		o.validate = (sid, v) => (!v || re.test(v)) ? true : msg;
-		break;
-	}
-	case 'string':
-		o.placeholder = s.def;
-		break;
-	case 'ipv4':
-		o.datatype = 'ip4addr';
-		break;
-	}
-	return o;
 }
 
 // Текст ошибки поля по схеме или null — та же проверка, что у службы (conf.uc, check_value): неверное
@@ -832,13 +706,12 @@ function tabUrl(tab) {
 
 return baseclass.extend({
 	callStatus, callLists, callCategories, callSets, callCheck, callUpdateLists, callRollbackLists, callRates, callLog,
-	callSchema, loadSchema, schema, get, field, fieldError, handshakeLevel, callDevices, callConnections,
-	ACTIVE_SPAN, devRate, devShare, devActive, deviceSections, deviceSection, devicePolicy, normMac, connLabel,
-	RULE_ACTIONS, ruleKey, ruleOf, ruleSections, ruleActions, ruleAction, catRows, catsDue, listsDue, checkErrorText,
-	runNatTest, runTunnelTest, parseLog, logSource, logShown, upstreamError, dnsStats, natSummary, upnpState, upnpRows,
-	forwardRows, fwProto, fwEnabled, portError, forwardErrors, zoneOfIp, forwardValues, natPick,
-	ACTION_LABELS, ACTION_LEVELS, REASON_LABELS, VIA_LABELS, WARNINGS, NAT_ERRORS, CHECK_ERRORS, UPNP_MISSING, NBSP, TABS,
+	loadSchema, schema, get, fieldError, handshakeLevel, callDevices, callConnections,
+	devRate, devShare, devActive, deviceSections, deviceSection, devicePolicy, normMac, connLabel,
+	ruleKey, ruleOf, ruleSections, ruleActions, ruleAction, catRows, catsDue, listsDue, checkErrorText,
+	runNatTest, runTunnelTest, parseLog, logShown, upstreamError, dnsStats, natSummary, upnpState, upnpRows,
+	forwardRows, fwEnabled, portError, forwardErrors, zoneOfIp, forwardValues, natPick,
+	ACTION_LABELS, REASON_LABELS, VIA_LABELS, WARNINGS, NAT_ERRORS, CHECK_ERRORS, UPNP_MISSING, NBSP, TABS,
 	fmtBytes, fmtRate, fmtAge, fmtTime, fmtDate, fmtNum, missingText,
-	pill, busy, empty, span, svgEl, kvTable, table, row, chips,
-	setText, setState, setResult, setError, tunnelIface, tunnelState, tabUrl, invalidTab
+	setResult, setError, tunnelIface, tunnelState, tabUrl, invalidTab
 });
