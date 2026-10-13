@@ -60,6 +60,9 @@ uci -q batch <<-EOF
 	set network.@amneziawg_awg0[-1].public_key='demo'
 	commit network
 EOF
+# /tmp/booted ставит rc.local, а netifd procd запускает в фоне: его объекта network в ubus может ещё не быть,
+# и reload падал бы с «Command failed: Not found» (CI).
+ubus -t 30 wait_for network
 /etc/init.d/network reload
 wan_up() { [ "$(ubus call network.interface.wan status 2>/dev/null | jsonfilter -e '@.up')" = true ]; }
 wait_for 20 wan_up

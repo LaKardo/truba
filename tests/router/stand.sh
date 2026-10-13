@@ -77,6 +77,8 @@ uci -q batch <<-'EOF'
 	commit network
 EOF
 section "стенд: сеть"
+# /tmp/booted ставит rc.local, а netifd procd запускает в фоне: объекта network в ubus может ещё не быть.
+ubus -t 30 wait_for network
 /etc/init.d/network reload
 iface_up() { [ "$(ubus call network.interface."$1" status 2>/dev/null | jsonfilter -e '@.up')" = true ]; }
 if ! { wait_for 20 iface_up lan && wait_for 20 iface_up awg0; }; then fail "стенд: lan и awg0 не поднялись"; finish; fi
