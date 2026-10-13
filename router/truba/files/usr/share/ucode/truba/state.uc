@@ -275,6 +275,15 @@ export function lists() {
 	};
 };
 
+// Строки для «Журнала» (truba.log): Труба и её watchdog, mosdns (ошибки DNS-серверов) и интерфейс Туннеля
+// (netifd, ядро). Имя интерфейса — как его читает служба, по схеме ^[A-Za-z0-9_]{1,15}$: в выражение оно
+// подставляется как есть. «invalid msg» — повреждённые запросы устройств, которые dnsmasq пересылает как
+// есть: это шум, а не ошибка Трубы.
+export function log(n) {
+	let iface = F.check_value('main', 'iface', cursor().get('truba', 'main', 'iface'));
+	return { log: U.run(sprintf("logread -e '%s\\|mosdns\\|%s' | grep -v 'invalid msg' | tail -n %d", C.LOG_TAG, iface, n)).out };
+};
+
 // Размеры наборов для «Обзора»: geoip — подсетей по Действиям (посчитаны при применении),
 // dns — IP, которые mosdns положил по ответам для доменов geosite. Дороже status — реже.
 export function sets() {

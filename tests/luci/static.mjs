@@ -96,6 +96,13 @@ const allowed = new Set([ ...(acl.read?.ubus?.truba || []), ...(acl.write?.ubus?
 // ubus-API — в пакете truba (ADR 0008), ACL — в luci-app-truba.
 const plugin = readFileSync(join(root, '../truba/files/usr/share/rpcd/ucode/truba-api.uc'), 'utf8');
 const provided = new Set([ ...plugin.matchAll(/^\t(\w+): \{$/gm) ].map((m) => m[1]));
+// rpcd-плагин — тонкий (ADR 0008): логика — в команде truba. Импорт truba.conf (с ним — uci) вешал rpcd на NC-1812
+// при SIGHUP, а его шлёт установка любого пакета LuCI; стенд в Docker этого не воспроизводит — проверка здесь.
+const pluginImports = [ ...plugin.matchAll(/^import .* from '([^']+)';$/gm) ].map((m) => m[1]);
+if (!pluginImports.length || !pluginImports.every((m) => [ 'fs', 'truba.const', 'truba.util' ].includes(m))) {
+	console.log(`FAIL  truba-api.uc: импорты только fs, truba.const и truba.util, а не ${pluginImports.join(', ')}`);
+	fails++;
+}
 for (const f of files) {
 	for (const m of readFileSync(f, 'utf8').matchAll(/object: 'truba', method: '(\w+)'/g)) {
 		if (!provided.has(m[1])) { console.log(`FAIL  метода truba.${m[1]} нет в rpcd-плагине (${rel(f)})`); fails++; }
