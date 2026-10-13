@@ -475,9 +475,10 @@
 }
 
 /* ---- Поле по схеме ---- */
-.field { display: grid; gap: 3px; min-width: 0; }
+/* Поле — сверху ячейки: в сетке соседнее поле с подсказкой выше, а растянутое поле опустило бы своё поле ввода. */
+.field { display: grid; align-content: start; gap: 3px; min-width: 0; }
 .field label { color: var(--mu); font-size: 12px; }
-.field label .dot { display: inline-block; width: 8px; height: 8px; box-shadow: none; vertical-align: 1px; }
+.field label .dot, .tt-res .dot { display: inline-block; width: 8px; height: 8px; box-shadow: none; vertical-align: 1px; }
 .field input {
 	min-width: 0;
 	height: 30px;
@@ -678,7 +679,8 @@
 /* «Туннель»: плитки, график задержки по окну проверок, строки состояния; поля и импорт — с отступами. */
 .state .stats { margin: 0 0 12px; }
 .spark-empty { display: flex; align-items: center; justify-content: center; height: 70px; border-radius: 8px; background: var(--chip); }
-.state .kv, .conn-f, .tt-res, .tt-hint, .wd .cols, .fields + .mu, .fields + .fields { margin-top: 10px; }
+/* С .tr — сильнее «.tr p { margin: 0 }»: абзацы карточки — с отступом. */
+.state .kv, .conn-f, .tt-res, .wd .cols, .fields + .fields, .tr .tt-hint, .tr .fields + .mu, .tr .peer > p.mu { margin-top: 10px; }
 .peer .kv { margin-bottom: 4px; }
 .ks { margin: 14px 0 0; padding: 10px 0 0; border-top: 1px solid var(--bd); }
 .ks .mu { margin: 4px 0 0; }

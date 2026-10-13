@@ -463,8 +463,12 @@ async function waitApply(page) {
 		'Jc = 4', 'S1 = 20', 'S2 = 40', 'H1 = 100-200', 'HeaderProtectionKey = aHBrLWZvci10ZXN0cw==', '[Peer]', 'PublicKey = cHVibGljLWtleS1mb3ItdGVzdHMtb25seQ==',
 		'Endpoint = 198.51.100.7:40243', 'PersistentKeepalive = 15-25', '' ].join('\r\n'));
 	await (await el('.drop input[type="file"]'))?.uploadFile(`${out}/router.conf`);
-	await page.waitForFunction(() => /AmneziaWG 3\.1/.test(document.querySelector('.truba-root')?.shadowRoot?.querySelector('.card.peer')?.innerText || ''),
-		{ timeout: 5000 }).catch(() => {});
+	// Ждать карточку, смонтированную заново: «AmneziaWG 3.1» прежняя показывает на миг раньше, а её поле S1 —
+	// ещё прежнее (пустое). Иначе раскрылся бы блок прежней карточки, а набор ушёл бы мимо поля.
+	await page.waitForFunction(() => {
+		const c = document.querySelector('.truba-root')?.shadowRoot?.querySelector('.card.peer');
+		return /AmneziaWG 3\.1/.test(c?.innerText || '') && c.querySelector('input[data-opt="network.awg0.awg_s1"]')?.value == '20';
+	}, { timeout: 5000 }).catch(() => {});
 	await page.evaluate(() => document.querySelector('.truba-root').shadowRoot.querySelectorAll('.card.peer details.fold').forEach((d) => { d.open = true; }));
 	const imp = await page.evaluate(async () => {
 		const u = await L.require('uci'), r = document.querySelector('.truba-root').shadowRoot;
@@ -473,13 +477,22 @@ async function waitApply(page) {
 			bar: !!r.querySelector('.changes') };
 	});
 	// Уход из поля показывает ошибку сразу (пауза в наборе проверена на «Правилах»).
-	await retypeIn(await el('input[data-opt="network.awg0.awg_s1"]'), '5');
+	// Метка на узле поля: если карточку смонтируют заново, у нового поля её нет.
+	const s1h = await el('input[data-opt="network.awg0.awg_s1"]');
+	imp.s1Pre = await s1h?.evaluate((e) => {
+		e.__mark = 1;
+		e.focus();
+		e.select();
+		return { connected: e.isConnected, focused: e.getRootNode().activeElement === e, open: !!e.closest('details')?.open };
+	});
+	await page.keyboard.type('5');
+	imp.s1Mid = await s1h?.evaluate((e) => ({ value: e.value, connected: e.isConnected }));
 	await page.keyboard.press('Tab');
 	imp.s1Err = await page.waitForFunction(() => document.querySelector('.truba-root').shadowRoot.querySelector('.card.peer .field.bad [role="alert"]')?.textContent,
 		{ timeout: 5000 }).then((h) => h.jsonValue()).catch(() => '');
 	imp.s1Typed = await page.evaluate(() => {
 		const r = document.querySelector('.truba-root').shadowRoot, i = r.querySelector('input[data-opt="network.awg0.awg_s1"]');
-		return { value: i?.value, invalid: i?.getAttribute('aria-invalid') };
+		return { value: i?.value, invalid: i?.getAttribute('aria-invalid'), same: !!i?.__mark };
 	});
 	result(/198\.51\.100\.7:40243/.test(imp.text) && /AmneziaWG 3\.1/.test(imp.text) && imp.proto == 'amneziawg' && imp.port == '40243' && imp.s1 == '20' && imp.bar &&
 		/at least 12/.test(imp.s1Err), '«Туннель»: импорт router.conf — адрес, протокол и поля; S1 меньше 12 с защитой заголовков — ошибка', JSON.stringify(imp));
@@ -505,6 +518,15 @@ async function waitApply(page) {
 	result(/not configured yet/.test(nc.text) && nc.drop && nc.sw === true, '«Туннель»: не настроен — пояснение, импорт, переключатель недоступен', JSON.stringify(nc));
 	await Promise.all([ page.waitForNavigation({ waitUntil: 'networkidle2' }).catch(() => {}), tap('.changes [data-act="reset"]') ]);
 	await settled(page);
+	// Вёрстка (видна на Роутере): поля соседних колонок — на одной высоте, хоть у одного и есть подсказка; описание
+	// проверки — с отступом от подсказок полей.
+	const lay = await page.evaluate(() => {
+		const r = document.querySelector('.truba-root').shadowRoot, top = (o) => r.querySelector(`input[data-opt="${o}"]`)?.getBoundingClientRect().top;
+		const f = r.querySelector('.card.peer .conn-f')?.getBoundingClientRect(), h = r.querySelector('.card.peer .tt-hint')?.getBoundingClientRect();
+		return { wd: Math.abs(top('truba.watchdog.fails') - top('truba.watchdog.probe')), peer: Math.abs(top('network.awg0.mtu') - top(r.querySelector('input[data-opt$=".persistent_keepalive"]')?.dataset.opt)),
+			gap: (f && h) ? Math.round(h.top - f.bottom) : null };
+	});
+	result(lay.wd <= 1 && lay.peer <= 1 && lay.gap >= 6, '«Туннель»: поля соседних колонок на одной высоте, описание проверки с отступом', JSON.stringify(lay));
 	// «Проверить Туннель» (была на «Диагностике»): итог — в карточке подключения.
 	await tap('[data-act="tunnel-test"]');
 	const tt = await page.waitForFunction(() => {
@@ -512,6 +534,12 @@ async function waitApply(page) {
 		return !r?.querySelector('.card.peer .spinning') && t.trim() && t;
 	}, { timeout: 45000 }).then((h) => h.jsonValue()).catch(() => '');
 	result(!!tt, '«Туннель»: «Проверить Туннель» — итог в карточке', tt.replace(/\s+/g, ' ').slice(0, 100));
+	// Точка «ответы» в таблице итога — точкой, а не полосой на высоту ячейки.
+	const ttDot = await page.evaluate(() => {
+		const d = document.querySelector('.truba-root').shadowRoot.querySelector('.card.peer .tt-res .dot')?.getBoundingClientRect();
+		return d ? { w: Math.round(d.width), h: Math.round(d.height) } : null;
+	});
+	result(!!ttDot && ttDot.w <= 10 && ttDot.h <= 10 && ttDot.w > 0, '«Туннель»: точка в итоге проверки — маленькая и круглая', JSON.stringify(ttDot));
 	// Аварийная блокировка — «Применить» на «Туннеле» доходит до службы; затем прежнее значение.
 	t0 = await time();
 	const ksOn = await page.evaluate(() => document.querySelector('.truba-root').shadowRoot.querySelector('input[data-opt="truba.main.killswitch"]')?.checked);

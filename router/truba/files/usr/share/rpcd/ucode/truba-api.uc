@@ -3,10 +3,8 @@
 'use strict';
 
 import { popen, readfile } from 'fs';
-import { cursor } from 'uci';
 import * as C from 'truba.const';
 import * as U from 'truba.util';
-import * as F from 'truba.conf';
 
 function truba(args) {
 	let p = popen(C.CLI + ' ' + args + ' 2>/dev/null', 'r');
@@ -164,15 +162,8 @@ const methods = {
 			let n = int(req.args?.lines ?? 200);
 			if (n < 10 || n > 2000)
 				n = 200;
-			// Источники «Журнала»: Труба и её watchdog, mosdns (ошибки DNS-серверов) и интерфейс Туннеля (netifd,
-			// ядро). Имя интерфейса — как его читает служба, по схеме ^[A-Za-z0-9_]{1,15}$: в выражение оно
-			// подставляется как есть. «invalid msg» — повреждённые запросы устройств, которые dnsmasq
-			// пересылает как есть: это шум, а не ошибка Трубы.
-			let iface = F.check_value('main', 'iface', cursor().get('truba', 'main', 'iface'));
-			let p = popen(sprintf("logread -e '%s\\|mosdns\\|%s' | grep -v 'invalid msg' | tail -n %d", C.LOG_TAG, iface, n), 'r');
-			let out = p ? p.read('all') : '';
-			p?.close();
-			return { log: out };
+			// Строки отбирает команда truba (state.log): ей нужны настройки, а плагин — тонкий (ADR 0008).
+			return truba('log ' + n);
 		}
 	},
 };
