@@ -478,8 +478,8 @@
 /* Поле — сверху ячейки: в сетке соседнее поле с подсказкой выше, а растянутое поле опустило бы своё поле ввода. */
 .field { display: grid; align-content: start; gap: 3px; min-width: 0; }
 .field label { color: var(--mu); font-size: 12px; }
-.field label .dot, .tt-res .dot { display: inline-block; width: 8px; height: 8px; box-shadow: none; vertical-align: 1px; }
-.field input {
+.field label .dot, .tt-res .dot, .kv .dot { display: inline-block; width: 8px; height: 8px; box-shadow: none; vertical-align: 1px; }
+.field input, .field select {
 	min-width: 0;
 	height: 30px;
 	padding: 0 10px;
@@ -491,7 +491,7 @@
 	font-size: 12px;
 }
 .field input:disabled { opacity: .55; }
-.field.bad input { border-color: var(--blk); }
+.field.bad input, .field.bad select { border-color: var(--blk); }
 .field .mu { font-size: 11px; }
 
 /* ---- Сворачиваемый блок ---- */
@@ -706,3 +706,26 @@
 .ups .err-text { margin-top: 4px; }
 /* В столбец flex: 1 давал полю основу 0 — оно сплющивалось; там высота — своя. */
 @container (max-width: 600px) { .ups-add { flex-direction: column; } .ups-add input { flex: none; } }
+
+/* ---- «Входящие» ---- */
+.nat .card-h .aside { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.nat .kv + .mu, .nat .fold + .mu { margin-top: 8px; }
+.nat-srv, .upnp-rows { margin: 0; padding: 0; list-style: none; font-size: 12px; }
+.nat-srv li { overflow-wrap: anywhere; }
+.upnp-rows li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 12px; padding: 7px 0; border-top: 1px solid var(--bd); }
+.upnp-rows li:first-child { border-top: 0; padding-top: 0; }
+.upnp-rows b { flex: 1 1 12em; min-width: 0; overflow-wrap: anywhere; font-weight: 500; }
+.upnp .warns { margin: 8px 0 0; }
+.upnp .warns .dot { width: 8px; height: 8px; box-shadow: none; }
+.fwd-rows { margin: 0; padding: 0; list-style: none; }
+.fwd-rows li { display: flex; align-items: center; gap: 12px; padding: 6px 0; border-top: 1px solid var(--bd); }
+.fwd-rows li:first-child { border-top: 0; padding-top: 0; }
+.fwd-rows .sw { flex: none; }
+.fwd-b { display: grid; flex: 1; gap: 2px; min-width: 0; padding: 2px 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.fwd-b b { font-weight: 500; overflow-wrap: anywhere; }
+.fwd-b .num { color: var(--mu); font-size: 12px; overflow-wrap: anywhere; }
+.fwd-b .dot { display: inline-block; width: 8px; height: 8px; box-shadow: none; vertical-align: 1px; }
+.fwd-rows li.off .fwd-b { opacity: .6; }
+.fwd .card-h .btn .icon { width: 14px; height: 14px; }
+.fwd-form { display: grid; gap: 12px; width: 388px; max-width: 100%; }
+.btn.del { border-color: var(--blk); color: var(--blk); }

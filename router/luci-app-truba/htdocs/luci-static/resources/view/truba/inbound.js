@@ -1,172 +1,221 @@
 'use strict';
 'require view';
-'require form';
-'require poll';
 'require uci';
-'require ui';
 'require truba.common as common';
+'require truba.ui.app as app';
+'require truba.ui.kit as kit';
 
-// «Входящие»: Проверка NAT, UPnP / NAT-PMP и пробросы портов из Туннеля. Трафик входящих —
-// в таблице «Трафик устройств» на «Обзоре», здесь он не повторяется.
+// «Входящие» (spec §5.6): «Проверка NAT», UPnP / NAT-PMP и пробросы портов из Туннеля. Трафик входящих —
+// на «Обзоре», здесь он не повторяется. Страница — компоненты Preact в Shadow DOM (ADR 0017).
 
-// ---- Проверка NAT: строки постоянны, меняются значения; список серверов — по клику ----
+const POLL = 10;   // итог проверки NAT появляется сам через несколько секунд после подъёма Туннеля
 
-const span = common.span, setState = common.setState;
+// ---- Проверка NAT ----
 
-function buildNat(view) {
-	const x = { busy: false, key: null };
-	x.state = span('truba-badge');
-	x.addr = span('truba-num');
-	x.vps = span('truba-dot');
-	x.port = span('truba-dot');
-	x.same = span('truba-dot');
-	x.when = span();
-	x.servers = E('ul');
-	x.btn = E('button', { 'class': 'btn cbi-button-action', 'type': 'button', 'click': ui.createHandlerFn(view, () => runNat(x)) },
-		_('Check NAT'));
-	x.el = E('div', { 'class': 'cbi-section' }, [
-		E('h3', {}, [ _('NAT check'), ' ', x.state ]),
-		common.kvTable([
-			[ _('External address'), x.addr ],
-			[ _('External IP is the Truba IP'), x.vps ],
-			[ _('Port preserved'), x.port ],
-			[ _('Same mapping for different servers'), x.same ],
-			[ _('Checked'), x.when ]
-		]),
-		E('details', { 'class': 'truba-details' }, [ E('summary', {}, _('STUN servers')), x.servers ]),
-		E('div', { 'class': 'truba-toolbar' }, [ x.btn ]),
-		E('p', { 'class': 'truba-muted' },
-			_('This checks the Truba layer only. For the full RFC 5780 test run NatTypeTester on a PC in the home network whose device policy is «All via tunnel».'))
-	]);
-	return x;
+// Итог — последняя проверка из status (её запускает и watchdog после подъёма Туннеля); своя проверка —
+// её итог, пока опрос не принесёт другой (common.natPick). Типа NAT нет: служба его не определяет.
+function NatCard({ st }) {
+	const { html, useState } = app.lib;
+	const [ mine, setMine ] = useState(null), [ busy, setBusy ] = useState(false);
+	const run = () => {
+		const base = st.nat?.time ?? null;
+		setBusy(true);
+		common.runNatTest().then((n) => setMine({ n, base }), (e) => setMine({ n: { time: Date.now() / 1000, error: e.message }, base }))
+			.finally(() => setBusy(false));
+	};
+	const s = common.natSummary(common.natPick(st.nat, mine), common.get('watchdog', 'enabled'));
+	const aside = html`${busy ? html`<${kit.Busy} text=${_('Testing…')} />` : html`<${kit.Badge} level=${s.level}>${s.text}</${kit.Badge}>`}
+		<button type="button" class="btn" data-act="nat-test" disabled=${busy} onClick=${run}>${_('Check NAT')}</button>`;
+	return html`<${kit.Card} cls="nat" title=${_('NAT check')} aside=${aside}>
+		<${kit.KV} rows=${s.rows.map(([ k, v, lv ]) => [ k, lv ? html`<${kit.Dot} level=${lv} /> ${v}` : v ])} />
+		<p class="mu">${'%s: %s'.format(_('Checked'), s.when)}</p>
+		<${kit.Fold} title=${_('STUN servers')}>
+			${s.servers.length ? html`<ul class="nat-srv">${s.servers.map((x) => html`<li class="num">${x}</li>`)}</ul>` : html`<${kit.Empty} text=${_('none')} />`}
+		</${kit.Fold}>
+		<p class="mu">${_('This checks the Truba layer only. For the full RFC 5780 test run NatTypeTester on a PC in the home network whose device policy is «All via tunnel».')}</p>
+	</${kit.Card}>`;
 }
 
-// Итог «Проверки NAT»: из status (последняя проверка) или сразу после нажатия кнопки.
-function paintNat(x, n, wdOn) {
-	const yesNo = (el, v, unknown) => setState(el, v == null ? '' : v ? 'ok' : 'err', v == null ? unknown : v ? _('yes') : _('no'));
-	if (!n || n.error) {
-		if (!n)
-			setState(x.state, '', _('not run yet'));
-		else
-			setState(x.state, (n.error == 'tunnel_down' || n.error == 'not_configured') ? 'warn' : 'err',
-				_('not checked: %s').format(common.NAT_ERRORS[n.error] || n.error));
-		common.setText(x.addr, '—');
-		for (let el of [ x.vps, x.port, x.same ])
-			setState(el, '', '—');
-	}
-	else {
-		setState(x.state, n.ok ? 'ok' : 'err', n.ok ? _('Truba layer OK') : _('problem'));
-		common.setText(x.addr, '%s:%d'.format(n.external_ip, n.external_port));
-		yesNo(x.vps, n.ip_is_vps);
-		yesNo(x.port, n.port_preserved);
-		yesNo(x.same, n.consistent, _('nothing to compare: one server answered'));
-	}
-	common.setText(x.when, !n
-		? (wdOn ? _('runs by itself after the tunnel comes up') : _('never'))
-		: '%s · %s'.format(common.fmtTime(n.time), n.auto ? _('automatically after the tunnel came up') : _('manually')));
+// ---- UPnP / NAT-PMP ----
 
-	// Список серверов меняется только с новой проверкой.
-	const key = n ? String(n.time) + (n.error || '') : '';
-	if (x.key !== key) {
-		x.key = key;
-		const why = { dns: _('name not resolved'), timeout: _('no answer') };
-		x.servers.replaceChildren(...((n?.servers || []).map((s) => E('li', { 'class': 'truba-num' }, s.mapped
-			? '%s — %s:%d, %s'.format(s.server, s.mapped.address, s.mapped.port, _('%d ms').format(s.rtt))
-			: '%s — %s'.format(s.server, why[s.error] || s.error || '—')))));
-		if (!x.servers.childNodes.length)
-			x.servers.appendChild(E('li', {}, common.empty(_('none'))));
-	}
+function UpnpCard({ st, devices }) {
+	const { html } = app.lib;
+	const on = common.get('main', 'upnp'), up = st.upnp || {}, s = common.upnpState(up, on), rows = common.upnpRows(up.leases, devices);
+	return html`<${kit.Card} cls="upnp" title=${_('UPnP / NAT-PMP')}>
+		<${kit.Switch} label=${_('Enable UPnP and NAT-PMP on the tunnel')} opt="truba.main.upnp" checked=${on}
+			disabled=${s.locked} onChange=${(on) => app.set('truba', 'main', 'upnp', on ? '1' : '0')} />
+		<p class="mu">${s.installed ? _('Devices open ports themselves; miniupnpd reports the Truba IP as the external address.')
+			: _('Package luci-app-upnp is not installed.')}</p>
+		${s.note ? html`<ul class="warns"><li><${kit.Dot} level="warn" /><span>${s.note}</span></li></ul>` : ''}
+		<h4 class="sub">${_('Active UPnP / NAT-PMP mappings')}</h4>
+		${rows.length ? html`<ul class="upnp-rows">${rows.map((r) => html`<li>
+			<b>${r.descr}</b><span>${r.who}</span><span class="num">${'%s %s → %s'.format(r.proto, r.ext, r.port)}</span><span class="mu">${r.expires}</span>
+		</li>`)}</ul>` : html`<${kit.Empty} text=${_('No active mappings.')} />`}
+	</${kit.Card}>`;
 }
 
-function runNat(x) {
-	x.busy = true;
-	setState(x.state, '', _('Testing…'));
-	return common.runNatTest()
-		.then((n) => paintNat(x, n, true))
-		.catch((e) => paintNat(x, { time: Date.now() / 1000, error: e.message }, true))
-		.finally(() => { x.busy = false; });
+// ---- Пробросы портов из Туннеля ----
+
+const PROTOS = { 'tcp udp': 'TCP+UDP', tcp: 'TCP', udp: 'UDP' };
+const OTHER = 'other';   // «Другой IP-адрес…» в выборе устройства
+
+// Устройства с IP для выбора: сначала с именем — по имени, затем по IP.
+function devChoices(devices) {
+	const num = (ip) => ip.split('.').reduce((n, x) => n * 256 + +x, 0);
+	return devices.filter((d) => d.ip).sort((a, b) => (!a.name - !b.name) || String(a.name || '').localeCompare(String(b.name || '')) || num(a.ip) - num(b.ip));
+}
+
+// Окно правки проброса (решения 2–6 плана этапа 6). Пишутся только опции, которые есть в окне; остальные
+// (src_ip, reflection и другие из «Межсетевого экрана») остаются. Протокол того же смысла и зона при том же
+// IP — как в настройках. У нового проброса ошибка поля видна после ухода из него, у сохранённого — сразу:
+// неверное значение из настроек иначе держало бы «Save» без видимой причины. «Save» недоступна сразу.
+function FwdDialog({ row, devices, onClose, onDeleted }) {
+	const { html, useState } = app.lib;
+	const choices = devChoices(devices);
+	const [ v, setV ] = useState(() => row
+		? { name: row.name, proto: row.proto, ext: row.ext, port: uci.get('firewall', row.sid, 'dest_port') || '',
+			dev: choices.some((d) => d.ip == row.ip) ? row.ip : row.ip ? OTHER : '', ip: row.ip }
+		: { name: '', proto: 'tcp udp', ext: '', port: '', dev: '', ip: '' });
+	const [ touched, setTouched ] = useState(() => row ? { name: true, proto: true, ext: true, dev: true, ip: true, port: true } : {});
+	const ip = (v.dev == OTHER) ? v.ip : v.dev;
+	const errs = common.forwardErrors({ sid: row?.sid || null, name: v.name, proto: v.proto, ext: v.ext, ip, port: v.port });
+	const shown = {
+		ext: touched.ext && errs.ext,
+		dev: touched.dev && v.dev != OTHER && errs.ip && _('Choose a device'),
+		ip: touched.ip && v.dev == OTHER && errs.ip,
+		port: touched.port && errs.port
+	};
+	const set = (k) => (ev) => setV((s) => ({ ...s, [k]: ev.target.value }));
+	const touch = (k) => () => setTouched((t) => t[k] ? t : { ...t, [k]: true });
+
+	const save = () => {
+		const vals = common.forwardValues({ ...v, ip }, devices, row?.sid);
+		let sid = row?.sid;
+		if (!sid) {
+			sid = app.add('firewall', 'redirect');
+			app.set('firewall', sid, 'src', common.schema().consts.fw_zone);
+			app.set('firewall', sid, 'target', 'DNAT');
+		}
+		for (let k in vals)
+			app.set('firewall', sid, k, vals[k]);
+	};
+	const del = (ev) => {
+		app.remove('firewall', row.sid);
+		ev.currentTarget.closest('dialog')?.close();
+		onDeleted();
+	};
+
+	// Поле окна: подпись, элемент, ошибка и подсказка — как у kit.Field.
+	const field = (k, label, control, hint) => html`<div class=${'field' + (shown[k] ? ' bad' : '')}>
+		<label for=${'fwd-' + k}>${label}</label>
+		${control({ id: 'fwd-' + k, 'data-f': k, 'aria-invalid': shown[k] ? 'true' : undefined, 'aria-describedby': shown[k] ? 'fwd-' + k + '-e' : undefined,
+			onBlur: touch(k) })}
+		${shown[k] ? html`<div class="err-text" id=${'fwd-' + k + '-e'} role="alert">${shown[k]}</div>` : ''}
+		${hint ? html`<div class="mu">${hint}</div>` : ''}
+	</div>`;
+	const input = (k, extra) => (a) => html`<input ...${a} autocomplete="off" value=${v[k]} onInput=${set(k)} ...${extra || {}} />`;
+	const protos = PROTOS[v.proto] ? Object.entries(PROTOS) : [ ...Object.entries(PROTOS), [ v.proto, v.proto ] ];
+
+	return html`<${kit.Dialog} open=${true} title=${row ? _('Port forward') : _('New port forward')} confirm=${_('Save')}
+		disabled=${Object.keys(errs).length > 0} onConfirm=${save} onClose=${onClose}>
+		<div class="fwd-form">
+			${field('name', _('Name'), input('name'))}
+			<div class="cols">
+				${field('proto', _('Protocol'), (a) => html`<select ...${a} value=${v.proto} onChange=${set('proto')}>
+					${protos.map(([ x, l ]) => html`<option value=${x} selected=${x == v.proto}>${l}</option>`)}
+				</select>`)}
+				${field('ext', _('External port'), input('ext', { placeholder: '8080' }), _('A port or a range «from-to»'))}
+			</div>
+			${field('dev', _('Device'), (a) => html`<select ...${a} value=${v.dev} onChange=${(ev) => { set('dev')(ev); touch('dev')(); }}>
+				<option value="" disabled selected=${v.dev == ''}>${_('Choose a device')}</option>
+				${choices.map((d) => html`<option value=${d.ip} selected=${d.ip == v.dev}>${d.name ? '%s (%s)'.format(d.name, d.ip) : d.ip}</option>`)}
+				<option value=${OTHER} selected=${v.dev == OTHER}>${_('Other IP address…')}</option>
+			</select>`)}
+			${(v.dev == OTHER) ? field('ip', _('IP address'), input('ip', { inputmode: 'decimal', placeholder: '192.168.1.10' })) : ''}
+			${field('port', _('Internal port'), input('port'), _('Empty — the same as external'))}
+			${row ? html`<div><button type="button" class="btn del" data-act="fwd-delete" onClick=${del}>${_('Delete')}</button></div>` : ''}
+		</div>
+	</${kit.Dialog}>`;
+}
+
+// Пробросы из Туннеля: строка — имя, протокол, внешний порт → устройство:внутренний порт и переключатель.
+// Выключение — enabled '0', включение — опция снимается (или '1', если так было в настройках): туда и обратно —
+// ноль изменений. Нажатие на строку — окно правки.
+function FwdCard({ devices }) {
+	const { html, useState, useRef } = app.lib;
+	const addRef = useRef(null);
+	const [ edit, setEdit ] = useState(null);   // { row, n } открытого окна: row null — новый проброс
+	const rows = common.forwardRows(devices);
+	const open = (row) => setEdit((e) => ({ row, n: (e?.n || 0) + 1 }));
+	const toggle = (sid, on) => app.set('firewall', sid, 'enabled', common.fwEnabled(uci.state?.values?.firewall?.[sid]?.enabled, on));
+	// Строки, открывшей окно, после «Delete» нет — фокус на «Add», а не на странице (после перерисовки).
+	const deleted = () => requestAnimationFrame(() => addRef.current?.focus());
+	const aside = html`<button type="button" class="btn" data-act="fwd-add" ref=${addRef} onClick=${() => open(null)}><${kit.Icon} name="plus" />${_('Add')}</button>`;
+	return html`<${kit.Card} cls="w3 fwd" title=${_('Port forwards from the tunnel')} aside=${aside}>
+		${rows.length ? html`<ul class="fwd-rows">${rows.map((r) => html`<li data-sid=${r.sid} class=${r.on ? '' : 'off'}>
+			<button type="button" class="fwd-b" data-act="fwd-edit" onClick=${() => open(r)}>
+				<b>${r.name || '—'}${app.pending('firewall', r.sid) ? html` <${kit.Dot} level="warn" label=${_('changed, not applied yet')} />` : ''}</b>
+				<span class="num">${'%s %s → %s:%s'.format(PROTOS[r.proto] || r.proto, r.ext, r.who || '?', r.port)}</span>
+			</button>
+			<${kit.Switch} label=${_('Enabled')} aria=${'%s: %s'.format(r.name || '%s %s'.format(PROTOS[r.proto] || r.proto, r.ext), _('Enabled'))}
+				opt=${'firewall.' + r.sid + '.enabled'} checked=${r.on} onChange=${(on) => toggle(r.sid, on)} />
+		</li>`)}</ul>` : html`<${kit.Empty} text=${_('No port forwards from the tunnel yet.')} />`}
+		<div><${kit.Go} href=${L.url('admin/network/firewall/forwards')} label=${_('More options: Network → Firewall')} /></div>
+		${edit ? html`<${FwdDialog} key=${edit.n} row=${edit.row} devices=${devices} onClose=${() => setEdit(null)} onDeleted=${deleted} />` : ''}
+	</${kit.Card}>`;
+}
+
+function Page({ store, view, devices }) {
+	const { html } = app.lib;
+	const { status, offline } = app.use(store);
+	app.use(app.changes);   // карточки читают UCI браузера — перерисовка после app.set
+	const st = status || {};
+	return html`
+		<div class="head">
+			<h2>${_('Inbound')}</h2>
+			<span class="mu">${_('All ports of the Truba IP %s (except the VPS SSH and tunnel ports) reach the router. Full cone NAT keeps mappings open for any remote host; ports for home devices are opened manually or via UPnP.').format(st.vps_ip || '—')}
+				${' '}${_('Replies always go back through the tunnel, even to Russian clients.')}
+				${' '}<${kit.Go} tab="overview" label=${_('Inbound traffic is on the Overview.')} /></span>
+			${offline ? html`<${kit.Badge} level="err"><${kit.Icon} name="wifi-off" />${_('No connection to the router')}</${kit.Badge}>` : ''}
+		</div>
+		<div class="grid g2">
+			<${NatCard} st=${st} />
+			<${UpnpCard} st=${st} devices=${devices} />
+			<${FwdCard} devices=${devices} />
+		</div>
+		<${kit.ChangesBar} view=${view} />
+		<${kit.Toast} />`;
 }
 
 return view.extend({
 	load: function() {
-		return Promise.all([ uci.load('firewall'), L.resolveDefault(uci.load('upnpd'), null), common.callStatus(), uci.load('truba'),
-			common.loadSchema() ]);
+		return Promise.all([ app.load(), common.loadSchema() ]).then(() => Promise.all([
+			common.callStatus(), common.callDevices().catch(() => null), uci.load('truba'), uci.load('firewall'), uci.load('network') ]));
 	},
 
+	// Устройства — один раз при открытии: имена в строках и список для выбора; опрос — только status.
 	render: function(data) {
-		const st = data[2] || {};
-		const up = st.upnp || {};
-		const wdOn = common.get('watchdog', 'enabled');
-		// Конфиг upnpd может остаться и без самого miniupnpd — смотрим на установленную службу.
-		const haveUpnp = data[1] != null && up.installed !== false;
-		const forwards = uci.sections('firewall', 'redirect').filter((r) => r.src == common.schema().consts.fw_zone);
+		const store = app.store({ status: data[0] });
+		app.poll(store, () => common.callStatus().then((s) => ({ status: s })), POLL);
+		return app.mount(this, Page, { store, devices: data[1]?.devices || [] });
+	},
 
-		const nat = buildNat(this);
-		paintNat(nat, st.nat, wdOn);
-		// Итог появляется сам через несколько секунд после подъёма Туннеля.
-		poll.add(() => common.callStatus().then((s) => {
-			if (!nat.busy)
-				paintNat(nat, s.nat, wdOn);
-		}), 10);
+	// «Применить» панели изменений и «Сохранить и применить» LuCI: пока есть неверные поля, ничего не
+	// сохраняется (spec §3.6) — иначе применилось бы остальное, а введённое значение молча пропало бы.
+	handleSaveApply: function(ev, mode) {
+		if (app.changes.get().bad) {
+			app.toast(_('Fix the highlighted fields'));
+			return Promise.resolve();
+		}
+		return this.super('handleSaveApply', [ ev, mode ]);
+	},
 
-		const m = new form.Map('truba');
-		const s = m.section(form.NamedSection, 'main', 'main', _('UPnP / NAT-PMP'));
-		s.addremove = false;
-		const o = s.option(form.Flag, 'upnp', _('Enable UPnP and NAT-PMP on the tunnel'),
-			haveUpnp
-				? _('Devices open ports themselves; miniupnpd reports the Truba IP as the external address.')
-				: _('Package luci-app-upnp is not installed.'));
-		common.field(o, 'main', 'upnp');
-		o.rmempty = false;
-		o.readonly = !haveUpnp;
+	// Настройки меняются прямо в браузере: сохранить — отправить эти изменения, сбросить — перечитать страницу.
+	handleSave: function() {
+		return uci.save().then(() => app.changes.set({ n: app.changeCount() }));
+	},
 
-		let upnpState = '';
-		if (up.enabled && !up.installed)
-			upnpState = E('div', { 'class': 'alert-message warning' }, common.UPNP_MISSING);
-		else if (up.enabled && !up.running)
-			upnpState = E('div', { 'class': 'alert-message warning' }, _('UPnP is enabled, but miniupnpd is not running.'));
-		const leases = (up.leases || []).map((l) => common.row([
-			l.proto,
-			String(l.ext_port),
-			'%s:%d'.format(l.ip, l.port),
-			l.descr || '—',
-			l.expires ? common.fmtTime(l.expires) : _('no expiry')
-		]));
-
-		const rows = forwards.map((r) => common.row([
-			r.name || '—',
-			L.toArray(r.proto).join(', ') || 'tcp udp',
-			r.src_dport || '—',
-			'%s:%s'.format(r.dest_ip || '?', r.dest_port || r.src_dport || '?'),
-			r.enabled == '0' ? _('disabled') : _('enabled')
-		]));
-
-		return m.render().then((mapEl) => E('div', {}, [
-			E('h2', { 'name': 'content' }, _('Inbound')),
-			E('div', { 'class': 'cbi-map-descr' }, [
-				_('All ports of the Truba IP %s (except the VPS SSH and tunnel ports) reach the router. Full cone NAT keeps mappings open for any remote host; ports for home devices are opened manually or via UPnP.').format(st.vps_ip || '—'),
-				' ', _('Replies always go back through the tunnel, even to Russian clients.'), ' ',
-				E('a', { 'href': L.url('admin/services/truba/overview') }, _('Inbound traffic is on the Overview.'))
-			]),
-			nat.el,
-			mapEl,
-			E('div', { 'class': 'cbi-section' }, [
-				E('h3', {}, _('Active UPnP / NAT-PMP mappings')),
-				upnpState,
-				leases.length
-					? common.table([ _('Protocol'), _('External port'), _('Device'), _('Description'), _('Expires') ], leases)
-					: E('p', {}, common.empty(_('No active mappings.')))
-			]),
-			E('div', { 'class': 'cbi-section' }, [
-				E('h3', {}, _('Port forwards from the tunnel')),
-				rows.length
-					? common.table([ _('Name'), _('Protocol'), _('External port'), _('Device'), _('State') ], rows)
-					: E('p', {}, common.empty(_('No port forwards with source zone «truba».'))),
-				E('div', { 'class': 'truba-toolbar' }, [
-					E('a', { 'class': 'btn cbi-button', 'href': L.url('admin/network/firewall/forwards') }, _('Edit port forwards')),
-					E('span', { 'class': 'cbi-value-description' }, _('Choose source zone «truba».'))
-				])
-			])
-		]));
+	handleReset: function() {
+		window.location.reload();
 	}
 });

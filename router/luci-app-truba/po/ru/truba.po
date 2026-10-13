@@ -166,32 +166,14 @@ msgstr "Пакет luci-app-upnp не установлен."
 msgid "disabled"
 msgstr "выключен"
 
-msgid "enabled"
-msgstr "включён"
-
 msgid "Port forwards from the tunnel"
 msgstr "Пробросы портов из Туннеля"
 
 msgid "Protocol"
 msgstr "Протокол"
 
-msgid "External port"
-msgstr "Внешний порт"
-
-msgid "Device"
-msgstr "Устройство"
-
 msgid "State"
 msgstr "Состояние"
-
-msgid "No port forwards with source zone «truba»."
-msgstr "Нет пробросов портов из зоны «truba»."
-
-msgid "Edit port forwards"
-msgstr "Изменить пробросы портов"
-
-msgid "Choose source zone «truba»."
-msgstr "Выберите зону-источник «truba»."
 
 msgid "Update in progress…"
 msgstr "Идёт обновление…"
@@ -438,12 +420,6 @@ msgstr "бессрочно"
 
 msgid "Active UPnP / NAT-PMP mappings"
 msgstr "Действующие пробросы UPnP / NAT-PMP"
-
-msgid "Description"
-msgstr "Описание"
-
-msgid "Expires"
-msgstr "Истекает"
 
 msgid "No active mappings."
 msgstr "Пробросов нет."
@@ -1218,3 +1194,54 @@ msgstr "Для Категорий с Действием «Напрямую», д
 
 msgid "At least one valid server is needed"
 msgstr "Нужен хотя бы один верный сервер"
+
+msgid "Enter a port or a range «from-to» within 1–65535"
+msgstr "Введите порт или диапазон «от-до» в пределах 1–65535"
+
+msgid "This external port is already forwarded: %s"
+msgstr "Этот внешний порт уже пробрасывается: %s"
+
+msgid "Choose a device"
+msgstr "Выберите устройство"
+
+msgid "Port forward"
+msgstr "Проброс порта"
+
+msgid "New port forward"
+msgstr "Новый проброс порта"
+
+msgid "Save"
+msgstr "Сохранить"
+
+msgid "External port"
+msgstr "Внешний порт"
+
+msgid "A port or a range «from-to»"
+msgstr "Порт или диапазон «от-до»"
+
+msgid "Device"
+msgstr "Устройство"
+
+msgid "Other IP address…"
+msgstr "Другой IP-адрес…"
+
+msgid "IP address"
+msgstr "IP-адрес"
+
+msgid "Internal port"
+msgstr "Внутренний порт"
+
+msgid "Empty — the same as external"
+msgstr "Пусто — тот же, что внешний"
+
+msgid "Delete"
+msgstr "Удалить"
+
+msgid "Enabled"
+msgstr "Включён"
+
+msgid "No port forwards from the tunnel yet."
+msgstr "Пробросов из Туннеля пока нет."
+
+msgid "More options: Network → Firewall"
+msgstr "Другие параметры: Сеть → Межсетевой экран"

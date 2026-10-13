@@ -369,24 +369,34 @@ const devSecs = [
 	{ '.name': 'r6', '.type': 'rule', mode: 'odd', set: 'geoip', tag: 'private', action: 'block' },
 	{ '.name': 'r7', '.type': 'rule', tag: 'x', action: 'tunnel' },
 	{ '.name': 'r8', '.type': 'rule', set: 'geoip', action: 'block' },
+	// Пробросы «Входящих»: секции firewall и network (поле '.conf'; без него — truba). fw2 — из другой зоны,
+	// fw3 — выключен и без протокола (умолчание fw4 — tcp udp).
+	{ '.name': 'fw1', '.type': 'redirect', '.conf': 'firewall', src: 'truba', name: 'web', proto: 'tcp', src_dport: '8000-8100', dest_ip: '192.168.1.10', dest_port: '80' },
+	{ '.name': 'fw2', '.type': 'redirect', '.conf': 'firewall', src: 'wan', src_dport: '22' },
+	{ '.name': 'fw3', '.type': 'redirect', '.conf': 'firewall', src: 'truba', src_dport: '9000', dest_ip: '192.168.1.11', enabled: '0' },
+	{ '.name': 'z1', '.type': 'zone', '.conf': 'firewall', name: 'lan', network: [ 'lan' ] },
+	{ '.name': 'lan', '.type': 'interface', '.conf': 'network', proto: 'static', ipaddr: '192.168.1.1', netmask: '255.255.255.0' },
 ];
 const devSchema = { sections: {
 	device: { enabled: { type: 'bool', def: true }, policy: { type: 'enum', values: [ 'tunnel', 'direct', 'rules' ], def: 'tunnel' } },
 	lists: { update_utc: { type: 'pattern', re: '^([01]?[0-9]|2[0-3]):[0-5][0-9]$', def: '12:00' }, geoip_url: { type: 'string', def: 'https://x' } },
 	dns: { set_timeout: { type: 'int', def: 86400, lo: 0, hi: 604800, min: 600 } },
 	watchdog: { probe: { type: 'ipv4', def: '' } }
-}, upstream_schemes: [ 'udp', 'tcp', 'tcp+pipeline', 'tls', 'tls+pipeline', 'https', 'h3', 'quic', 'doq' ], consts: {} };
+}, upstream_schemes: [ 'udp', 'tcp', 'tcp+pipeline', 'tls', 'tls+pipeline', 'https', 'h3', 'quic', 'doq' ], consts: { fw_zone: 'truba' } };
 // String.prototype.format задаёт luci.js; в Node — замена для текстов ошибок полей и времени строк журнала (%02d).
 String.prototype.format ??= function(...a) {
 	let i = 0;
 	return this.replace(/%(0\d+)?([sd%])/g, (m, w, t) => (t == '%') ? '%' : w ? String(a[i++]).padStart(+w, '0') : String(a[i++]));
 };
+// state.deletes — опции, удалённые в браузере: LuCI uci.sections их не снимает, а uci.get — снимает.
+const devUci = { sections: (c, t) => devSecs.filter((s) => (s['.conf'] || 'truba') == c && s['.type'] == t),
+	get: (c, sid, o) => devSecs.find((s) => (s['.conf'] || 'truba') == c && s['.name'] == sid)?.[o], state: { deletes: {} } };
 let cdev = null;
 try {
 	cdev = new Function('baseclass', 'rpc', 'uci', '_', 'L', 'E', 'document', commonSrc)(
-		baseclass, { declare: (o) => () => Promise.resolve(o.method == 'schema' ? devSchema : {}) },
-		{ sections: (c, t) => devSecs.filter((s) => s['.type'] == t), get: (c, sid, o) => devSecs.find((s) => s['.name'] == sid)?.[o] },
-		(s) => s, stub, stub, { querySelector: () => true });
+		baseclass, { declare: (o) => () => Promise.resolve(o.method == 'schema' ? devSchema : {}) }, devUci,
+		(s) => s, new Proxy(stub, { get: (t, k) => (k === 'toArray') ? (x) => (x == null) ? [] : Array.isArray(x) ? x : String(x).split(/\s+/) : stub }),
+		stub, { querySelector: () => true });
 	await cdev.loadSchema();
 } catch (e) {
 	console.log(`FAIL  common.js с заглушкой uci: ${e.message}`);
@@ -435,6 +445,82 @@ if (cdev) {
 	check(vals(dz) === '— — 0% 0' && dz.note === 'no queries yet', `common.dnsStats: запросов ещё нет (${vals(dz)})`);
 	const dn = DS({ routing: true, mosdns: true, dns_cache: { query: 200, hit: 150, lazy_hit: 10, size: 70000, max: 65536 } });
 	check(dn.level === 'ok' && vals(dn) === '75% 5% 100% 200' && dn.note === null, `common.dnsStats: доли, заполнение не больше 100 % (${vals(dn)})`);
+
+	// «Входящие»: итог «Проверки NAT» — без проверки и при ошибке «—», а не undefined:NaN.
+	const NS = (n, w) => cdev.natSummary?.(n, w) || { rows: [], servers: [] };
+	const nsVals = (s) => s.rows.map((r) => r[1]).join('|');
+	check(NS(null, true).text === 'not run yet' && nsVals(NS(null, true)) === '—|—|—|—' && NS(null, true).when === 'runs by itself after the tunnel comes up' &&
+		NS(null, false).when === 'never', 'common.natSummary: ещё не запускалась — «—»');
+	const nd = NS({ time: 1, error: 'tunnel_down', servers: [] }, true);
+	check(nd.level === 'warn' && nd.text === 'not checked: ' + cdev.NAT_ERRORS.tunnel_down && nsVals(nd) === '—|—|—|—', 'common.natSummary: Туннель лежит — warn');
+	check(NS({ time: 1, error: 'weird' }, true).level === 'err' && /weird/.test(NS({ time: 1, error: 'weird' }, true).text), 'common.natSummary: незнакомая ошибка — как есть');
+	const nok = NS({ time: 1, ok: true, external_ip: '203.0.113.5', external_port: 40000, ip_is_vps: true, port_preserved: true, consistent: null,
+		servers: [ { server: 's1:3478', mapped: { address: '203.0.113.5', port: 40000 }, rtt: 12 }, { server: 's2:3478', error: 'timeout' } ] }, true);
+	check(nok.level === 'ok' && nsVals(nok) === '203.0.113.5:40000|yes|yes|nothing to compare: one server answered' && nok.servers.length === 2 &&
+		/s2:3478 — no answer/.test(nok.servers[1]), `common.natSummary: успех, один сервер (${nsVals(nok)})`);
+	// UPnP: не установлен, не работает, выключен; отображения — с именем устройства.
+	const US = (u) => cdev.upnpState?.(u) || {};
+	check(US({ enabled: true, installed: false }).installed === false && US({ enabled: true, installed: false }).note === cdev.UPNP_MISSING &&
+		/not running/.test(US({ enabled: true, installed: true, running: false }).note) && US({ enabled: false, installed: true }).note === null,
+		'common.upnpState: не установлен, не работает, выключен');
+	const ur = cdev.upnpRows?.([ { proto: 'UDP', ext_port: 27036, ip: '192.168.1.50', port: 27036, expires: 0, descr: 'Steam' },
+		{ proto: 'TCP', ext_port: 51413, ip: '192.168.1.9', port: 51413, expires: 0, descr: '' } ], [ { ip: '192.168.1.50', name: 'pc' } ]) || [];
+	check(ur.length === 2 && ur[0].who === 'pc' && ur[1].who === '192.168.1.9' && ur[1].descr === '—' && ur[0].expires === 'no expiry',
+		'common.upnpRows: имя устройства по IP, без описания — «—»');
+	// Пробросы из Туннеля: только зона Туннеля; проверка формы; зона назначения; значения секции.
+	const FR = cdev.forwardRows?.([ { ip: '192.168.1.10', name: 'nas' } ]) || [];
+	check(FR.length === 2 && FR[0].who === 'nas' && FR[0].proto === 'tcp' && FR[1].proto === 'tcp udp' && FR[1].on === false && FR[1].port === '9000',
+		'common.forwardRows: только из зоны Туннеля, имя устройства, протокол по умолчанию, выключенный');
+	const PE = (v, o) => cdev.portError?.(v, o);
+	check([ '1', '65535', '8000-8100' ].every((v) => PE(v) === null) && PE('', true) === null &&
+		[ '', '0', '65536', '100-50', 'a', '1-2-3' ].every((v) => /1–65535/.test(PE(v) || '')), 'common.portError: порт и диапазон 1–65535');
+	const FE2 = (f) => cdev.forwardErrors?.({ sid: null, name: '', proto: 'tcp', ext: '', ip: '', port: '', ...f }) || {};
+	check(/already forwarded/.test(FE2({ ext: '8050', ip: '192.168.1.20' }).ext || '') && !FE2({ ext: '8050', proto: 'udp', ip: '192.168.1.20' }).ext &&
+		!FE2({ ext: '9000', ip: '192.168.1.20' }).ext && !FE2({ sid: 'fw1', ext: '8050', ip: '192.168.1.10' }).ext,
+		'common.forwardErrors: пересечение портов при общем протоколе; выключенный и свой — не в счёт');
+	check(/IPv4/.test(FE2({ ext: '1', ip: '1.2.3' }).ip || '') && /1–65535/.test(FE2({ ext: '1', ip: '192.168.1.5', port: '0' }).port || ''),
+		'common.forwardErrors: IP и внутренний порт');
+	check(PE('8000:8100') === null, 'common.portError: диапазон через «:», как у fw4 (parse_port)');
+	// Проброс, снова включённый в браузере (enabled снят), — включён и в строках, и в проверке пересечения.
+	devUci.state.deletes = { firewall: { fw3: { enabled: true } } };
+	const FRd = cdev.forwardRows?.([]) || [];
+	check(FRd.find((r) => r.sid == 'fw3')?.on === true && /already forwarded/.test(FE2({ ext: '9000', ip: '192.168.1.20' }).ext || ''),
+		'common.forwardRows и forwardErrors: опция, удалённая в браузере, не действует (как у uci.get)');
+	devUci.state.deletes = {};
+	// fw4 (parse_bool): enabled 'off', 'no', 'false' — выключен; правило SNAT — не проброс (как у LuCI).
+	devSecs.push({ '.name': 'fw5', '.type': 'redirect', '.conf': 'firewall', src: 'truba', target: 'SNAT', src_dport: '7000' },
+		{ '.name': 'fw6', '.type': 'redirect', '.conf': 'firewall', src: 'truba', src_dport: '7100', dest_ip: '192.168.1.13', enabled: 'off' });
+	const FRs = cdev.forwardRows?.([]) || [];
+	check(!FRs.some((r) => r.sid == 'fw5') && FRs.find((r) => r.sid == 'fw6')?.on === false && !FE2({ ext: '7100', ip: '192.168.1.20' }).ext,
+		'common.forwardRows: SNAT — не проброс, enabled off — выключен');
+	devSecs.splice(-2);
+	// Переключатель строки: туда и обратно — значение из настроек (ноль изменений), какой бы записью оно ни было.
+	const EV = (saved, on) => cdev.fwEnabled?.(saved, on);
+	check(EV(undefined, false) === '0' && EV(undefined, true) === null && EV('1', true) === '1' && EV('yes', true) === 'yes' &&
+		EV('off', false) === 'off' && EV('off', true) === null && EV('0', false) === '0', 'common.fwEnabled: значение enabled переключателя');
+	// Правка сохранённого проброса: протокол того же смысла (список) и зона при том же IP — как в настройках.
+	devSecs.push({ '.name': 'fw7', '.type': 'redirect', '.conf': 'firewall', src: 'wan', proto: [ 'tcp', 'udp' ], src_dport: '5000',
+		dest_ip: '192.168.1.12', dest: 'guest' });
+	const FV7 = cdev.forwardValues?.({ name: '', proto: 'tcp udp', ext: '5000', ip: '192.168.1.12', port: '' }, [], 'fw7') || {};
+	const FV7b = cdev.forwardValues?.({ name: '', proto: 'tcp', ext: '5000', ip: '192.168.1.77', port: '' }, [], 'fw7') || {};
+	check(JSON.stringify(FV7.proto) === '["tcp","udp"]' && !('dest' in FV7) && FV7b.proto === 'tcp' && FV7b.dest === 'lan',
+		'common.forwardValues: правка — протокол-список и зона при том же IP остаются, другой IP — новая зона', JSON.stringify({ FV7, FV7b }));
+	devSecs.splice(-1);
+	// «Проверка NAT»: своя проверка — пока опрос не принесёт другой итог; время браузера с временем Роутера не сравнивается.
+	const NP = (pl, m) => cdev.natPick?.(pl, m);
+	const mineT = { n: { time: 5, error: 'timeout' }, base: 100 };
+	check(NP({ time: 100 }, mineT)?.error === 'timeout' && NP({ time: 130, ok: true }, mineT)?.time === 130 && NP(null, { n: mineT.n, base: null }) === mineT.n &&
+		NP({ time: 1 }, null)?.time === 1, 'common.natPick: своя проверка — до нового итога службы');
+	// UPnP без miniupnpd: включённый можно выключить (иначе предупреждение не убрать), выключенный не включить.
+	const US2 = (u, on) => cdev.upnpState?.(u, on) || {};
+	check(US2({ installed: false }, true).locked === false && US2({ installed: false }, false).locked === true && US2({ installed: true }, false).locked === false,
+		'common.upnpState: без miniupnpd включённый UPnP можно выключить');
+	const ZO = (ip, d) => cdev.zoneOfIp?.(ip, d || []);
+	check(ZO('192.168.1.77') === 'lan' && ZO('10.9.9.9') === null && ZO('100.64.0.9', [ { ip: '100.64.0.9', zone: 'mesh' } ]) === 'mesh',
+		'common.zoneOfIp: устройство, сеть со статическим адресом, неизвестно — null');
+	const FV = cdev.forwardValues?.({ name: '', proto: 'tcp udp', ext: '25565', ip: '10.9.9.9', port: '' }) || {};
+	check(FV.name === null && FV.proto === 'tcp udp' && FV.src_dport === '25565' && FV.dest_port === null && FV.dest === null && FV.dest_ip === '10.9.9.9',
+		'common.forwardValues: пустое — null, без зоны — без dest');
 
 	// «Правила»: Действие Категории — как его поймёт служба, по настройкам браузера.
 	const RA = (...a) => cdev.ruleAction?.(...a);

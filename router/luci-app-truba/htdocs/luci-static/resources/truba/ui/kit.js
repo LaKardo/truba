@@ -41,11 +41,12 @@ function Icon({ name }) {
 		stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" dangerouslySetInnerHTML=${{ __html: icons[name] || '' }}></svg>`;
 }
 
-// Переключатель опции UCI. opt — «конфиг.секция.опция»: по нему тесты находят элемент.
-function Switch({ label, checked, disabled, opt, onChange }) {
+// Переключатель опции UCI. opt — «конфиг.секция.опция»: по нему тесты находят элемент. aria — имя для экранного
+// чтеца, когда подписи мало (одинаковые переключатели в строках списка).
+function Switch({ label, checked, disabled, opt, aria, onChange }) {
 	const { html } = app.lib;
 	return html`<label class="sw">
-		<input type="checkbox" data-opt=${opt} checked=${!!checked} disabled=${!!disabled}
+		<input type="checkbox" data-opt=${opt} aria-label=${aria} checked=${!!checked} disabled=${!!disabled}
 			onChange=${(ev) => onChange(ev.target.checked)} />
 		<span>${label}</span>
 	</label>`;
@@ -331,10 +332,11 @@ function DropZone({ label, accept, placeholder, error, onText }) {
 }
 
 // Подтверждение: родной <dialog> в верхнем слое — не зависит от container-type у .tr, фокус внутри
-// окна и Esc — у браузера. Закрытие любым путём (Esc, «Отмена») — onClose.
+// окна и Esc — у браузера. Закрытие любым путём (Esc, «Отмена») — onClose. disabled — подтверждение недоступно
+// (в окне неверные поля).
 let dialogs = 0;   // для id заголовка: окон на странице может быть несколько
 
-function Dialog({ open, title, confirm, onConfirm, onClose, children }) {
+function Dialog({ open, title, confirm, disabled, onConfirm, onClose, children }) {
 	const { html, useRef, useEffect, useState } = app.lib;
 	const ref = useRef(null);
 	const [ id ] = useState(() => 'dlg-' + (++dialogs));
@@ -356,7 +358,7 @@ function Dialog({ open, title, confirm, onConfirm, onClose, children }) {
 		${children ? html`<div class="dlg-b">${children}</div>` : ''}
 		<div class="acts">
 			<button type="button" class="btn" data-act="cancel" onClick=${() => ref.current?.close()}>${_('Cancel')}</button>
-			<button type="button" class="btn p" data-act="confirm" onClick=${yes}>${confirm}</button>
+			<button type="button" class="btn p" data-act="confirm" disabled=${!!disabled} onClick=${yes}>${confirm}</button>
 		</div>
 	</dialog>`;
 }

@@ -414,6 +414,203 @@ function dnsStats(st) {
 	};
 }
 
+// ---- Входящие ----
+
+// Итог «Проверки NAT» (spec §5.6): значок, четыре строки [ название, значение, уровень ], когда проверено
+// и ответы серверов STUN. Без проверки и при ошибке — «—»: адреса и порта тогда нет. Типа NAT нет — служба
+// его не определяет: STUN видит отображение, но не фильтрацию.
+function natSummary(n, wdOn) {
+	const done = !!n && !n.error;
+	const yesNo = (v, unknown) => (!done || v == null) ? [ (done && unknown) || '—', '' ] : v ? [ _('yes'), 'ok' ] : [ _('no'), 'err' ];
+	const [ level, text ] = !n ? [ '', _('not run yet') ]
+		: n.error ? [ (n.error == 'tunnel_down' || n.error == 'not_configured') ? 'warn' : 'err', _('not checked: %s').format(NAT_ERRORS[n.error] || n.error) ]
+		: n.ok ? [ 'ok', _('Truba layer OK') ] : [ 'err', _('problem') ];
+	const why = { dns: _('name not resolved'), timeout: _('no answer') };
+	return {
+		level, text,
+		rows: [
+			[ _('External address'), (done && n.external_ip) ? ((n.external_port != null) ? '%s:%d'.format(n.external_ip, n.external_port) : n.external_ip) : '—', '' ],
+			[ _('External IP is the Truba IP'), ...yesNo(n?.ip_is_vps) ],
+			[ _('Port preserved'), ...yesNo(n?.port_preserved) ],
+			[ _('Same mapping for different servers'), ...yesNo(n?.consistent, _('nothing to compare: one server answered')) ]
+		],
+		when: !n ? (wdOn ? _('runs by itself after the tunnel comes up') : _('never'))
+			: '%s · %s'.format(fmtTime(n.time), n.auto ? _('automatically after the tunnel came up') : _('manually')),
+		servers: (n?.servers || []).map((s) => s.mapped
+			? '%s — %s:%d, %s'.format(s.server, s.mapped.address, s.mapped.port, _('%d ms').format(s.rtt))
+			: '%s — %s'.format(s.server, why[s.error] || s.error || '—'))
+	};
+}
+
+// Итог на карточке «Проверки NAT»: своя проверка (mine — { n, base }: её итог и время итога в status на момент
+// нажатия), пока опрос не принесёт другой итог. Время браузера с временем Роутера не сравнивается: часы могут
+// расходиться, а неудача в браузере (нет ответа за 20 с) помечена временем браузера.
+function natPick(polled, mine) {
+	return (mine && (polled?.time ?? null) === mine.base) ? mine.n : (polled || null);
+}
+
+// UPnP (status.upnp): переключатель доступен, пока miniupnpd установлен, а без него — только чтобы выключить
+// (иначе предупреждение не убрать); on — значение переключателя. Предупреждение — включён, а служба не
+// установлена или не работает.
+function upnpState(up, on) {
+	up = up || {};
+	return {
+		installed: up.installed !== false,
+		locked: up.installed === false && !on,
+		note: (up.enabled && !up.installed) ? UPNP_MISSING
+			: (up.enabled && !up.running) ? _('UPnP is enabled, but miniupnpd is not running.') : null
+	};
+}
+
+// Отображения UPnP / NAT-PMP: устройство — по имени из devices, без него — IP.
+function upnpRows(leases, devices) {
+	const names = new Map((devices || []).filter((d) => d.ip && d.name).map((d) => [ d.ip, d.name ]));
+	return (leases || []).map((l) => ({
+		descr: l.descr || '—', who: names.get(l.ip) || l.ip, proto: l.proto, ext: l.ext_port, port: l.port,
+		expires: l.expires ? fmtTime(l.expires) : _('no expiry')
+	}));
+}
+
+// Пробросы портов из Туннеля (spec §5.6) — секции firewall.redirect с src = зона Туннеля, кроме правил SNAT
+// (их LuCI тоже не считает пробросами), по настройкам браузера (с несохранёнными изменениями). Опции,
+// удалённые в браузере (uci.unset), uci.sections не снимает — их снимает здесь, как uci.get: иначе снова
+// включённый проброс (enabled снят) оставался бы выключенным.
+function forwardSections() {
+	const del = uci.state?.deletes?.firewall || {};
+	return uci.sections('firewall', 'redirect').map((s) => {
+		const d = del[s['.name']];
+		if (!d || d === true)
+			return s;
+		const x = Object.assign({}, s);
+		for (let o in d)
+			delete x[o];
+		return x;
+	}).filter((s) => s.src == schema().consts.fw_zone && s.target != 'SNAT');
+}
+
+// enabled — как его читает fw4 (parse_bool): 0, off, false, no — выключен, остальное и без опции — включён.
+const FW_OFF = [ '0', 'off', 'false', 'no' ], FW_ON = [ '1', 'on', 'true', 'yes' ];
+
+function fwOn(v) {
+	return !FW_OFF.includes(v);
+}
+
+// Значение enabled от переключателя строки: из настроек, если оно уже значит нужное, — туда и обратно ноль
+// изменений; иначе выкл — '0', вкл — без опции.
+function fwEnabled(saved, on) {
+	return (saved != null && (on ? FW_ON : FW_OFF).includes(saved)) ? saved : on ? null : '0';
+}
+
+// Протоколы секции: без опции — tcp и udp, как у fw4; tcpudp, all, any — оба.
+function fwProtos(p) {
+	const l = L.toArray(p);
+	if (!l.length || l.some((x) => [ 'tcpudp', 'all', 'any', '*' ].includes(x)))
+		return [ 'tcp', 'udp' ];
+	return l;
+}
+
+// Протокол строкой, как его пишет форма LuCI: tcp, udp или «tcp udp».
+function fwProto(p) {
+	const l = fwProtos(p);
+	return (l.includes('tcp') && l.includes('udp')) ? 'tcp udp' : l.join(' ');
+}
+
+// Строки карточки: кто — имя устройства с этим IP, иначе IP; внутренний порт — без своего тот же, что внешний.
+function forwardRows(devices) {
+	const names = new Map((devices || []).filter((d) => d.ip && d.name).map((d) => [ d.ip, d.name ]));
+	return forwardSections().map((s) => ({
+		sid: s['.name'], name: s.name || '', proto: fwProto(s.proto), ext: s.src_dport || '', ip: s.dest_ip || '',
+		who: names.get(s.dest_ip) || s.dest_ip || '', port: s.dest_port || s.src_dport || '', on: fwOn(s.enabled)
+	}));
+}
+
+// Порт или диапазон «от-до» в 1–65535 → [ от, до ]; иначе null.
+function portRange(v) {
+	const m = /^(\d+)(?:[-:](\d+))?$/.exec(String(v ?? '').trim());
+	if (!m)
+		return null;
+	const a = +m[1], b = (m[2] != null) ? +m[2] : a;
+	return (a >= 1 && b <= 65535 && a <= b) ? [ a, b ] : null;
+}
+
+// Ошибка поля порта или null; optional — пустое можно (внутренний порт: тот же, что внешний). Диапазон —
+// через «-» или «:», как у fw4 (parse_port).
+function portError(v, optional) {
+	const t = String(v ?? '').trim();
+	if (t === '' && optional)
+		return null;
+	return portRange(t) ? null : _('Enter a port or a range «from-to» within 1–65535');
+}
+
+// Ошибки формы проброса: { ext, ip, port } — только неверные. Внешний порт, который уже пробрасывает другой
+// включённый проброс Туннеля по тому же протоколу, — ошибка: иначе второй молча не работал бы.
+function forwardErrors(f) {
+	const e = {};
+	const ext = portError(f.ext);
+	if (ext)
+		e.ext = ext;
+	else {
+		const [ a, b ] = portRange(f.ext), mine = fwProtos(f.proto);
+		const other = forwardSections().find((s) => s['.name'] != f.sid && fwOn(s.enabled) && fwProtos(s.proto).some((p) => mine.includes(p)) &&
+			((r) => r && r[0] <= b && a <= r[1])(portRange(s.src_dport)));
+		if (other)
+			e.ext = _('This external port is already forwarded: %s').format(other.name || other.src_dport);
+	}
+	if (!IPV4.test(String(f.ip ?? '').trim()))
+		e.ip = _('Enter an IPv4 address');
+	const port = portError(f.port, true);
+	if (port)
+		e.port = port;
+	return e;
+}
+
+// IPv4 → число; null — не IPv4.
+function ip4(v) {
+	return IPV4.test(v) ? String(v).split('.').reduce((n, x) => n * 256 + +x, 0) : null;
+}
+
+// Зона межсетевого экрана для IP: у устройства — его зона (служба знает её по интерфейсу), иначе — зона сети
+// со статическим адресом, в которую IP входит. Не нашлась — null: fw4 пробросит порт и без dest, а неверная
+// зона хуже никакой.
+function zoneOfIp(ip, devices) {
+	const d = (devices || []).find((x) => x.ip == ip && x.zone);
+	if (d)
+		return d.zone;
+	const n = ip4(ip);
+	if (n == null)
+		return null;
+	for (let s of uci.sections('network', 'interface')) {
+		if (s.proto != 'static')
+			continue;
+		const inside = L.toArray(s.ipaddr).some((a) => {
+			const [ addr, len ] = String(a).split('/');
+			const mask = (len != null) ? (len > 0 ? (~0 << (32 - len)) >>> 0 : 0) : ip4(s.netmask || '255.255.255.255');
+			return ip4(addr) != null && mask != null && ((ip4(addr) & mask) >>> 0) == ((n & mask) >>> 0);
+		});
+		const z = inside && uci.sections('firewall', 'zone').find((z) => L.toArray(z.network).includes(s['.name']));
+		if (z)
+			return z.name || null;
+	}
+	return null;
+}
+
+// Значения секции из формы: пустое — null (опция снимается); dest — зона по IP. sid — правка сохранённой секции:
+// протокол того же смысла (список, tcpudp, без опции) остаётся как в настройках, а при том же IP dest не пишется —
+// зону могли задать в «Межсетевом экране».
+function forwardValues(f, devices, sid) {
+	const t = (v) => { v = String(v ?? '').trim(); return (v === '') ? null : v; };
+	const ip = t(f.ip);
+	const v = { name: t(f.name), proto: f.proto || 'tcp udp', src_dport: t(f.ext), dest_ip: ip, dest_port: t(f.port), dest: ip ? zoneOfIp(ip, devices) : null };
+	if (sid) {
+		const proto = uci.get('firewall', sid, 'proto');
+		if (fwProto(proto) == v.proto)
+			v.proto = proto ?? null;
+		if (ip == (uci.get('firewall', sid, 'dest_ip') ?? null))
+			delete v.dest;
+	}
+	return v;
+}
+
 // ---- Правила Категорий ----
 
 // Действия правила, которые служба принимает (const.uc, ACTIONS); остальные она пропускает.
@@ -638,7 +835,8 @@ return baseclass.extend({
 	callSchema, loadSchema, schema, get, field, fieldError, handshakeLevel, callDevices, callConnections,
 	ACTIVE_SPAN, devRate, devShare, devActive, deviceSections, deviceSection, devicePolicy, normMac, connLabel,
 	RULE_ACTIONS, ruleKey, ruleOf, ruleSections, ruleActions, ruleAction, catRows, catsDue, listsDue, checkErrorText,
-	runNatTest, runTunnelTest, parseLog, logSource, logShown, upstreamError, dnsStats,
+	runNatTest, runTunnelTest, parseLog, logSource, logShown, upstreamError, dnsStats, natSummary, upnpState, upnpRows,
+	forwardRows, fwProto, fwEnabled, portError, forwardErrors, zoneOfIp, forwardValues, natPick,
 	ACTION_LABELS, ACTION_LEVELS, REASON_LABELS, VIA_LABELS, WARNINGS, NAT_ERRORS, CHECK_ERRORS, UPNP_MISSING, NBSP, TABS,
 	fmtBytes, fmtRate, fmtAge, fmtTime, fmtDate, fmtNum, missingText,
 	pill, busy, empty, span, svgEl, kvTable, table, row, chips,
