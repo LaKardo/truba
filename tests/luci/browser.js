@@ -531,6 +531,27 @@ async function waitApply(page) {
 		return { n: rows.length, levels: [ ...new Set(rows.map((x) => x.dataset.level)) ], sources: [ ...new Set(rows.map((x) => x.dataset.source)) ],
 			top: rows[0]?.textContent || '', empty: !!r.querySelector('.loglines .empty') };
 	});
+	// Время и источник — одной строкой при любом моноширинном шрифте: у шрифтов пользователей (Consolas, SF Mono)
+	// знак шире, чем у шрифта стенда, — эту разницу изображает межбуквенный интервал.
+	const logCols = () => page.evaluate(() => {
+		const r = document.querySelector('.truba-root').shadowRoot;
+		const st = r.appendChild(document.createElement('style'));
+		st.textContent = '.loglines { letter-spacing: .1em; }';
+		// Строки текста — по его прямоугольникам, а не по высоте ячейки: ячейка тянется на высоту строки журнала,
+		// когда переносится длинное сообщение.
+		const lines = (s) => {
+			const rg = document.createRange();
+			rg.selectNodeContents(s);
+			return rg.getClientRects().length;
+		};
+		const rows = [ ...r.querySelectorAll('.loglines .ln') ];
+		const bad = rows.filter((row) => [ ...row.children ].slice(0, 2).some((s) => s.offsetParent &&
+			(lines(s) > 1 || s.scrollWidth > s.clientWidth + 1))).length;
+		st.remove();
+		return { rows: rows.length, bad };
+	});
+	const cols1280 = await logCols();
+	result(cols1280.rows > 0 && cols1280.bad === 0, '«Журнал»: время и источник — одной строкой, без обрезки', JSON.stringify(cols1280));
 	const log0 = await logState();
 	await clickIn('.log-bar .chips button', '^Errors');
 	await sleep(200);
@@ -804,7 +825,9 @@ async function waitApply(page) {
 		const tr = document.querySelector('.truba-root').shadowRoot.querySelector('.tr');
 		return { doc: document.documentElement.scrollWidth, win: window.innerWidth, tr: tr.scrollWidth - tr.clientWidth };
 	});
-	result(log375.doc <= log375.win && log375.tr <= 0, '«Журнал» 375: без горизонтальной прокрутки', JSON.stringify(log375));
+	const cols375 = await logCols();
+	result(log375.doc <= log375.win && log375.tr <= 0 && cols375.rows > 0 && cols375.bad === 0,
+		'«Журнал» 375: без горизонтальной прокрутки, время — одной строкой', JSON.stringify({ ...log375, cols375 }));
 	await page.screenshot({ path: `${out}/log-375.png`, fullPage: true });
 	await page.setViewport({ width: 1280, height: 900 });
 

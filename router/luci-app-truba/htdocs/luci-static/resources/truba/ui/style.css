@@ -652,24 +652,26 @@
 .tt-res th, .tt-res td { padding: 4px 8px 4px 0; border-top: 1px solid var(--bd); }
 .tt-res .verdict { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 8px 0 0; font-size: 12px; }
 
-/* Журнал: время, источник, текст; длинная строка переносится, а не растягивает страницу. */
+/* Журнал: время, источник, текст. Сетка — одна на все строки (строка — display: contents): колонки времени
+   и источника — по самому длинному значению при любом моноширинном шрифте (ширина знака у них разная),
+   строки выровнены; длинный текст переносится, а не растягивает страницу. */
 .log-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 10px; }
 .log-bar .end { display: flex; align-items: center; gap: 8px; margin-left: auto; }
-.loglines { font: 11.5px/1.7 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
-.loglines .ln {
+.loglines {
 	display: grid;
-	grid-template-columns: 7.5em 8em minmax(0, 1fr);
-	gap: 8px;
-	padding: 1px 0;
-	border-top: 1px solid var(--bd);
+	grid-template-columns: max-content max-content minmax(0, 1fr);
+	font: 11.5px/1.7 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
-.loglines .ln > span { min-width: 0; overflow-wrap: anywhere; }
-.loglines .ln > span:not(:last-child) { color: var(--mu); }
-.loglines .ln.warn, .loglines .ln.warn > span { color: var(--warn); }
-.loglines .ln.err, .loglines .ln.err > span { color: var(--blk); }
+.loglines .ln { display: contents; }
+.loglines .ln > span { padding: 1px 0; border-top: 1px solid var(--bd); }
+.loglines .ln > span:nth-child(-n+2) { padding-right: 8px; white-space: nowrap; color: var(--mu); }
+.loglines .ln > span:last-child { min-width: 0; overflow-wrap: anywhere; }
+.loglines .ln.warn > span { color: var(--warn); }
+.loglines .ln.err > span { color: var(--blk); }
+.loglines > .empty { grid-column: 1 / -1; }
 @container (max-width: 600px) {
 	/* Как в макете: на телефоне без колонки источника — цвет строки всё равно говорит об уровне. */
-	.loglines .ln { grid-template-columns: 7.5em minmax(0, 1fr); }
+	.loglines { grid-template-columns: max-content minmax(0, 1fr); }
 	.loglines .ln > span:nth-child(2) { display: none; }
 }
 
