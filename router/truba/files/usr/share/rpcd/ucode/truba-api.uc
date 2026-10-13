@@ -162,8 +162,7 @@ const methods = {
 			let n = int(req.args?.lines ?? 200);
 			if (n < 10 || n > 2000)
 				n = 200;
-			// Строки отбирает команда truba (state.log): ей нужны настройки, а импорт truba.conf сюда вешал rpcd
-			// на SIGHUP (NC-1812), который шлёт установка любого пакета LuCI.
+			// Строки отбирает команда truba (state.log): ей нужны настройки, а плагин — тонкий (ADR 0008).
 			return truba('log ' + n);
 		}
 	},
