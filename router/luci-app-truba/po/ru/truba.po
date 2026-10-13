@@ -1215,3 +1215,6 @@ msgstr "Для Категорий с Действием «Туннель», а �
 
 msgid "Used for categories with action Direct, for the router's own hosts (NTP, list mirrors) and, in mode «Selective», for everything else."
 msgstr "Для Категорий с Действием «Напрямую», для служебных хостов самого Роутера (NTP, зеркала списков), а в Режиме «Выборочный» — для всего остального."
+
+msgid "At least one valid server is needed"
+msgstr "Нужен хотя бы один верный сервер"

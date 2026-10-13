@@ -690,9 +690,11 @@
 /* ---- Серверы DNS (kit.UpstreamList) ---- */
 .ups ul { margin: 0; padding: 0; list-style: none; }
 .ups li { display: flex; align-items: center; gap: 8px; min-height: 34px; padding: 3px 0; border-bottom: 1px solid var(--bd); }
-.ups li code { flex: 1; min-width: 0; overflow-wrap: anywhere; font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+/* Адрес и под ним пометка неверного: пометка в строку с адресом сжимала его на телефоне. */
+.ups-a { flex: 1; min-width: 0; display: grid; gap: 2px; }
+.ups li code { min-width: 0; overflow-wrap: anywhere; font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 .ups li .dot { width: 8px; height: 8px; box-shadow: none; }
-.ups li .err { color: var(--blk); font-size: 12px; font-style: normal; white-space: nowrap; }
+.ups li .err { display: inline-flex; align-items: center; gap: 6px; color: var(--blk); font-size: 12px; font-style: normal; }
 .ups .btn .icon { width: 14px; height: 14px; }
 .ups .btn.ic { min-height: 26px; padding: 0 6px; }
 .ups .btn:disabled { opacity: .4; cursor: not-allowed; }

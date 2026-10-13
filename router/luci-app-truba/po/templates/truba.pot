@@ -342,15 +342,19 @@ msgid "This server is already in the list"
 msgstr ""
 
 #: htdocs/luci-static/resources/truba/ui/kit.js
+msgid "At least one valid server is needed"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/ui/kit.js
 msgid "invalid address, not used"
 msgstr ""
 
 #: htdocs/luci-static/resources/truba/ui/kit.js
-msgid "Remove %s"
+msgid "Remove"
 msgstr ""
 
 #: htdocs/luci-static/resources/truba/ui/kit.js
-msgid "Remove"
+msgid "Remove %s"
 msgstr ""
 
 #: htdocs/luci-static/resources/truba/ui/kit.js
