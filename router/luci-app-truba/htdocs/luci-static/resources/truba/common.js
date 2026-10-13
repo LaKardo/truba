@@ -414,6 +414,54 @@ function dnsStats(st) {
 	};
 }
 
+// ---- Входящие ----
+
+// Итог «Проверки NAT» (spec §5.6): значок, четыре строки [ название, значение, уровень ], когда проверено
+// и ответы серверов STUN. Без проверки и при ошибке — «—»: адреса и порта тогда нет. Типа NAT нет — служба
+// его не определяет: STUN видит отображение, но не фильтрацию.
+function natSummary(n, wdOn) {
+	const done = !!n && !n.error;
+	const yesNo = (v, unknown) => (!done || v == null) ? [ (done && unknown) || '—', '' ] : v ? [ _('yes'), 'ok' ] : [ _('no'), 'err' ];
+	const [ level, text ] = !n ? [ '', _('not run yet') ]
+		: n.error ? [ (n.error == 'tunnel_down' || n.error == 'not_configured') ? 'warn' : 'err', _('not checked: %s').format(NAT_ERRORS[n.error] || n.error) ]
+		: n.ok ? [ 'ok', _('Truba layer OK') ] : [ 'err', _('problem') ];
+	const why = { dns: _('name not resolved'), timeout: _('no answer') };
+	return {
+		level, text,
+		rows: [
+			[ _('External address'), (done && n.external_ip) ? ((n.external_port != null) ? '%s:%d'.format(n.external_ip, n.external_port) : n.external_ip) : '—', '' ],
+			[ _('External IP is the Truba IP'), ...yesNo(n?.ip_is_vps) ],
+			[ _('Port preserved'), ...yesNo(n?.port_preserved) ],
+			[ _('Same mapping for different servers'), ...yesNo(n?.consistent, _('nothing to compare: one server answered')) ]
+		],
+		when: !n ? (wdOn ? _('runs by itself after the tunnel comes up') : _('never'))
+			: '%s · %s'.format(fmtTime(n.time), n.auto ? _('automatically after the tunnel came up') : _('manually')),
+		servers: (n?.servers || []).map((s) => s.mapped
+			? '%s — %s:%d, %s'.format(s.server, s.mapped.address, s.mapped.port, _('%d ms').format(s.rtt))
+			: '%s — %s'.format(s.server, why[s.error] || s.error || '—'))
+	};
+}
+
+// UPnP (status.upnp): переключатель доступен, пока miniupnpd установлен; предупреждение — включён, а служба
+// не установлена или не работает.
+function upnpState(up) {
+	up = up || {};
+	return {
+		installed: up.installed !== false,
+		note: (up.enabled && !up.installed) ? UPNP_MISSING
+			: (up.enabled && !up.running) ? _('UPnP is enabled, but miniupnpd is not running.') : null
+	};
+}
+
+// Отображения UPnP / NAT-PMP: устройство — по имени из devices, без него — IP.
+function upnpRows(leases, devices) {
+	const names = new Map((devices || []).filter((d) => d.ip && d.name).map((d) => [ d.ip, d.name ]));
+	return (leases || []).map((l) => ({
+		descr: l.descr || '—', who: names.get(l.ip) || l.ip, proto: l.proto, ext: l.ext_port, port: l.port,
+		expires: l.expires ? fmtTime(l.expires) : _('no expiry')
+	}));
+}
+
 // ---- Правила Категорий ----
 
 // Действия правила, которые служба принимает (const.uc, ACTIONS); остальные она пропускает.
@@ -638,7 +686,7 @@ return baseclass.extend({
 	callSchema, loadSchema, schema, get, field, fieldError, handshakeLevel, callDevices, callConnections,
 	ACTIVE_SPAN, devRate, devShare, devActive, deviceSections, deviceSection, devicePolicy, normMac, connLabel,
 	RULE_ACTIONS, ruleKey, ruleOf, ruleSections, ruleActions, ruleAction, catRows, catsDue, listsDue, checkErrorText,
-	runNatTest, runTunnelTest, parseLog, logSource, logShown, upstreamError, dnsStats,
+	runNatTest, runTunnelTest, parseLog, logSource, logShown, upstreamError, dnsStats, natSummary, upnpState, upnpRows,
 	ACTION_LABELS, ACTION_LEVELS, REASON_LABELS, VIA_LABELS, WARNINGS, NAT_ERRORS, CHECK_ERRORS, UPNP_MISSING, NBSP, TABS,
 	fmtBytes, fmtRate, fmtAge, fmtTime, fmtDate, fmtNum, missingText,
 	pill, busy, empty, span, svgEl, kvTable, table, row, chips,

@@ -436,6 +436,28 @@ if (cdev) {
 	const dn = DS({ routing: true, mosdns: true, dns_cache: { query: 200, hit: 150, lazy_hit: 10, size: 70000, max: 65536 } });
 	check(dn.level === 'ok' && vals(dn) === '75% 5% 100% 200' && dn.note === null, `common.dnsStats: доли, заполнение не больше 100 % (${vals(dn)})`);
 
+	// «Входящие»: итог «Проверки NAT» — без проверки и при ошибке «—», а не undefined:NaN.
+	const NS = (n, w) => cdev.natSummary?.(n, w) || { rows: [], servers: [] };
+	const nsVals = (s) => s.rows.map((r) => r[1]).join('|');
+	check(NS(null, true).text === 'not run yet' && nsVals(NS(null, true)) === '—|—|—|—' && NS(null, true).when === 'runs by itself after the tunnel comes up' &&
+		NS(null, false).when === 'never', 'common.natSummary: ещё не запускалась — «—»');
+	const nd = NS({ time: 1, error: 'tunnel_down', servers: [] }, true);
+	check(nd.level === 'warn' && nd.text === 'not checked: ' + cdev.NAT_ERRORS.tunnel_down && nsVals(nd) === '—|—|—|—', 'common.natSummary: Туннель лежит — warn');
+	check(NS({ time: 1, error: 'weird' }, true).level === 'err' && /weird/.test(NS({ time: 1, error: 'weird' }, true).text), 'common.natSummary: незнакомая ошибка — как есть');
+	const nok = NS({ time: 1, ok: true, external_ip: '203.0.113.5', external_port: 40000, ip_is_vps: true, port_preserved: true, consistent: null,
+		servers: [ { server: 's1:3478', mapped: { address: '203.0.113.5', port: 40000 }, rtt: 12 }, { server: 's2:3478', error: 'timeout' } ] }, true);
+	check(nok.level === 'ok' && nsVals(nok) === '203.0.113.5:40000|yes|yes|nothing to compare: one server answered' && nok.servers.length === 2 &&
+		/s2:3478 — no answer/.test(nok.servers[1]), `common.natSummary: успех, один сервер (${nsVals(nok)})`);
+	// UPnP: не установлен, не работает, выключен; отображения — с именем устройства.
+	const US = (u) => cdev.upnpState?.(u) || {};
+	check(US({ enabled: true, installed: false }).installed === false && US({ enabled: true, installed: false }).note === cdev.UPNP_MISSING &&
+		/not running/.test(US({ enabled: true, installed: true, running: false }).note) && US({ enabled: false, installed: true }).note === null,
+		'common.upnpState: не установлен, не работает, выключен');
+	const ur = cdev.upnpRows?.([ { proto: 'UDP', ext_port: 27036, ip: '192.168.1.50', port: 27036, expires: 0, descr: 'Steam' },
+		{ proto: 'TCP', ext_port: 51413, ip: '192.168.1.9', port: 51413, expires: 0, descr: '' } ], [ { ip: '192.168.1.50', name: 'pc' } ]) || [];
+	check(ur.length === 2 && ur[0].who === 'pc' && ur[1].who === '192.168.1.9' && ur[1].descr === '—' && ur[0].expires === 'no expiry',
+		'common.upnpRows: имя устройства по IP, без описания — «—»');
+
 	// «Правила»: Действие Категории — как его поймёт служба, по настройкам браузера.
 	const RA = (...a) => cdev.ruleAction?.(...a);
 	check(RA('all', 'geosite', 'youtube') === 'direct', `common.ruleAction: тег без учёта регистра, последняя верная из секций одного ключа (${RA('all', 'geosite', 'youtube')})`);
