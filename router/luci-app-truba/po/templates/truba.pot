@@ -338,6 +338,34 @@ msgid "changed, not applied yet"
 msgstr ""
 
 #: htdocs/luci-static/resources/truba/ui/kit.js
+msgid "This server is already in the list"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/ui/kit.js
+msgid "invalid address, not used"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/ui/kit.js
+msgid "Remove %s"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/ui/kit.js
+msgid "Remove"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/ui/kit.js
+msgid "Default servers"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/ui/kit.js
+msgid "Server address"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/ui/kit.js
+msgid "Add server"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/ui/kit.js
 msgid "Import"
 msgstr ""
 
@@ -462,10 +490,6 @@ msgid "A device with an invalid MAC address «%s» is ignored."
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/devices.js
-msgid "Remove"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/devices.js
 msgid "Name, IP or MAC"
 msgstr ""
 
@@ -562,6 +586,10 @@ msgid "State"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/dns.js
+msgid "queried all at once"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/dns.js
 msgid "Settings"
 msgstr ""
 
@@ -626,7 +654,15 @@ msgid "Servers for «Tunnel»"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/dns.js
+msgid "Used for categories with action Tunnel and, in mode «All via tunnel», for everything else. Requests go through the tunnel, each one to all servers at once. udp://10.77.77.1 is the DNS server on the Truba itself (install-vps.sh). Formats: https://…, tls://…, tls+pipeline://… (several requests in one connection), udp://…; «address@IP» sets the IP to connect to."
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/dns.js
 msgid "Servers for «Direct»"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/dns.js
+msgid "Used for categories with action Direct, for the router's own hosts (NTP, list mirrors) and, in mode «Selective», for everything else."
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/inbound.js

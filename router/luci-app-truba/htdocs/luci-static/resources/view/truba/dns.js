@@ -24,9 +24,13 @@ function StateCard({ st }) {
 
 // ---- Серверы ----
 
-function ServersCard({ cls, title }) {
+// Серверы одного пути: запрос идёт ко всем сразу, ответ — первый годный (render.uc, upstream_group).
+function ServersCard({ cls, title, name, hint }) {
 	const { html } = app.lib;
-	return html`<${kit.Card} cls=${cls} title=${title}></${kit.Card}>`;
+	return html`<${kit.Card} cls=${cls} title=${title} aside=${_('queried all at once')}>
+		<${kit.UpstreamList} sec="dns" name=${name} label=${title} />
+		<p class="mu">${hint}</p>
+	</${kit.Card}>`;
 }
 
 // ---- Перехват и кэш ----
@@ -69,8 +73,10 @@ function Page({ store, view }) {
 		</div>
 		<div class="grid g2">
 			<${StateCard} st=${status || {}} />
-			<${ServersCard} cls="ups-tunnel" title=${_('Servers for «Tunnel»')} />
-			<${ServersCard} cls="ups-direct" title=${_('Servers for «Direct»')} />
+			<${ServersCard} cls="ups-tunnel" title=${_('Servers for «Tunnel»')} name="tunnel_upstream"
+				hint=${_('Used for categories with action Tunnel and, in mode «All via tunnel», for everything else. Requests go through the tunnel, each one to all servers at once. udp://10.77.77.1 is the DNS server on the Truba itself (install-vps.sh). Formats: https://…, tls://…, tls+pipeline://… (several requests in one connection), udp://…; «address@IP» sets the IP to connect to.')} />
+			<${ServersCard} cls="ups-direct" title=${_('Servers for «Direct»')} name="direct_upstream"
+				hint=${_('Used for categories with action Direct, for the router\'s own hosts (NTP, list mirrors) and, in mode «Selective», for everything else.')} />
 			<${SettingsCard} />
 		</div>
 		<${kit.ChangesBar} view=${view} />

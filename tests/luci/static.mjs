@@ -321,7 +321,7 @@ if (!existsSync(stylePath)) {
 // Иконки Lucide: у каждой, что берут компоненты, есть разметка.
 const icons = loadModule('truba/ui/icons.js', { baseclass });
 if (icons)
-	for (const n of [ 'circle-check', 'triangle-alert', 'circle-x', 'arrow-right', 'wifi-off', 'pencil', 'file-up', 'download' ])
+	for (const n of [ 'circle-check', 'triangle-alert', 'circle-x', 'arrow-right', 'wifi-off', 'pencil', 'file-up', 'download', 'x', 'plus' ])
 		check(typeof icons[n] === 'string' && /<(path|circle|line|polyline|rect)/.test(icons[n]), `icons.js: иконка ${n}`);
 
 // Верх шкалы графика скорости и толщина веток схемы потоков.

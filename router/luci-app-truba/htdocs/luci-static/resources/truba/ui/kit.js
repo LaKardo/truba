@@ -211,6 +211,64 @@ function Fold({ title, open, children }) {
 	return html`<details class="fold" open=${!!open}><summary>${title}</summary><div class="fold-b">${children}</div></details>`;
 }
 
+// Список DNS-серверов опции truba.sec.name (spec §4.3, §5.5): добавить, удалить, проверка адреса как у службы.
+// Запрос идёт ко всем серверам пути сразу — порядка нет. Без списка в настройках действует умолчание схемы.
+// Список, равный сохранённому (без учёта порядка), — не изменение; равный умолчанию при пустых настройках —
+// снова без опции. Последний сервер не удаляется: пустой список служба молча заменила бы умолчанием.
+// Набранный верный адрес добавляется и при уходе из поля — «Применить» сразу после набора его не теряет;
+// неверный держит «Применить», пока поле не очищено. Неверный адрес из сохранённых настроек служба пропускает —
+// он помечен, и его можно удалить.
+function UpstreamList({ sec, name, label }) {
+	const { html, useState, useEffect } = app.lib;
+	const def = common.schema().sections?.[sec]?.[name]?.def || [];
+	const list = L.toArray(uci.get('truba', sec, name));
+	const rows = list.length ? list : def;
+	const saved = L.toArray(uci.state?.values?.truba?.[sec]?.[name]);
+	const base = saved.length ? saved : def;
+	const key = 'truba.%s.%s.new'.format(sec, name), id = 'ups-' + sec + '-' + name;
+	const [ text, setText ] = useState('');
+	const [ err, setErr ] = useState(null);
+	const check = (v) => !v ? null : (common.upstreamError(v) || (rows.includes(v) ? _('This server is already in the list') : null));
+	const bad = !!check(text.trim());
+	useEffect(() => { app.invalid(key, bad); }, [ key, bad ]);
+	useEffect(() => () => app.invalid(key, false), [ key ]);
+	const sameSet = (a, b) => a.length == b.length && a.every((x) => b.includes(x));
+	const write = (arr) => app.set('truba', sec, name, sameSet(arr, base) ? (saved.length ? saved : null) : arr);
+	const add = () => {
+		const v = text.trim(), e = check(v);
+		if (!v)
+			return;
+		if (e)
+			return setErr(e);
+		write([ ...rows, v ]);
+		setText('');
+		setErr(null);
+	};
+	const onKey = (ev) => {
+		if (ev.key == 'Enter') {
+			ev.preventDefault();
+			add();
+		}
+	};
+	return html`<div class="ups">
+		<ul aria-label=${label}>${rows.map((u) => html`<li>
+			<code>${u}</code>
+			${common.upstreamError(u) ? html`<${Dot} level="err" /><em class="err">${_('invalid address, not used')}</em>`
+				: !base.includes(u) ? html`<${Dot} level="warn" label=${_('changed, not applied yet')} />` : ''}
+			<button type="button" class="btn ic" data-act="remove-upstream" aria-label=${_('Remove %s').format(u)} title=${_('Remove')}
+				disabled=${rows.length < 2} onClick=${() => write(rows.filter((x) => x !== u))}><${Icon} name="x" /></button>
+		</li>`)}</ul>
+		${list.length ? '' : html`<div class="mu">${_('Default servers')}</div>`}
+		<div class=${'ups-add' + (bad ? ' bad' : '')}>
+			<input data-act="new-upstream" aria-label=${_('Server address')} placeholder="https://… tls://… udp://…" autocomplete="off" spellcheck="false"
+				value=${text} aria-invalid=${bad ? 'true' : undefined} aria-describedby=${err ? id + '-e' : undefined}
+				onInput=${(ev) => { setText(ev.target.value); setErr(null); }} onKeyDown=${onKey} onBlur=${add} />
+			<button type="button" class="btn" data-act="add-upstream" onClick=${add}><${Icon} name="plus" />${_('Add server')}</button>
+		</div>
+		${err ? html`<div class="err-text" id=${id + '-e'} role="alert">${err}</div>` : ''}
+	</div>`;
+}
+
 // Файл или текст для импорта (router.conf): файл перетаскивают в зону или выбирают нажатием на неё, текст
 // вставляют в поле под ней — на телефоне вставить можно только в поле ввода. onText получает текст;
 // error — почему он не подошёл, под зоной.
@@ -361,4 +419,4 @@ function ChangesBar({ view }) {
 }
 
 return baseclass.extend({ Card, Stat, Badge, Dot, Icon, Switch, Segmented, Chips, ActionTag, ShareBar, KV, Busy, Empty, Go, ChangesBar, step,
-	ActionPicker, Field, Fold, DropZone, Dialog, Toast, Check });
+	ActionPicker, Field, Fold, UpstreamList, DropZone, Dialog, Toast, Check });
