@@ -789,6 +789,40 @@ check(!existsSync(join(res, 'truba/truba.css')), 'truba/truba.css удалён (
 	check(exp.length > 0 && !unused.length, `common.js: экспорт без пользователей — ${unused.join(', ')}`);   // EXPORT-CHECK
 }
 
+// ---- Документы — о тех же вкладках, что в меню (spec §9) ----
+// Таблица вкладок README («Как пользоваться») и docs/architecture.md §5.2 — подписи menu.d по-русски, в порядке меню.
+// Старых вкладок («Маршрутизация», «DNS и списки», «Диагностика») в документах, службе и скрипте VPS нет: CHANGELOG
+// и ADR — история, их это не касается. «Маршрутизация» как переключатель и функция остаётся.
+{
+	const repo = join(root, '../..');
+	const menu = JSON.parse(readFileSync(join(root, 'root/usr/share/luci/menu.d/luci-app-truba.json'), 'utf8'));
+	const want = Object.entries(menu).filter(([ k, v ]) => /^admin\/services\/truba\/\w+$/.test(k) && v.title)
+		.sort((a, b) => a[1].order - b[1].order).map(([ , v ]) => translated.get(v.title) || v.title);
+	const firstCol = (text) => [ ...text.matchAll(/^\| *([^|]+?) *\|/gm) ].map((m) => m[1].replace(/\*\*/g, ''))
+		.filter((c) => !/^-+$|^Вкладка/.test(c));
+	const section = (text, head, next) => text.slice(text.indexOf(head), text.indexOf(next, text.indexOf(head) + head.length));
+	const readme = readFileSync(join(repo, 'README.md'), 'utf8'), arch = readFileSync(join(repo, 'docs/architecture.md'), 'utf8');
+	const rTabs = firstCol(section(readme, '## Как пользоваться', '\n## '));
+	const aTabs = firstCol(section(arch, '### 5.2 ', '\n### '));
+	check(JSON.stringify(rTabs) == JSON.stringify(want), `README «Как пользоваться»: вкладки ${rTabs.join(', ')} — нужно ${want.join(', ')}`);
+	check(JSON.stringify(aTabs) == JSON.stringify(want), `architecture.md §5.2: вкладки ${aTabs.join(', ')} — нужно ${want.join(', ')}`);
+	const OLD = [ /Диагностик/, /Маршрутизация →/, /вкладк\S*\s+[«*]+Маршрутизаци/, /^\d+\. \*\*Маршрутизация\*\*/, /вкладк\S*\s+[«*]+DNS и списк/,
+		/на [«*]+DNS и списках/, /\*\*DNS и списки\*\*/, /truba\.css/ ];
+	const docs = [ 'README.md', 'CONTEXT.md', 'docs/architecture.md', 'docs/roadmap.md', 'vps/install-vps.sh' ];
+	(function walkTruba(d) {
+		for (const f of readdirSync(join(repo, d))) {
+			const p = d + '/' + f;
+			if (statSync(join(repo, p)).isDirectory()) walkTruba(p);
+			else docs.push(p);
+		}
+	})('router/truba/files');
+	for (const f of docs)
+		readFileSync(join(repo, f), 'utf8').split('\n').forEach((line, i) => {
+			const re = OLD.find((r) => r.test(line));
+			if (re) check(false, `${f}:${i + 1}: прежняя вкладка (${re.source}) — ${line.trim().slice(0, 90)}`);
+		});
+}
+
 console.log(`${files.length} файлов, ${strings.size} строк`);
 console.log(fails ? `${fails} FAILED` : 'ALL OK');
 process.exit(fails ? 1 : 0);

@@ -80,7 +80,7 @@ function health_state() {
 	return U.read_json(C.HEALTH_FILE, null);
 }
 
-// sums — с контрольной суммой: она нужна только вкладке «DNS и списки».
+// sums — с контрольной суммой: она нужна только вкладке «Правила».
 function list_info(dir, file, sums) {
 	let p = dir + '/' + file;
 	let st = stat(p);
@@ -263,7 +263,7 @@ export function status() {
 	return res;
 };
 
-// Версии Наборов правил для вкладки «DNS и списки»: текущие и предыдущие, с контрольными суммами.
+// Версии Наборов правил для вкладки «Правила»: текущие и предыдущие, с контрольными суммами.
 export function lists() {
 	return {
 		geoip: list_info(C.LISTS_DIR, C.DAT_FILES.geoip, true),

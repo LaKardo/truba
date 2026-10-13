@@ -934,7 +934,7 @@ cmd_install() {
 	echo "  SSH VPS:         ssh -p $SSH_PORT root@$PUB_IP"
 	echo "  Туннель:         udp/$AWG_PORT, протокол AmneziaWG ${AWG_PROTO}.x"
 	echo "  MTU Туннеля:     $(tunnel_mtu) (сеть VPS: $(cat "$SYS_NET/$WAN_IF/mtu"))"
-	echo "  DNS для Роутера: udp://$VPS_TUN — первый сервер «Туннеля» на вкладке «DNS и списки»"
+	echo "  DNS для Роутера: udp://$VPS_TUN — первый сервер «Туннеля» на вкладке «DNS»"
 	echo "  Конфиг Роутера:  $ROUTER_CONF"
 	echo
 	echo "  Скопировать на компьютер:  scp -P $SSH_PORT root@$PUB_IP:$ROUTER_CONF ."
