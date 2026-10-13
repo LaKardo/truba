@@ -677,6 +677,8 @@
 .state .stats { margin: 0 0 12px; }
 .spark-empty { display: flex; align-items: center; justify-content: center; height: 70px; border-radius: 8px; background: var(--chip); }
 .state .kv, .conn-f, .tt-res, .tt-hint, .wd .cols, .fields + .mu, .fields + .fields { margin-top: 10px; }
-.conn .kv { margin-bottom: 4px; }
+.peer .kv { margin-bottom: 4px; }
 .ks { margin: 14px 0 0; padding: 10px 0 0; border-top: 1px solid var(--bd); }
 .ks .mu { margin: 4px 0 0; }
+.log-bar .btn { display: inline-flex; align-items: center; gap: 4px; }
+.log-bar .btn .icon { width: 14px; height: 14px; }

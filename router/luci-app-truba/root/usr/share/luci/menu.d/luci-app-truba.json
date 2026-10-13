@@ -40,15 +40,18 @@
 		"order": 50,
 		"action": { "type": "view", "path": "truba/inbound" }
 	},
-	"admin/services/truba/diagnostics": {
-		"title": "Diagnostics",
+	"admin/services/truba/log": {
+		"title": "Log",
 		"order": 60,
-		"action": { "type": "view", "path": "truba/diagnostics" }
+		"action": { "type": "view", "path": "truba/log" }
 	},
 	"admin/services/truba/routing": {
 		"action": { "type": "alias", "path": "admin/services/truba/rules" }
 	},
 	"admin/services/truba/lists": {
 		"action": { "type": "alias", "path": "admin/services/truba/rules" }
+	},
+	"admin/services/truba/diagnostics": {
+		"action": { "type": "alias", "path": "admin/services/truba/log" }
 	}
 }

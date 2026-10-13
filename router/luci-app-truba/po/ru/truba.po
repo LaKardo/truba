@@ -22,9 +22,6 @@ msgstr "DNS"
 msgid "Inbound"
 msgstr "Входящие"
 
-msgid "Diagnostics"
-msgstr "Диагностика"
-
 msgid "By mode"
 msgstr "По режиму"
 
@@ -123,9 +120,6 @@ msgstr "Проверка…"
 
 msgid "Check"
 msgstr "Проверить"
-
-msgid "Refresh"
-msgstr "Обновить"
 
 msgid "Router DNS goes through mosdns: it recognises geosite categories, picks the upstream and puts resolved IPs into the routing sets."
 msgstr "DNS Роутера идёт через mosdns: он узнаёт Категории geosite, выбирает DNS-сервер и кладёт полученные IP в наборы маршрутизации."
@@ -448,9 +442,6 @@ msgstr "Мбит/с"
 msgid "Gbit/s"
 msgstr "Гбит/с"
 
-msgid "Log: Truba and mosdns"
-msgstr "Журнал: Труба и mosdns"
-
 msgid "UPnP is enabled, but miniupnpd is not installed: install luci-app-upnp."
 msgstr "UPnP включён, но miniupnpd не установлен: поставьте luci-app-upnp."
 
@@ -640,32 +631,17 @@ msgstr "Пакеты теряются"
 msgid "MTU %d suits the path to the Truba."
 msgstr "MTU %d подходит к пути до Трубы."
 
-msgid "If only the largest packets are lost, lower the tunnel MTU on both sides (Tunnel tab and install-vps.sh)."
-msgstr "Если теряются только самые крупные пакеты, уменьшите MTU Туннеля на обеих сторонах: на вкладке «Туннель» и на VPS (install-vps.sh)."
-
 msgid "Checking… about 5 seconds"
 msgstr "Проверка… около 5 секунд"
 
 msgid "All"
 msgstr "Все"
 
-msgid "Warnings and errors"
-msgstr "Предупреждения и ошибки"
-
-msgid "Checks and the log. Nothing is configured on this tab."
-msgstr "Проверки и журнал. На этой вкладке ничего не настраивается."
-
-msgid "Tunnel check"
-msgstr "Проверка Туннеля"
-
 msgid "Pings the Truba inside the tunnel with packets of three sizes, up to the whole tunnel MTU. Shows loss of large packets that a normal ping does not see: with it pages open slowly and downloads stall."
 msgstr "Ping Трубы внутри Туннеля пакетами трёх размеров, до полного MTU Туннеля. Показывает потери крупных пакетов, которых не видно по обычному ping: при них сайты открываются с задержкой, а загрузки замирают."
 
 msgid "Check the tunnel"
 msgstr "Проверить Туннель"
-
-msgid "Log filter"
-msgstr "Фильтр журнала"
 
 msgid "DNS state"
 msgstr "Состояние DNS"
@@ -798,9 +774,6 @@ msgstr "Ключи и параметры приходят из router.conf, ко
 
 msgid "No replies"
 msgstr "Нет ответов"
-
-msgid "The Truba does not answer inside the tunnel: see the State on the Tunnel tab."
-msgstr "Труба не отвечает внутри Туннеля: см. «Состояние» на вкладке «Туннель»."
 
 msgid "via the tunnel"
 msgstr "через Туннель"
@@ -1206,3 +1179,21 @@ msgstr "Если Туннель не отвечает"
 
 msgid "Watchdog"
 msgstr "Контроль"
+
+msgid "Truba, its watchdog, mosdns and the tunnel interface: the last %d lines, newest first."
+msgstr "Труба, её контроль, mosdns и интерфейс Туннеля: последние %d строк, новые сверху."
+
+msgid "Level"
+msgstr "Уровень"
+
+msgid "Errors"
+msgstr "Ошибки"
+
+msgid "Sources"
+msgstr "Источники"
+
+msgid "Follow"
+msgstr "Следить"
+
+msgid "Download"
+msgstr "Скачать"

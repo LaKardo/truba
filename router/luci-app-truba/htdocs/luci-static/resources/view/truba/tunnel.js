@@ -170,7 +170,7 @@ function ConnCard({ iface, onImport }) {
 		placeholder=${_('…or paste its text')} error=${err} onText=${imp} />`;
 	const aside = html`<button type="button" class="btn" data-act="tunnel-test" disabled=${!ok || busy} onClick=${run}>${_('Check the tunnel')}</button>`;
 	if (!ok)
-		return html`<${kit.Card} cls="conn" title=${_('Connection to the Truba')} aside=${aside}>
+		return html`<${kit.Card} cls="peer" title=${_('Connection to the Truba')} aside=${aside}>
 			<p class="note"><b>${_('The tunnel is not configured yet. Run install-vps.sh on the VPS and import the resulting router.conf.')}</b></p>
 			${zone}
 		</${kit.Card}>`;
@@ -180,7 +180,7 @@ function ConnCard({ iface, onImport }) {
 	const rows = [ [ _('Address'), host ? ((/:/.test(host) ? '[' + host + ']' : host) + (port ? ':' + port : '')) : '—' ] ];
 	if (ver)
 		rows.push([ _('Protocol'), 'AmneziaWG ' + ver ]);
-	return html`<${kit.Card} cls="conn" title=${_('Connection to the Truba')} aside=${aside}>
+	return html`<${kit.Card} cls="peer" title=${_('Connection to the Truba')} aside=${aside}>
 		<${kit.KV} rows=${rows} />
 		<div class="cols conn-f">
 			<${kit.Field} config="network" sec=${iface} name="mtu" label=${_('MTU')} check=${awg.mtuError} placeholder=${MTU_HINT}
