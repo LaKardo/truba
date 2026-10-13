@@ -105,7 +105,9 @@ return view.extend({
 	},
 
 	// Настройки меняются прямо в браузере: сохранить — отправить эти изменения, сбросить — перечитать страницу.
+	// Набранный, но не добавленный адрес сервера сохраняется вместе с ними (app.flush).
 	handleSave: function() {
+		app.flush();
 		return uci.save().then(() => app.changes.set({ n: app.changeCount() }));
 	},
 

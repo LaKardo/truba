@@ -485,15 +485,15 @@ async function waitApply(page) {
 	result(ut.def && JSON.stringify(ut.rows) == JSON.stringify(dnsSch.tunnel_upstream.def) && ut2.rows.length == ut.rows.length && !/Unapplied changes/.test(ut2.bar),
 		'«DNS»: умолчание — удалить сервер и вернуть — ноль изменений', JSON.stringify({ ut, ut2 }));
 	await setUp('tunnel_upstream', prevUp.tunnel_upstream);
-	// (e) Верный адрес добавляется и при уходе из поля — точка «изменено», одно изменение.
+	// (e) Верный адрес добавляется по Enter — точка «изменено», одно изменение.
 	await page.goto(url('dns'), { waitUntil: 'networkidle2' });
 	await settled(page);
 	const newUp = 'tls://dns.example@192.0.2.53';
 	await typeUp('ups-direct', newUp);
-	await page.evaluate(() => document.querySelector('.truba-root').shadowRoot.activeElement?.blur());
+	await page.keyboard.press('Enter');
 	await sleep(300);
 	ud = await ups('ups-direct');
-	result(ud.rows.includes(newUp) && ud.warn == 1 && /Unapplied changes: 1/.test(ud.bar), '«DNS»: адрес добавляется и при уходе из поля, с точкой «изменено»', JSON.stringify(ud));
+	result(ud.rows.includes(newUp) && ud.warn == 1 && /Unapplied changes: 1/.test(ud.bar), '«DNS»: адрес добавляется по Enter, с точкой «изменено»', JSON.stringify(ud));
 	// (f) Неверный текст в поле держит «Применить» и «Save & Apply» LuCI; очищен — применяется.
 	await typeUp('ups-tunnel', 'htps://x');
 	const heldUp = await ups('ups-direct');
@@ -535,6 +535,19 @@ async function waitApply(page) {
 	await waitApply(page);
 	result(JSON.stringify(ud.bad) == '["htps://bad.example"]' && await applied(t0, async (st) => !(st.applied.invalid || []).length &&
 		![].concat(await uciUp('direct_upstream') || []).includes('htps://bad.example')), '«DNS»: неверный сохранённый адрес помечен и удаляется', JSON.stringify(ud));
+	// (j) Набранный верный адрес и сразу «Save & Apply» LuCI настоящим нажатием мыши (фокус остаётся в поле):
+	// адрес применяется. Уход из поля не должен сдвигать страницу под нажатой кнопкой — иначе клик теряется.
+	await page.goto(url('dns'), { waitUntil: 'networkidle2' });
+	await settled(page);
+	const typedUp = 'udp://192.0.2.54';
+	await typeUp('ups-direct', typedUp);
+	const saveApply = await page.evaluateHandle(() => [ ...document.querySelectorAll('.cbi-page-actions *') ]
+		.find((x) => x.childElementCount == 0 && x.textContent.trim() == 'Save & Apply'));
+	t0 = await time();
+	await saveApply.asElement()?.click();
+	await waitApply(page);
+	result(await applied(t0, async () => [].concat(await uciUp('direct_upstream') || []).includes(typedUp)),
+		'«DNS»: набранный адрес и сразу «Save & Apply» (нажатие мыши) — применён');
 	// Прежние серверы Напрямую.
 	t0 = await time();
 	await setUp('direct_upstream', prevUp.direct_upstream);
