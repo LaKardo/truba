@@ -104,7 +104,6 @@ ip netns add meshhost
 ip link add ms0 type veth peer name ms1
 ip link set ms1 netns meshhost
 ip addr add 100.64.0.1/32 dev ms0; ip link set ms0 up
-echo "$(cut -d' ' -f1 /proc/uptime)" > /tmp/ms0.added   # ВРЕМЕННО, диагностика
 ip -n meshhost link set lo up; ip -n meshhost link set ms1 up
 ip -n meshhost addr add 100.64.0.2/32 dev ms1
 ip -n meshhost route add 100.64.0.1 dev ms1
@@ -191,15 +190,6 @@ done
 check "свои сокеты службы (0x80000) — мимо Туннеля" eval 'ip route get 203.0.113.77 mark 0x80000 | grep -q "dev inet0"'
 
 section "mesh-VPN — зона Маршрутизации (ADR 0014)"
-# ВРЕМЕННО — диагностика нестабильной проверки DNS узла mesh в CI (уберётся, когда найдётся причина).
-# Трасса пакетов DNS узла — с начала раздела, чтобы не сдвигать время у самих проверок.
-nft -f - <<-'EOF'
-	table inet t_trace {
-		chain pre { type filter hook prerouting priority -400; iifname "ms0" udp dport 53 meta nftrace set 1; }
-		chain out { type filter hook output priority -400; ip daddr 100.64.0.0/24 meta nftrace set 1; }
-	}
-EOF
-nft monitor trace >> /tmp/trace.log 2>&1 & TRACE=$!
 # Зона mesh выбрана в «Правила → Зоны»: перенаправление mesh → truba заводит сама Труба, узлы
 # сети идут по Категориям, как домашняя сеть. Адрес ms0 — /32: для dnsmasq с --local-service узлы
 # чужие, и он им не отвечает; перехват Трубы подменяет им источник на адрес Роутера.
@@ -246,37 +236,9 @@ uci delete firewall.mesh_truba; uci commit firewall; /etc/init.d/firewall reload
 check "без перенаправления fw4 отбрасывает трафик узла в Туннель" eval '! mesh_tunnel'
 reload "перенаправление удалено вручную"
 check "применение заводит перенаправление снова" eval '[ "$(uci -q get firewall.mesh_truba.dest)" = truba ] && mesh_tunnel'
-# dns_from с записью кода и времени (ВРЕМЕННО, диагностика).
-dns_from_t() {
-	local t0 rc
-	t0=$(cut -d' ' -f1 /proc/uptime)
-	ip netns exec "$1" ucode /repo/tests/lib/dns_ttl.uc 53 localhost "$2" > /tmp/dq.out 2>&1; rc=$?
-	echo "$2 rc=$rc t0=$t0 t1=$(cut -d' ' -f1 /proc/uptime) out=$(head -1 /tmp/dq.out)" >> /tmp/dq.log
-	grep -q '^127\.0\.0\.1 ' /tmp/dq.out
-}
-DIAG_FAILS=$FAILS
-check "узел сети: DNS к чужому серверу перехвачен, источник подменён — dnsmasq ответил" eval 'dns_from_t meshhost 8.8.8.8 && dns_snat ms0'
-check "узел сети: DNS к адресу Роутера — тоже" dns_from_t meshhost 100.64.0.1
+check "узел сети: DNS к чужому серверу перехвачен, источник подменён — dnsmasq ответил" eval 'dns_from meshhost 8.8.8.8 && dns_snat ms0'
+check "узел сети: DNS к адресу Роутера — тоже" dns_from meshhost 100.64.0.1
 check "устройство домашней сети: DNS перехвачен, источник не подменён" eval 'in_set local4 192.168.1.0/24 && dns_from lanhost 8.8.8.8 && dns_seen lan && ! dns_snat lan'
-sed 's/^/DIAG q /' /tmp/dq.log
-if [ "$FAILS" -ne "$DIAG_FAILS" ]; then
-	echo "DIAG uptime=$(cut -d' ' -f1 /proc/uptime) dnsmasq=$(pidof dnsmasq) busy=$(busy | tr '\n' ' ')"
-	netstat -lnu 2>/dev/null | grep ':53 ' | sed 's/^/DIAG udp53 /'
-	for p in $(pidof dnsmasq); do echo "DIAG dnsmasq $p: старт $(awk '{print $22}' /proc/$p/stat) тиков; ms0 добавлен на $(cat /tmp/ms0.added) с; $(tr '\0' ' ' < /proc/$p/cmdline | cut -c1-80)"; done
-	sed 's/^/DIAG netlink /' /proc/net/netlink
-	ip -o link show ms0 | sed 's/^/DIAG link /'
-	grep -E 'bind|interface|local' /var/etc/dnsmasq.conf.* 2>/dev/null | sed 's/^/DIAG conf /'
-	ip rule show | sed 's/^/DIAG rule /'
-	ip route get 100.64.0.2 from 100.64.0.1 2>&1 | head -1 | sed 's/^/DIAG get /'
-	echo "DIAG local4 $(nft list set inet truba local4 2>/dev/null | tr -d '\n\t' | sed 's/.*elements = //')"
-	grep -E 'dport=53 ' /proc/net/nf_conntrack 2>/dev/null | grep -F '100.64.' | tail -6 | sed 's/^/DIAG ct /'
-	grep -vE 'rule .*(dns_ms0|snat_ms0|dns_lan|snat_lan)' /tmp/trace.log | tail -100 | sed 's/^/DIAG trace /'
-	logread | grep -E 'dnsmasq|netifd|firewall|truba|procd|kernel' | tail -30 | sed 's/^/DIAG log /'
-	for t in 8.8.8.8 100.64.0.1; do dns_from_t meshhost "$t"; done
-	tail -2 /tmp/dq.log | sed 's/^/DIAG повтор /'
-fi
-kill "$TRACE" 2>/dev/null
-nft delete table inet t_trace
 nft delete table inet t_snat
 ip addr add 10.99.0.1/24 dev ms0
 ACTION=ifupdate INTERFACE=lan sh /etc/hotplug.d/iface/50-truba
