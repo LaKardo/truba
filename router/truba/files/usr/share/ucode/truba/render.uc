@@ -429,8 +429,8 @@ export function mosdns(cfg, plan, router_hosts, gsdir) {
 	push(plugins, { tag: 'udp_in', type: 'udp_server', args: { entry: 'main', listen } });
 	push(plugins, { tag: 'tcp_in', type: 'tcp_server', args: { entry: 'main', listen } });
 
-	// API — ради счётчиков кэша (/metrics) на «Обзоре». Только MOSDNS_ADDR: там же mosdns отдаёт
-	// и /debug/pprof, снаружи Роутера их не видно. Нет адреса — порт занят, без API.
+	// API — ради счётчиков кэша (/metrics) на «Обзоре». Только MOSDNS_ADDR: снаружи Роутера API
+	// не видно. Нет адреса — порт занят, без API.
 	let conf = { log: { level: 'warn' }, plugins };
 	if (cfg.dns.api)
 		conf.api = { http: cfg.dns.api };
