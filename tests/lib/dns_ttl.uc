@@ -14,17 +14,21 @@ q += chr(0, 0, 1, 0, 1);
 const s = socket.create(socket.AF_INET, socket.SOCK_DGRAM);
 s.connect({ address: server, port });
 s.send(q);
+// Порт закрыт — ядро получает ICMP «порт недоступен»: poll отдаёт POLLERR без POLLIN, recv — null.
 const pr = socket.poll(3000, [ s, socket.POLLIN ]);
-if (!length(pr) || !pr[0][1])
+const r = (length(pr ?? []) && (pr[0][1] & socket.POLLIN)) ? s.recv(1500) : null;
+if (r == null)
 	exit(1);
-const r = s.recv(1500);
 
 function u16(o) { return (ord(r, o) << 8) | ord(r, o + 1); }
 function u32(o) { return (u16(o) << 16) | u16(o + 2); }
-// Имя: метки или ссылка (2 байта) — пропустить.
+// Имя: метки или ссылка (2 байта) — пропустить. За концом ответа ord() даёт null, и цикл
+// не кончился бы: обрезанный или чужой ответ — тоже код 1.
 function skip(o) {
 	while (true) {
 		let l = ord(r, o);
+		if (l == null)
+			exit(1);
 		if (l == 0)
 			return o + 1;
 		if ((l & 0xc0) == 0xc0)
