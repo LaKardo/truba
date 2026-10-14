@@ -190,6 +190,15 @@ done
 check "свои сокеты службы (0x80000) — мимо Туннеля" eval 'ip route get 203.0.113.77 mark 0x80000 | grep -q "dev inet0"'
 
 section "mesh-VPN — зона Маршрутизации (ADR 0014)"
+# ВРЕМЕННО — диагностика нестабильной проверки DNS узла mesh в CI (уберётся, когда найдётся причина).
+# Трасса пакетов DNS узла — с начала раздела, чтобы не сдвигать время у самих проверок.
+nft -f - <<-'EOF'
+	table inet t_trace {
+		chain pre { type filter hook prerouting priority -400; iifname "ms0" udp dport 53 meta nftrace set 1; }
+		chain out { type filter hook output priority -400; ip daddr 100.64.0.0/24 meta nftrace set 1; }
+	}
+EOF
+nft monitor trace >> /tmp/trace.log 2>&1 & TRACE=$!
 # Зона mesh выбрана в «Правила → Зоны»: перенаправление mesh → truba заводит сама Труба, узлы
 # сети идут по Категориям, как домашняя сеть. Адрес ms0 — /32: для dnsmasq с --local-service узлы
 # чужие, и он им не отвечает; перехват Трубы подменяет им источник на адрес Роутера.
@@ -236,40 +245,30 @@ uci delete firewall.mesh_truba; uci commit firewall; /etc/init.d/firewall reload
 check "без перенаправления fw4 отбрасывает трафик узла в Туннель" eval '! mesh_tunnel'
 reload "перенаправление удалено вручную"
 check "применение заводит перенаправление снова" eval '[ "$(uci -q get firewall.mesh_truba.dest)" = truba ] && mesh_tunnel'
-# ВРЕМЕННО — диагностика нестабильной проверки DNS узла mesh в CI (уберётся, когда найдётся причина).
-# Трасса пакетов DNS узла — до проверок; при провале — сокеты dnsmasq на :53, правила, наборы,
-# conntrack, трасса и журнал стенда.
-nft -f - <<-'EOF'
-	table inet t_trace {
-		chain pre { type filter hook prerouting priority -400; iifname "ms0" udp dport 53 meta nftrace set 1; }
-		chain inp { type filter hook input priority -400; iifname "ms0" udp dport 53 meta nftrace set 1; }
-		chain out { type filter hook output priority -400; udp sport 53 ip daddr 100.64.0.0/24 meta nftrace set 1; }
-	}
-EOF
-nft monitor trace >> /tmp/trace.log 2>&1 & TRACE=$!
-ddump() {
-	echo "DIAG uptime=$(cut -d' ' -f1 /proc/uptime) dnsmasq=$(pidof dnsmasq) busy=$(busy | tr '\n' ' ')"
-	netstat -lnu 2>/dev/null | grep ':53 ' | sed 's/^/DIAG udp53 /'
-	ip -4 addr show dev ms0 | sed 's/^/DIAG ms0 /'
-	ip rule show | sed 's/^/DIAG rule /'
-	ip route get 100.64.0.2 from 100.64.0.1 2>&1 | head -1 | sed 's/^/DIAG get /'
-	nft list chain inet truba dns_hijack 2>&1 | grep -E 'redirect' | sed 's/^/DIAG /'
-	nft list chain inet truba dns_snat 2>&1 | grep -E 'snat' | sed 's/^/DIAG /'
-	echo "DIAG local4 $(nft list set inet truba local4 2>/dev/null | tr -d '\n\t' | sed 's/.*elements = //')"
-	grep -E 'dport=53 ' /proc/net/nf_conntrack 2>/dev/null | grep -F '100.64.' | tail -6 | sed 's/^/DIAG ct /'
-	tail -80 /tmp/trace.log | sed 's/^/DIAG trace /'
-	logread | grep -E 'dnsmasq|netifd|firewall|truba|procd' | tail -25 | sed 's/^/DIAG log /'
+# dns_from с записью кода и времени (ВРЕМЕННО, диагностика).
+dns_from_t() {
+	local t0 rc
+	t0=$(cut -d' ' -f1 /proc/uptime)
+	ip netns exec "$1" ucode /repo/tests/lib/dns_ttl.uc 53 localhost "$2" > /tmp/dq.out 2>&1; rc=$?
+	echo "$2 rc=$rc t0=$t0 t1=$(cut -d' ' -f1 /proc/uptime) out=$(head -1 /tmp/dq.out)" >> /tmp/dq.log
+	grep -q '^127\.0\.0\.1 ' /tmp/dq.out
 }
 DIAG_FAILS=$FAILS
-check "узел сети: DNS к чужому серверу перехвачен, источник подменён — dnsmasq ответил" eval 'dns_from meshhost 8.8.8.8 && dns_snat ms0'
-check "узел сети: DNS к адресу Роутера — тоже" dns_from meshhost 100.64.0.1
+check "узел сети: DNS к чужому серверу перехвачен, источник подменён — dnsmasq ответил" eval 'dns_from_t meshhost 8.8.8.8 && dns_snat ms0'
+check "узел сети: DNS к адресу Роутера — тоже" dns_from_t meshhost 100.64.0.1
 check "устройство домашней сети: DNS перехвачен, источник не подменён" eval 'in_set local4 192.168.1.0/24 && dns_from lanhost 8.8.8.8 && dns_seen lan && ! dns_snat lan'
+sed 's/^/DIAG q /' /tmp/dq.log
 if [ "$FAILS" -ne "$DIAG_FAILS" ]; then
-	for t in 8.8.8.8 100.64.0.1; do
-		ip netns exec meshhost ucode /repo/tests/lib/dns_ttl.uc 53 localhost "$t" >/dev/null 2>&1
-		echo "DIAG повтор $t: код $? (uptime $(cut -d' ' -f1 /proc/uptime))"
-	done
-	ddump
+	echo "DIAG uptime=$(cut -d' ' -f1 /proc/uptime) dnsmasq=$(pidof dnsmasq) busy=$(busy | tr '\n' ' ')"
+	netstat -lnu 2>/dev/null | grep -E '(100\.64|192\.168)[0-9.]*:53 ' | sed 's/^/DIAG udp53 /'
+	ip rule show | sed 's/^/DIAG rule /'
+	ip route get 100.64.0.2 from 100.64.0.1 2>&1 | head -1 | sed 's/^/DIAG get /'
+	echo "DIAG local4 $(nft list set inet truba local4 2>/dev/null | tr -d '\n\t' | sed 's/.*elements = //')"
+	grep -E 'dport=53 ' /proc/net/nf_conntrack 2>/dev/null | grep -F '100.64.' | tail -6 | sed 's/^/DIAG ct /'
+	grep -vE 'rule .*(dns_ms0|snat_ms0|dns_lan|snat_lan)' /tmp/trace.log | tail -100 | sed 's/^/DIAG trace /'
+	logread | grep -E 'dnsmasq|netifd|firewall|truba|procd|kernel' | tail -30 | sed 's/^/DIAG log /'
+	for t in 8.8.8.8 100.64.0.1; do dns_from_t meshhost "$t"; done
+	tail -2 /tmp/dq.log | sed 's/^/DIAG повтор /'
 fi
 kill "$TRACE" 2>/dev/null
 nft delete table inet t_trace
