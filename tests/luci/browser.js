@@ -118,15 +118,12 @@ async function waitApply(page) {
 	// Переводы Трубы — её собственные. LuCI отдаёт браузеру строки всех каталогов разом, и при одинаковом msgid
 	// берётся чужой перевод: «MTU» в каталоге LuCI — разметка <abbr>, «Log» — «Системный журнал». На стенде стоят
 	// русские каталоги LuCI и межсетевого экрана. Ни один из них не должен переводить строку Трубы иначе, чем её
-	// po. Совпавшим msgid нужен контекст «truba». Заголовок меню переводит сервер, а там каталог Трубы ищется
-	// раньше каталога LuCI: строка меню без контекста, у которой есть пара с контекстом, в браузер не идёт.
-	const menuTitles = new Set(Object.values(JSON.parse(fs.readFileSync('/repo/router/luci-app-truba/root/usr/share/luci/menu.d/luci-app-truba.json', 'utf8')))
-		.map((x) => x.title));
-	const poAll = fs.readFileSync('/repo/router/luci-app-truba/po/ru/truba.po', 'utf8').split(/\n\s*\n/).map((b) => {
+	// po. Совпавшим msgid нужен контекст «truba». Заголовки меню тема тоже переводит в браузере — _(title) без
+	// контекста: заголовок вкладки не должен совпадать со строкой каталога LuCI с другим переводом.
+	const poRu = fs.readFileSync('/repo/router/luci-app-truba/po/ru/truba.po', 'utf8').split(/\n\s*\n/).map((b) => {
 		const f = (k) => { const m = b.match(new RegExp('^' + k + ' (".*")$', 'm')); return m ? JSON.parse(m[1]) : null; };
 		return { ctx: f('msgctxt'), id: f('msgid'), str: f('msgstr') };
 	}).filter((e) => e.id);
-	const poRu = poAll.filter((e) => !(e.ctx == null && menuTitles.has(e.id) && poAll.some((x) => x.ctx == 'truba' && x.id == e.id)));
 	const foreign = await page.evaluate(async (entries) => {
 		const src = await (await fetch(L.url('admin/translations', 'ru'))).text();
 		const tr = new Function('window', src + '; return window.TR;')({});

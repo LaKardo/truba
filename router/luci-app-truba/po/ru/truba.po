@@ -1062,13 +1062,6 @@ msgstr "Число или диапазон «от-до» в пределах 0�
 msgid "Enter a whole number"
 msgstr "Введите целое число"
 
-msgid "Log"
-msgstr "Журнал"
-
-msgctxt "truba"
-msgid "Log"
-msgstr "Журнал"
-
 msgid "Handshake"
 msgstr "Рукопожатие"
 
@@ -1298,3 +1291,6 @@ msgstr "Приходят с router.conf."
 
 msgid "Random bytes added to data packets instead of padding to a multiple of 16, so packet lengths do not share one remainder; a range «from-to». May differ from the Truba."
 msgstr "Случайные байты к пакетам данных вместо дополнения до кратного 16, чтобы длины пакетов не давали один остаток; диапазон «от-до». Может отличаться от Трубы."
+
+msgid "Logs"
+msgstr "Журнал"

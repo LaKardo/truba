@@ -401,9 +401,8 @@ msgstr ""
 msgid "Inbound"
 msgstr ""
 
-#: htdocs/luci-static/resources/truba/common.js
-msgctxt "truba"
-msgid "Log"
+#: menu.d
+msgid "Logs"
 msgstr ""
 
 #: htdocs/luci-static/resources/truba/ui/flow.js
@@ -1611,6 +1610,18 @@ msgid "Other interface settings"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/tunnel.js
+msgid "router.conf imported: apply the changes to use it."
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/tunnel.js
+msgid "Drop router.conf here or choose the file"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/tunnel.js
+msgid "…or paste its text"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/tunnel.js
 msgid "Check the tunnel"
 msgstr ""
 
@@ -1652,23 +1663,11 @@ msgid "Pings the Truba inside the tunnel with packets of three sizes, up to the 
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/tunnel.js
-msgid "router.conf imported: apply the changes to use it."
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/tunnel.js
 msgid "AmneziaWG keys and parameters"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/tunnel.js
 msgid "Keys and parameters come from router.conf made by install-vps.sh on the VPS. To replace them, import a new file."
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/tunnel.js
-msgid "Drop router.conf here or choose the file"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/tunnel.js
-msgid "…or paste its text"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/tunnel.js
@@ -1717,9 +1716,5 @@ msgstr ""
 
 #: menu.d
 msgid "Overview"
-msgstr ""
-
-#: menu.d
-msgid "Log"
 msgstr ""
 

@@ -635,7 +635,7 @@ if (cdev) {
 	const LSN = (lv, src) => cdev.logShown?.(LS, lv, src)?.length;
 	check(LSN('all', [ 'truba', 'mosdns' ]) === 3 && LSN('warn', [ 'truba', 'mosdns' ]) === 2 && LSN('err', [ 'truba', 'mosdns' ]) === 1 &&
 		LSN('all', [ 'mosdns' ]) === 1, 'common.logShown: уровень — порог, источники — несколько');
-	check(cdev.TABS.log === 'Log' && !('diagnostics' in cdev.TABS), 'common.TABS: «Журнал» вместо «Диагностики»');
+	check(cdev.TABS.log === 'Logs' && !('diagnostics' in cdev.TABS), 'common.TABS: «Журнал» вместо «Диагностики»');
 }
 
 // Туннель AmneziaWG (spec §5.4, Решения 4 и 7): router.conf, перенос его в network и проверки опций интерфейса.

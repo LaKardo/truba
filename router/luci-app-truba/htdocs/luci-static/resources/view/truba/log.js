@@ -72,7 +72,7 @@ function Page({ first }) {
 	const toggle = (s) => setSources((cur) => cur.includes(s) ? cur.filter((x) => x != s) : cur.concat([ s ]));
 	return html`
 		<div class="head">
-			<h2>${_('Log', 'truba')}</h2>
+			<h2>${_('Logs')}</h2>
 			<span class="mu">${_('Truba, its watchdog, mosdns and the tunnel interface: the last %d lines, newest first.').format(LINES)}</span>
 			${offline ? html`<${kit.Badge} level="err"><${kit.Icon} name="wifi-off" />${_('No connection to the router')}</${kit.Badge}>` : ''}
 		</div>

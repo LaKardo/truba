@@ -716,7 +716,7 @@ const TABS = {
 	tunnel: _('Tunnel'),
 	dns: _('DNS'),
 	inbound: _('Inbound'),
-	log: _('Log', 'truba')
+	log: _('Logs')
 };
 function tabUrl(tab) {
 	return L.url('admin/services/truba/' + tab);
