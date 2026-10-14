@@ -159,6 +159,85 @@ export function dnsmasq_restore() {
 	return true;
 };
 
+// ---- dnsmasq и адреса зон ----
+
+// Перехват DNS отправляет запрос устройства на первый адрес IPv4 устройства зоны, через которое он
+// пришёл (redirect), — этот адрес должен слушать dnsmasq. С bind-dynamic он открывает сокеты на новые
+// адреса сам, но иногда не открывает на адрес, появившийся вскоре после его старта (так бывает с
+// адресом mesh-VPN при загрузке): DNS устройств этой зоны пропадает до перезапуска dnsmasq.
+// devs — устройства зон, udp — вывод netstat -lnu, addrs — ip -4 -j addr show. Итог — [ { dev, addr } ]
+// без сокета на :53; сокет на 0.0.0.0:53 слушает все адреса.
+export function dns_unbound(devs, udp, addrs) {
+	let bound = {};
+	for (let l in split(udp ?? '', '\n')) {
+		let f = split(trim(l), /\s+/);
+		let m = (f[0] == 'udp') ? match(f[3] ?? '', /^(.+):53$/) : null;
+		if (m)
+			bound[m[1]] = true;
+	}
+	if (bound['0.0.0.0'])
+		return [];
+	let out = [];
+	for (let l in addrs ?? []) {
+		if (!(l.ifname in devs))
+			continue;
+		let a = filter(l.addr_info ?? [], (x) => x.family == 'inet' && !x.secondary)[0];
+		if (a && !bound[a.local])
+			push(out, { dev: l.ifname, addr: a.local });
+	}
+	return out;
+};
+
+function dns_probe(devs) {
+	let addrs = null;
+	try {
+		addrs = json(U.run('ip -4 -j addr show').out);
+	}
+	catch (e) { }
+	return dns_unbound(devs, U.run('netstat -lnu').out, addrs);
+}
+
+function dnsmasq_pid() {
+	return trim(U.run('pidof dnsmasq').out);
+}
+
+const addr_list = (miss) => join(', ', map(miss, (m) => m.addr + ' (' + m.dev + ')'));
+const addr_key = (miss) => join(' ', sort(map(miss, (m) => m.addr)));
+
+// Адрес зоны без сокета dnsmasq — перезапуск dnsmasq: при старте он открывает сокеты на все адреса.
+// Новому адресу сначала даётся до 3 с: dnsmasq открывает сокет по событию netlink, не мгновенно.
+// Перезапуск — один на процесс dnsmasq и набор адресов: если и после него адрес не слушается
+// (dnsmasq так настроен, например except-interface), повторять его на каждое применение и каждую
+// минуту незачем — остаётся запись в журнале. Итог — адреса, которые так и не слушаются.
+export function dns_heal(devs) {
+	if (!length(devs) || dnsmasq_pid() == '')
+		return [];
+	let st = U.read_json(C.DNS_HEAL_FILE, {});
+	let settled = (miss) => !length(miss) || (st.pid == dnsmasq_pid() && st.key == addr_key(miss));
+	let miss = dns_probe(devs);
+	for (let i = 0; i < 3 && !settled(miss); i++) {
+		sleep(1000);
+		miss = dns_probe(devs);
+	}
+	if (settled(miss))
+		return miss;
+
+	U.warn_log('dnsmasq не слушает ' + addr_list(miss) + ' — DNS устройств зоны не работает, перезапуск dnsmasq');
+	system('/etc/init.d/dnsmasq restart >/dev/null 2>&1');
+	for (let i = 0; i < 10; i++) {
+		sleep(500);
+		miss = dns_probe(devs);
+		if (!length(miss) && dnsmasq_pid() != '')
+			break;
+	}
+	if (length(miss))
+		U.err('dnsmasq и после перезапуска не слушает ' + addr_list(miss) +
+			': DNS устройств зоны не работает — проверьте, на каких интерфейсах dnsmasq принимает запросы');
+	U.mkdirp(C.RUN_DIR);
+	U.write_json(C.DNS_HEAL_FILE, { pid: dnsmasq_pid(), key: addr_key(miss) });
+	return miss;
+};
+
 // ---- Межсетевой экран зон Маршрутизации: перенаправления в зону Туннеля, IPv6-интернет ----
 
 // Своя секция зоны: имя зоны (имя секции UCI — только буквы, цифры и «_») и окончание из truba.const.

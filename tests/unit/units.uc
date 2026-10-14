@@ -426,6 +426,33 @@ check('IPv6: имя занято чужой секцией — она не тр�
 	no6('mesh_truba_no_ipv6')['.type'] == 'redirect' && no6('lan_truba_no_ipv6').src == 'wan' && !no6('lan_truba_no_ipv6').target,
 	sprintf('%J %J', no6('mesh_truba_no_ipv6'), no6('lan_truba_no_ipv6')));
 
+// ---- DNS устройств зон: слушает ли dnsmasq адрес, куда их направляет перехват ----
+
+{
+	const UDP = 'Active Internet connections (only servers)\n' +
+		'Proto Recv-Q Send-Q Local Address           Foreign Address         State\n' +
+		'udp        0      0 127.0.0.1:53            0.0.0.0:*\n' +
+		'udp        0      0 192.168.1.1:53          0.0.0.0:*\n' +
+		'udp        0      0 100.64.0.1:5353         0.0.0.0:*\n' +
+		'udp        0      0 fd64::1:53              :::*\n';
+	const ADDRS = [
+		{ ifname: 'br-lan', addr_info: [ { family: 'inet', local: '192.168.1.1', prefixlen: 24 } ] },
+		{ ifname: 'ms0', addr_info: [ { family: 'inet', local: '100.64.0.1', prefixlen: 32 } ] },
+		{ ifname: 'guest', addr_info: [ { family: 'inet', local: '192.168.3.1', prefixlen: 24 },
+		                                { family: 'inet', local: '192.168.4.1', prefixlen: 24, secondary: true } ] },
+		{ ifname: 'wan', addr_info: [ { family: 'inet', local: '198.51.100.1', prefixlen: 30 } ] },
+	];
+	const U = (devs, udp) => N.dns_unbound?.(devs, udp ?? UDP, ADDRS);
+	check('dnsmasq и зоны: адрес устройства зоны без сокета на :53 — в списке, со своим устройством',
+		same(U([ 'br-lan', 'ms0' ]), [ { dev: 'ms0', addr: '100.64.0.1' } ]), sprintf('%J', U([ 'br-lan', 'ms0' ])));
+	check('dnsmasq и зоны: только первый адрес устройства (его выбирает перехват), устройства вне зон не проверяются',
+		same(U([ 'guest' ]), [ { dev: 'guest', addr: '192.168.3.1' } ]) && same(U([ 'br-lan' ]), []), sprintf('%J', U([ 'guest' ])));
+	check('dnsmasq и зоны: сокет на 0.0.0.0:53 слушает все адреса',
+		same(U([ 'ms0', 'guest' ], UDP + 'udp        0      0 0.0.0.0:53              0.0.0.0:*\n'), []));
+	check('dnsmasq и зоны: устройства без адреса IPv4 и пустой ввод — без ошибки',
+		same(U([ 'nope' ]), []) && same(N.dns_unbound?.([ 'ms0' ], null, null), []));
+}
+
 // ---- «Проверить домен/IP»: Приоритет для IP ----
 
 let ip = '198.51.100.7', n = 0xc6336407;

@@ -1,6 +1,7 @@
 // История скорости трафика устройств для графика «Обзора». Её ведёт процесс `truba stats`
 // (инстанс procd): раз в 5 с он читает счётчики Трубы и считает скорость. Браузер историю
-// только показывает, поэтому она не рвётся, когда вкладка свёрнута или закрыта.
+// только показывает, поэтому она не рвётся, когда вкладка свёрнута или закрыта. Он же раз в минуту
+// проверяет, слушает ли dnsmasq адреса устройств зон (net.dns_heal).
 // Хранится в оперативной памяти (/var/run): флеш не изнашивается, а после перезагрузки
 // счётчики и так начинаются с нуля. Перезапуск процесса продолжает историю из файлов.
 'use strict';
@@ -10,6 +11,8 @@ import * as C from 'truba.const';
 import * as U from 'truba.util';
 import * as S from 'truba.state';
 import * as DV from 'truba.devstats';
+import * as F from 'truba.conf';
+import * as N from 'truba.net';
 
 // Шаг и сроки — C.HISTORY: те же у графика «Обзора» и у rpcd (rates).
 const STEP = C.HISTORY.fine.step;       // точки — раз в 5 с
@@ -128,9 +131,30 @@ function save(hist, minutes) {
 	U.write_json(C.RATES_FILE, { step: STEP, last: hist.last, points: hist.points });
 }
 
+// DNS устройств зон: слушает ли dnsmasq адреса их устройств (net.dns_heal). Раз в минуту, потому что
+// адрес mesh-VPN появляется и без применения настроек. Идёт применение — оно проверит само.
+const DNS_CHECK = 60;
+
+function dns_check() {
+	if (!U.read_json(C.APPLIED_FILE, null)?.routing)
+		return;
+	let lk = U.lock(C.LOCK_APPLY, true);
+	if (!lk)
+		return;
+	try {
+		let cfg = F.load();
+		if (cfg.routing && cfg.dns_hijack)
+			N.dns_heal(F.zone_devices(cfg.zones));
+	}
+	catch (e) {
+		U.err('проверка DNS зон: ' + U.errmsg(e));
+	}
+	lk.close();
+}
+
 export function run() {
 	let hist = load(), dev = DV.load();
-	let timer;
+	let timer, dns;
 	let tick = () => {
 		let m = int(U.now_ms()), t = time();
 		let applied = U.read_json(C.APPLIED_FILE, null);
@@ -144,5 +168,9 @@ export function run() {
 	};
 	uloop.init();
 	timer = uloop.timer(1000, tick);
+	dns = uloop.timer(DNS_CHECK * 1000, () => {
+		dns_check();
+		dns.set(DNS_CHECK * 1000);
+	});
 	uloop.run();
 };
