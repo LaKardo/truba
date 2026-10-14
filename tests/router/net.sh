@@ -104,6 +104,7 @@ ip netns add meshhost
 ip link add ms0 type veth peer name ms1
 ip link set ms1 netns meshhost
 ip addr add 100.64.0.1/32 dev ms0; ip link set ms0 up
+echo "$(cut -d' ' -f1 /proc/uptime)" > /tmp/ms0.added   # ВРЕМЕННО, диагностика
 ip -n meshhost link set lo up; ip -n meshhost link set ms1 up
 ip -n meshhost addr add 100.64.0.2/32 dev ms1
 ip -n meshhost route add 100.64.0.1 dev ms1
@@ -260,7 +261,11 @@ check "устройство домашней сети: DNS перехвачен,
 sed 's/^/DIAG q /' /tmp/dq.log
 if [ "$FAILS" -ne "$DIAG_FAILS" ]; then
 	echo "DIAG uptime=$(cut -d' ' -f1 /proc/uptime) dnsmasq=$(pidof dnsmasq) busy=$(busy | tr '\n' ' ')"
-	netstat -lnu 2>/dev/null | grep -E '(100\.64|192\.168)[0-9.]*:53 ' | sed 's/^/DIAG udp53 /'
+	netstat -lnu 2>/dev/null | grep ':53 ' | sed 's/^/DIAG udp53 /'
+	for p in $(pidof dnsmasq); do echo "DIAG dnsmasq $p: старт $(awk '{print $22}' /proc/$p/stat) тиков; ms0 добавлен на $(cat /tmp/ms0.added) с; $(tr '\0' ' ' < /proc/$p/cmdline | cut -c1-80)"; done
+	sed 's/^/DIAG netlink /' /proc/net/netlink
+	ip -o link show ms0 | sed 's/^/DIAG link /'
+	grep -E 'bind|interface|local' /var/etc/dnsmasq.conf.* 2>/dev/null | sed 's/^/DIAG conf /'
 	ip rule show | sed 's/^/DIAG rule /'
 	ip route get 100.64.0.2 from 100.64.0.1 2>&1 | head -1 | sed 's/^/DIAG get /'
 	echo "DIAG local4 $(nft list set inet truba local4 2>/dev/null | tr -d '\n\t' | sed 's/.*elements = //')"
