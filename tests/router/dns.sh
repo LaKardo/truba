@@ -100,6 +100,14 @@ wait_for 10 restarted
 # ttl_of ИМЯ IP — TTL A-записи IP в ответе mosdns.
 ttl_of() { ucode /repo/tests/lib/dns_ttl.uc "$(dns_port)" "$1" | awk -v ip="$2" '$1 == ip {print $2}'; }
 ttl_le() { T="$(ttl_of "$1" "$2")"; [ -n "$T" ] && [ "$T" -le "$3" ]; }
+# Без ответа — код 1, а не цикл на 100 % CPU, как было на Роутере. Порт закрыт — ядро получает
+# ICMP «порт недоступен»; мусор вместо ответа — разбор имени уходит за конец ответа.
+ttl_no_answer() { bounded 6 ucode /repo/tests/lib/dns_ttl.uc "$1" keep.zz-dom.trubatest; [ $? -eq 1 ]; }
+ucode /repo/tests/lib/udp_probe.uc server 127.0.0.1 5998 xxxxxxxxxxxxxxxx >/dev/null 2>&1 & JUNK=$!
+wait_for 5 eval 'netstat -lnu | grep -q "127.0.0.1:5998 "'
+check "dns_ttl.uc: порт закрыт — код 1, без зависания" ttl_no_answer 5999
+check "dns_ttl.uc: мусор вместо ответа — код 1, без зависания" ttl_no_answer 5998
+kill "$JUNK"
 check "клиенту — не больше ttl_max: из сервера и из кэша" eval 'ttl_le keep.zz-dom.trubatest 44.0.0.3 300 && ttl_le keep.zz-dom.trubatest 44.0.0.3 300'
 # В дампе кэша — A-запись 44.0.0.3 с TTL не больше часа: тип 1, класс 1, TTL 3600 (0x00000e10), длина 4, адрес.
 cached_ttl_3600() { curl -s http://127.0.0.1:5336/plugins/cache/dump | gunzip | hexdump -v -e '/1 "%02x"' | grep -q 0001000100000e1000042c000003; }
