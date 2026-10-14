@@ -270,7 +270,7 @@ function apply_config(res, prev) {
 	if (st.up)
 		N.set_rp_filter(st.device);
 	res.table = N.routes(cfg, tinfo);
-	N.cron_set(cfg.routing && cfg.lists.auto_update, cfg.lists.update_utc);
+	N.cron_set(cfg.routing && cfg.lists.auto_update);
 	N.upnp_set(cfg.upnp, cfg.iface, vps);
 	// И при выключенной Маршрутизации: перенаправления и правила IPv6 следуют за выбранными зонами.
 	N.zones_firewall(cfg.zones);
@@ -470,6 +470,7 @@ export function update_lists(force) {
 		let file = C.DAT_FILES[set];
 		let dst = C.LISTS_DIR + '/' + file;
 		let tmp = tmpdir + '/' + file;
+		let cur = U.sha256_file(dst);
 		let sources = [];
 		if (cfg.lists.via_tunnel && st.up)
 			push(sources, { url: cfg.lists[set + '_url'], dev: st.device, via: 'tunnel' });
@@ -481,11 +482,21 @@ export function update_lists(force) {
 		for (let src in sources) {
 			unlink(tmp);
 			unlink(tmp + '.sha256sum');
-			if (!curl(src.url, tmp, src.dev) || !curl(src.url + '.sha256sum', tmp + '.sha256sum', src.dev)) {
+			// Сначала контрольная сумма (65 байт): та же, что у текущего файла, — файл не скачивается.
+			// Поэтому ежечасная проверка без новых выпусков почти ничего не скачивает.
+			if (!curl(src.url + '.sha256sum', tmp + '.sha256sum', src.dev)) {
 				push(errors, src.via + ': download failed');
 				continue;
 			}
 			let want = U.sha_from_sumfile(tmp + '.sha256sum');
+			if (want && want == cur) {
+				got = { sha: want, via: src.via };
+				break;
+			}
+			if (!curl(src.url, tmp, src.dev)) {
+				push(errors, src.via + ': download failed');
+				continue;
+			}
 			let have = U.sha256_file(tmp);
 			if (!want || want != have) {
 				push(errors, src.via + ': sha256 mismatch');
@@ -511,7 +522,6 @@ export function update_lists(force) {
 			continue;
 		}
 
-		let cur = U.sha256_file(dst);
 		if (cur == got.sha) {
 			result.sets[set] = { ok: true, changed: false, sha: got.sha, via: got.via };
 			unlink(tmp);

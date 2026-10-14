@@ -282,40 +282,26 @@ export function zones_firewall(zones) {
 
 const CRONTAB_DIR = '/etc/crontabs', CRONTAB = CRONTAB_DIR + '/root';
 
-// update_utc «ЧЧ:ММ» → локальное время Роутера.
-function utc_to_local(hhmm) {
-	let m = match(hhmm ?? '', /^([0-9]{1,2}):([0-9]{2})$/);
-	let h = m ? int(m[1]) : 12, mi = m ? int(m[2]) : 0;
-	let now = time();
-	let off = int((timegm(localtime(now)) - now) / 60);   // смещение часового пояса, минуты
-	let t = ((h * 60 + mi + off) % 1440 + 1440) % 1440;
-	return [ int(t / 60), t % 60 ];
-}
-
 // Ближайший запуск обновления списков, unix-время; null — блока cron нет. Считается по
-// самой строке cron в местном времени Роутера, как её запустит crond (и после смены
-// летнего времени, когда строка уже разошлась с update_utc до следующего применения).
-// Строка — первая в блоке Трубы (cron_set).
+// самой строке cron в местном времени Роутера, как её запустит crond. Строка — первая
+// в блоке Трубы (cron_set).
 export function cron_next() {
 	let lines = split(readfile(CRONTAB) ?? '', '\n');
 	let i = index(lines, C.CRON_BEGIN);
-	let m = (i >= 0) ? match(lines[i + 1] ?? '', /^([0-9]+) ([0-9]+) /) : null;
+	let m = (i >= 0) ? match(lines[i + 1] ?? '', /^([0-9]+) \* \* \* \* /) : null;
 	if (!m)
 		return null;
 	let now = time();
 	let tm = localtime(now);
-	tm.hour = int(m[2]);
 	tm.min = int(m[1]);
 	tm.sec = 0;
 	let t = timelocal(tm);
-	if (t <= now) {
-		tm.mday++;
-		t = timelocal(tm);
-	}
-	return t;
+	return (t > now) ? t : t + 3600;
 };
 
-export function cron_set(enabled, update_utc) {
+// Наборы правил выходят в разное время суток (geoip — бывает и вечером по UTC): проверка
+// каждый час, в начале часа. Без изменений она скачивает только контрольные суммы.
+export function cron_set(enabled) {
 	let cur = readfile(CRONTAB) ?? '';
 	let lines = split(cur, '\n');
 	let out = [], skip = false;
@@ -329,9 +315,8 @@ export function cron_set(enabled, update_utc) {
 		pop(out);
 
 	if (enabled) {
-		let t = utc_to_local(update_utc);
 		push(out, C.CRON_BEGIN);
-		push(out, sprintf('%d %d * * * %s update-lists >/dev/null 2>&1', t[1], t[0], C.CLI));
+		push(out, sprintf('0 * * * * %s update-lists >/dev/null 2>&1', C.CLI));
 		push(out, C.CRON_END);
 	}
 

@@ -97,7 +97,7 @@ function failedSets(last) {
 	return Object.keys(sets).filter((k) => !sets[k].ok).map((k) => '%s: %s'.format(k, (sets[k].errors || []).map(common.setError).join('; ') || '?'));
 }
 
-// Автообновление идёт раз в сутки; проверка старше 36 ч — cron не запускал его или он падал.
+// Автообновление проверяет списки каждый час; проверка старше 36 ч — cron не запускал его или он падал.
 function listsStale(st) {
 	const last = st.lists?.last;
 	return st.routing && common.get('lists', 'auto_update') && !st.lists?.updating

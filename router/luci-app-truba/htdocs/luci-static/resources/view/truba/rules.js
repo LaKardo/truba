@@ -98,7 +98,8 @@ function ModeCard() {
 
 // Наборы правил: версии geoip и geosite, итог последней проверки, откуда скачан, сколько
 // адресов в наборах сейчас, «Обновить сейчас» и «Откатить», следующая проверка, настройки обновления.
-// lists и sets опрашивает страница (load): раз в 30 с, а пока идёт обновление или применение — раз в 5 с.
+// lists и sets опрашивает страница (load): раз в 30 с, а пока идёт обновление или применение и пока
+// не пришёл итог «Обновить сейчас» — раз в 5 с.
 
 // Сколько подсетей и IP сейчас уходит по каждому Действию. Подсети geoip посчитаны при применении;
 // в ядре соседние сливаются, там их меньше.
@@ -127,12 +128,16 @@ function RuleSets({ store, timing }) {
 	const busy = l.updating ? _('Update in progress…') : l.applying ? _('Applying settings…') : null;
 	const count = (set) => (cats?.cats || []).filter((c) => c.set == set).length;
 	const failed = (e) => app.toast(_('Error: %s').format(e?.message || e));
-	// После запуска опрос частый 15 с: замок обновления служба берёт не сразу.
-	const update = () => common.callUpdateLists(false).then(() => {
-		timing.kickedAt = Date.now();
+	// rpcd запускает проверку в фоне и отвечает временем запуска, а итог сообщает опрос страницы (load).
+	// Ошибку ubus (нет прав, rpcd занят) rpc LuCI отдаёт пустым объектом: без started проверка не запущена.
+	const update = () => common.callUpdateLists(false).then((r) => {
+		if (!r?.started)
+			return failed(_('the service did not answer'));
+		timing.kick = { at: Date.now(), since: r.started };
 		app.toast(_('Update started.'));
 	}, failed);
-	// Файлы переставляются сразу, применение — в фоне: его ход видно в карточке.
+	// Файлы переставляются сразу, применение — в фоне: его ход видно в карточке. Опрос частый 15 с:
+	// замок применения служба берёт не сразу.
 	const rollback = () => common.callRollbackLists().then((r) => {
 		timing.kickedAt = Date.now();
 		app.toast(r.error == 'busy' ? _('Rule sets are being updated, try again later.')
@@ -168,8 +173,7 @@ function RuleSets({ store, timing }) {
 			<div class="mu">${_('geoip.dat and geosite.dat from kirilllavrov/geoip-builder and kirilllavrov/geosite-builder. Files are used unchanged; the checksum is verified before every replacement.')}</div>
 			<div class="sws">${sw('auto_update', _('Update automatically'))}${sw('via_tunnel', _('Download via tunnel'))}</div>
 			<div class="mu">${_('The main source is fetched through the tunnel; the mirror always goes direct.')}</div>
-			<${kit.Field} sec="lists" name="update_utc" label=${_('Update time (UTC)')} msg=${_('Format: HH:MM')} disabled=${!auto}
-				hint=${_('geoip.dat is published every three days around 10–11 UTC, geosite.dat irregularly, usually by 09 UTC; at 12:00 a new release is picked up the same day. Converted to the router time zone for cron.')} />
+			<div class="mu">${_('Checked every hour: until a new release is out, only the checksums are downloaded.')}</div>
 			<${kit.Field} sec="lists" name="geoip_url" label=${_('geoip.dat')} />
 			<${kit.Field} sec="lists" name="geoip_mirror" label=${_('geoip.dat mirror')} hint=${_('Downloaded directly if the main source failed.')} />
 			<${kit.Field} sec="lists" name="geosite_url" label=${_('geosite.dat')} />
@@ -297,18 +301,25 @@ return view.extend({
 		// Действия при загрузке страницы — для точки «изменено»: секции rule удаляются и заводятся заново,
 		// поэтому несохранённое у секции не говорит, другое ли Действие.
 		const snap = { all: common.ruleActions('all'), selective: common.ruleActions('selective') };
-		// kickedAt — когда нажали «Обновить сейчас»: замок обновления берётся не сразу, опрос чаще 15 с.
-		const timing = { polledAt: Date.now(), kickedAt: -Infinity };
+		// kickedAt — когда нажали «Откатить»: замок применения берётся не сразу, опрос чаще 15 с.
+		// kick — запуск «Обновить сейчас», пока нет его итога (common.listsKick).
+		const timing = { polledAt: Date.now(), kickedAt: -Infinity, kick: null };
 		let tick = 0;
 		app.poll(store, () => {
 			const st = store.get(), now = Date.now(), patch = {}, calls = [];
 			if (tick++ % 2)
 				calls.push(common.callStatus().then((s) => { patch.status = s; }));
-			if (common.listsDue(now, timing.polledAt, timing.kickedAt, st.lists)) {
+			if (timing.kick || common.listsDue(now, timing.polledAt, timing.kickedAt, st.lists)) {
 				timing.polledAt = now;
 				// Категории — следом за lists, когда Наборы правил распаковываются, ещё не скачаны или сменились.
 				calls.push(common.callLists().then((l) => {
 					patch.lists = l;
+					// Итог проверки — сообщением: без новых выпусков на карточке меняется разве что время проверки.
+					const k = common.listsKick(timing.kick, l, Date.now());
+					if (k) {
+						timing.kick = null;
+						app.toast(k == 'done' ? _('Rule sets checked: %s').format(common.listsSummary(l.last)) : _('The update did not start.'));
+					}
 					if (common.catsDue(st.cats, st.lists, l))
 						return common.callCategories().then((c) => { patch.cats = c; });
 				}), common.callSets().then((s) => { patch.sets = s; }, () => {}));

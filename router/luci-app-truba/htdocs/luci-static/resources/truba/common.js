@@ -82,10 +82,13 @@ function checkErrorText(r) {
 }
 
 // Долгая проверка (NAT, Туннель): rpcd запускает её в фоне и отвечает сразу, а итог —
-// первый, у которого время не раньше запуска. limit — сколько секунд ждать.
+// первый, у которого время не раньше запуска. limit — сколько секунд ждать. Ошибку ubus
+// (нет прав, rpcd занят) rpc LuCI отдаёт пустым объектом: без started проверка не запущена.
 function runInBackground(start, result, limit) {
 	return start().then((s) => {
-		const since = s.started || 0, until = Date.now() + limit * 1000;
+		if (!s?.started)
+			throw new Error(_('the service did not answer'));
+		const since = s.started, until = Date.now() + limit * 1000;
 		const wait = () => new Promise((resolve) => setTimeout(resolve, 1000)).then(() => result()).then((r) =>
 			(r && r.time >= since) ? r : (Date.now() < until) ? wait() : { time: Date.now() / 1000, error: 'timeout' });
 		return wait();
@@ -553,9 +556,24 @@ function catsDue(cats, prev, next) {
 }
 
 // Пора ли спросить lists и sets: раз в 30 с, а пока идёт обновление или применение
-// и 15 с после «Обновить сейчас» (замок обновления берётся не сразу) — каждый опрос. Время — в мс.
+// и 15 с после «Откатить» (замок применения берётся не сразу) — каждый опрос. Время — в мс.
 function listsDue(now, polledAt, kickedAt, l) {
 	return !!(l?.updating || l?.applying) || now - kickedAt < 15000 || now - polledAt >= 30000;
+}
+
+// Чем кончилось «Обновить сейчас»: 'done' — есть итог (lists.last) не раньше запуска, 'lost' — через 15 с
+// нет ни итога, ни идущего обновления, null — ждать. kick — { at: мс браузера, since: started Роутера }.
+function listsKick(kick, l, now) {
+	if (!kick)
+		return null;
+	if ((l?.last?.time ?? -1) >= kick.since)
+		return 'done';
+	return (!l?.updating && now - kick.at >= 15000) ? 'lost' : null;
+}
+
+// Итог проверки обоих наборов одной строкой.
+function listsSummary(last) {
+	return [ 'geoip', 'geosite' ].map((k) => '%s — %s'.format(k, setResult(last?.sets?.[k]))).join('; ');
 }
 
 // ---- Устройства (truba.devices, ADR 0018) ----
@@ -726,7 +744,7 @@ return baseclass.extend({
 	callStatus, callLists, callCategories, callSets, callCheck, callUpdateLists, callRollbackLists, callRates, callLog,
 	loadSchema, schema, get, fieldError, handshakeLevel, callDevices, callConnections,
 	devRate, devShare, devActive, deviceSections, deviceSection, devicePolicy, normMac, connLabel,
-	ruleKey, ruleOf, ruleSections, ruleActions, ruleAction, catRows, catsDue, listsDue, checkErrorText,
+	ruleKey, ruleOf, ruleSections, ruleActions, ruleAction, catRows, catsDue, listsDue, listsKick, listsSummary, checkErrorText,
 	runNatTest, runTunnelTest, parseLog, logShown, upstreamError, dnsStats, natSummary, upnpState, upnpRows,
 	forwardRows, fwEnabled, portError, forwardErrors, zoneOfIp, forwardValues, natPick,
 	ACTION_LABELS, REASON_LABELS, VIA_LABELS, WARNINGS, NAT_ERRORS, CHECK_ERRORS, UPNP_MISSING, NBSP, TABS,

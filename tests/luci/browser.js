@@ -492,21 +492,6 @@ async function waitApply(page) {
 	result(/zz-gone/.test(missText) && !ruleSecs.some((x) => x.tag == 'zz-gone'), '«Правила»: пропавшая Категория — предупреждение и «Remove»',
 		missText.replace(/\s+/g, ' '));
 
-	// Неверное время обновления уже в настройках (правка из консоли): блок с полем раскрыт — иначе «Применить»
-	// недоступна без видимой причины.
-	await ubus('uci', 'set', { config: 'truba', section: 'lists', values: { update_utc: '25:00' } });
-	await ubus('uci', 'commit', { config: 'truba' });
-	await page.goto(url('rules'), { waitUntil: 'networkidle2' });
-	await settled(page);
-	await sleep(300);
-	const shownBad = await page.evaluate(() => {
-		const i = document.querySelector('.truba-root').shadowRoot.querySelector('input[data-opt="truba.lists.update_utc"]');
-		return { invalid: i?.getAttribute('aria-invalid'), open: !!i?.closest('details')?.open };
-	});
-	result(shownBad.invalid == 'true' && shownBad.open, '«Правила»: неверное значение из настроек — блок с полем раскрыт', JSON.stringify(shownBad));
-	await ubus('uci', 'set', { config: 'truba', section: 'lists', values: { update_utc: '12:00' } });
-	await ubus('uci', 'commit', { config: 'truba' });
-
 	// Наборы правил — на «Правилах» (были на «DNS и списках»): версии с датой.
 	await page.goto(url('rules'), { waitUntil: 'networkidle2' });
 	await settled(page);
@@ -523,45 +508,28 @@ async function waitApply(page) {
 	const toast = await page.waitForFunction(() => document.querySelector('.truba-root')?.shadowRoot?.querySelector('.toast')?.innerText, { timeout: 10000 })
 		.then((h) => h.jsonValue()).catch(() => '');
 	result(rbOpen && /No previous version/.test(toast), '«Правила»: «Откатить» — подтверждение и сообщение', `${rbOpen} ${toast}`);
-	// Время обновления по схеме: неверное — ошибка у поля, в UCI не пишется, «Применить» недоступна; верное снимает запрет.
-	await page.evaluate(() => document.querySelector('.truba-root').shadowRoot.querySelectorAll('.rule-sets details.fold').forEach((d) => { d.open = true; }));
-	await tap('input[data-opt="truba.lists.via_tunnel"]');
-	const utc = await el('input[data-opt="truba.lists.update_utc"]');
-	const uciUtc = () => page.evaluate(async () => (await L.require('uci')).get('truba', 'lists', 'update_utc') ?? null);
-	const utcBefore = await uciUtc();
-	// Ввод заново — выделением в самом поле, а не тройным кликом: внизу экрана поле может быть под
-	// прилипшей панелью изменений, и клик пришёлся бы в неё.
-	const retype = async (v) => {
-		await utc?.evaluate((e) => { e.focus(); e.select(); });
-		await page.keyboard.type(v);
-		return utc?.evaluate((e) => e.value);
+	// «Обновить сейчас»: итог проверки — сообщением. Источники — сами текущие файлы: без изменений и без применения.
+	const listsSaved = (await ubus('uci', 'get', { config: 'truba', section: 'lists' })).values || {};
+	const srcOpts = { via_tunnel: '0' };
+	for (const k of [ 'geoip', 'geosite' ])
+		srcOpts[k + '_url'] = srcOpts[k + '_mirror'] = `file:///etc/truba/lists/${k}.dat`;
+	// uci commit на стенде сам запускает применение: ждать его.
+	const setLists = async (values) => {
+		t0 = await time();
+		await ubus('uci', 'set', { config: 'truba', section: 'lists', values });
+		await ubus('uci', 'commit', { config: 'truba' });
+		await applied(t0, async () => true);
 	};
-	await retype('25:00');
-	const early = await shadowHas(page, '.rule-sets [role="alert"]');
-	await page.waitForFunction(() => document.querySelector('.truba-root').shadowRoot.querySelector('.rule-sets [role="alert"]'), { timeout: 3000 }).catch(() => {});
-	result(!early, '«Правила»: ошибка поля — после паузы в наборе, а не на каждое нажатие');
-	const badUtc = await page.evaluate(() => {
-		const r = document.querySelector('.truba-root').shadowRoot;
-		return { err: r.querySelector('.rule-sets .field.bad [role="alert"]')?.textContent || '', apply: r.querySelector('.changes [data-act="apply"]')?.disabled,
-			bar: r.querySelector('.changes')?.innerText.replace(/\s+/g, ' ') || '' };
-	});
-	badUtc.uci = await uciUtc();
-	await page.evaluate(() => [ ...document.querySelectorAll('.cbi-page-actions *') ]
-		.find((x) => x.childElementCount == 0 && x.textContent.trim() == 'Save & Apply')?.click());
-	await sleep(2000);
-	const footer = { via: (await ubus('uci', 'get', { config: 'truba', section: 'lists', option: 'via_tunnel' }).catch(() => ({}))).value,
-		toast: await page.evaluate(() => document.querySelector('.truba-root')?.shadowRoot?.querySelector('.toast')?.innerText || '') };
-	result(footer.via == '1' && /Fix the highlighted fields/.test(footer.toast), '«Правила»: «Save & Apply» LuCI при неверном поле ничего не применяет',
-		JSON.stringify(footer));
-	const typed = await retype('05:30');
-	// Счёт неверных полей меняет эффект Preact — после отрисовки кадра, не сразу после ввода.
-	await page.waitForFunction(() => document.querySelector('.truba-root').shadowRoot.querySelector('.changes [data-act="apply"]')?.disabled === false,
-		{ timeout: 3000 }).catch(() => {});
-	const goodUtc = { typed, apply: await page.evaluate(() => document.querySelector('.truba-root').shadowRoot.querySelector('.changes [data-act="apply"]')?.disabled),
-		uci: await uciUtc() };
-	result(!!utc && /Unapplied changes: 1/.test(badUtc.bar) && /HH:MM/.test(badUtc.err) && badUtc.apply === true && badUtc.uci === utcBefore &&
-		goodUtc.apply === false && goodUtc.uci == '05:30', '«Правила»: время обновления — неверное не пишется и держит «Применить»', JSON.stringify({ badUtc, goodUtc }));
-	await Promise.all([ page.waitForNavigation({ waitUntil: 'networkidle2' }).catch(() => {}), tap('.changes [data-act="reset"]') ]);
+	await setLists(srcOpts);
+	await page.goto(url('rules'), { waitUntil: 'networkidle2' });
+	await settled(page);
+	await tap('.rule-sets [data-act="update"]');
+	const checked = await page.waitForFunction(() => {
+		const t = document.querySelector('.truba-root')?.shadowRoot?.querySelector('.toast')?.innerText || '';
+		return /Rule sets checked|did not start|Error/.test(t) && t;
+	}, { timeout: 30000 }).then((h) => h.jsonValue()).catch(() => '');
+	result(/Rule sets checked: geoip — no changes.*; geosite — no changes/.test(checked), '«Правила»: «Обновить сейчас» — итог проверки сообщением', checked);
+	await setLists(Object.fromEntries(Object.keys(srcOpts).map((k) => [ k, listsSaved[k] ]).filter(([ , v ]) => v != null)));
 
 	// «DNS»: состояние mosdns и кэша — только то, что mosdns отдаёт; поля кэша и порта; Наборов
 	// правил здесь нет. Числа плиток — с разделителями разрядов браузера или «—», не NaN.
@@ -574,6 +542,67 @@ async function waitApply(page) {
 			vals: [ ...r.querySelectorAll('.card.state .stat b') ].map((b) => b.textContent) }; });
 	result(dns.h2 == 'DNS' && dns.tiles == 4 && dns.badge == 'mosdns running' && !dns.rs && dns.fields == 5 &&
 		dns.vals.every((v) => /^(—|\d[\d\s,. ]*%?)$/.test(v)), '«DNS»: состояние, 4 плитки без NaN, поля кэша и порта, без Наборов правил', JSON.stringify(dns));
+	// Неверное значение уже в настройках (правка из консоли): блок с полем раскрыт — иначе «Применить»
+	// недоступна без видимой причины.
+	const uciTtlSaved = (await ubus('uci', 'get', { config: 'truba', section: 'dns', option: 'ttl_max' }).catch(() => ({}))).value;
+	await ubus('uci', 'set', { config: 'truba', section: 'dns', values: { ttl_max: '5' } });
+	await ubus('uci', 'commit', { config: 'truba' });
+	await page.goto(url('dns'), { waitUntil: 'networkidle2' });
+	await settled(page);
+	await sleep(300);
+	const shownBad = await page.evaluate(() => {
+		const i = document.querySelector('.truba-root').shadowRoot.querySelector('input[data-opt="truba.dns.ttl_max"]');
+		return { invalid: i?.getAttribute('aria-invalid'), open: !!i?.closest('details')?.open };
+	});
+	result(shownBad.invalid == 'true' && shownBad.open, '«DNS»: неверное значение из настроек — блок с полем раскрыт', JSON.stringify(shownBad));
+	t0 = await time();
+	await ubus('uci', 'set', { config: 'truba', section: 'dns', values: { ttl_max: uciTtlSaved ?? '300' } });
+	await ubus('uci', 'commit', { config: 'truba' });
+	await applied(t0, async () => true);
+
+	// Поле по схеме: неверное — ошибка у поля, в UCI не пишется, «Применить» недоступна; верное снимает запрет.
+	await page.goto(url('dns'), { waitUntil: 'networkidle2' });
+	await settled(page);
+	await page.evaluate(() => document.querySelector('.truba-root').shadowRoot.querySelectorAll('.dns-set details.fold').forEach((d) => { d.open = true; }));
+	const hijackSaved = (await ubus('uci', 'get', { config: 'truba', section: 'main', option: 'dns_hijack' }).catch(() => ({}))).value;
+	await tap('input[data-opt="truba.main.dns_hijack"]');
+	const ttl = await el('input[data-opt="truba.dns.ttl_max"]');
+	const uciTtl = () => page.evaluate(async () => (await L.require('uci')).get('truba', 'dns', 'ttl_max') ?? null);
+	const ttlBefore = await uciTtl();
+	// Ввод заново — выделением в самом поле, а не тройным кликом: внизу экрана поле может быть под
+	// прилипшей панелью изменений, и клик пришёлся бы в неё.
+	const retype = async (v) => {
+		await ttl?.evaluate((e) => { e.focus(); e.select(); });
+		await page.keyboard.type(v);
+		return ttl?.evaluate((e) => e.value);
+	};
+	await retype('5');
+	const early = await shadowHas(page, '.dns-set [role="alert"]');
+	await page.waitForFunction(() => document.querySelector('.truba-root').shadowRoot.querySelector('.dns-set [role="alert"]'), { timeout: 3000 }).catch(() => {});
+	result(!early, '«DNS»: ошибка поля — после паузы в наборе, а не на каждое нажатие');
+	const badTtl = await page.evaluate(() => {
+		const r = document.querySelector('.truba-root').shadowRoot;
+		return { err: r.querySelector('.dns-set .field.bad [role="alert"]')?.textContent || '', apply: r.querySelector('.changes [data-act="apply"]')?.disabled,
+			bar: r.querySelector('.changes')?.innerText.replace(/\s+/g, ' ') || '' };
+	});
+	badTtl.uci = await uciTtl();
+	await page.evaluate(() => [ ...document.querySelectorAll('.cbi-page-actions *') ]
+		.find((x) => x.childElementCount == 0 && x.textContent.trim() == 'Save & Apply')?.click());
+	await sleep(2000);
+	const footer = { hijack: (await ubus('uci', 'get', { config: 'truba', section: 'main', option: 'dns_hijack' }).catch(() => ({}))).value,
+		toast: await page.evaluate(() => document.querySelector('.truba-root')?.shadowRoot?.querySelector('.toast')?.innerText || '') };
+	result(footer.hijack == hijackSaved && /Fix the highlighted fields/.test(footer.toast), '«DNS»: «Save & Apply» LuCI при неверном поле ничего не применяет',
+		JSON.stringify(footer));
+	const typed = await retype('600');
+	// Счёт неверных полей меняет эффект Preact — после отрисовки кадра, не сразу после ввода.
+	await page.waitForFunction(() => document.querySelector('.truba-root').shadowRoot.querySelector('.changes [data-act="apply"]')?.disabled === false,
+		{ timeout: 3000 }).catch(() => {});
+	const goodTtl = { typed, apply: await page.evaluate(() => document.querySelector('.truba-root').shadowRoot.querySelector('.changes [data-act="apply"]')?.disabled),
+		uci: await uciTtl() };
+	result(!!ttl && /Unapplied changes: 1/.test(badTtl.bar) && /30 to 86400/.test(badTtl.err) && badTtl.apply === true && badTtl.uci === ttlBefore &&
+		goodTtl.apply === false && goodTtl.uci == '600', '«DNS»: неверное значение не пишется и держит «Применить»', JSON.stringify({ badTtl, goodTtl }));
+	await Promise.all([ page.waitForNavigation({ waitUntil: 'networkidle2' }).catch(() => {}), tap('.changes [data-act="reset"]') ]);
+	await settled(page);
 	// Перехват DNS: «Применить» доходит до настроек и службы; затем прежнее значение.
 	const hijack = async () => (await ubus('uci', 'get', { config: 'truba', section: 'main', option: 'dns_hijack' }).catch(() => ({}))).value;
 	for (const want of [ '0', '1' ]) {

@@ -236,14 +236,14 @@ msgstr "Основной источник скачивается через Ту
 msgid "Update automatically"
 msgstr "Обновлять автоматически"
 
-msgid "Update time (UTC)"
-msgstr "Время обновления (UTC)"
-
-msgid "Format: HH:MM"
-msgstr "Формат: ЧЧ:ММ"
-
 msgid "Update started."
 msgstr "Обновление запущено."
+
+msgid "Rule sets checked: %s"
+msgstr "Наборы правил проверены: %s"
+
+msgid "The update did not start."
+msgstr "Обновление не запустилось."
 
 msgid "Update now"
 msgstr "Обновить сейчас"
@@ -449,8 +449,8 @@ msgstr "Добавка к пакетам"
 msgid "Leave empty with random trailers: the module would use the padding instead of them"
 msgstr "Со случайными хвостами оставьте пустым: модуль взял бы добавку вместо них"
 
-msgid "geoip.dat is published every three days around 10–11 UTC, geosite.dat irregularly, usually by 09 UTC; at 12:00 a new release is picked up the same day. Converted to the router time zone for cron."
-msgstr "geoip.dat выходит раз в три дня около 10–11 UTC, geosite.dat — нерегулярно, обычно до 09 UTC; в 12:00 новый выпуск подхватывается в тот же день. Для cron время переводится в часовой пояс Роутера."
+msgid "Checked every hour: until a new release is out, only the checksums are downloaded."
+msgstr "Проверка — каждый час: пока нового выпуска нет, скачиваются только контрольные суммы."
 
 msgid "update in progress"
 msgstr "идёт обновление"
@@ -737,6 +737,9 @@ msgstr "Текущие Наборы правил не читаются — во�
 
 msgid "no result in time"
 msgstr "итог не пришёл вовремя"
+
+msgid "the service did not answer"
+msgstr "служба не ответила"
 
 msgid "the file cannot be read, the current one is kept"
 msgstr "файл не читается, оставлен текущий"

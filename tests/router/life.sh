@@ -16,7 +16,7 @@ check "копия на флеше: правила, конфиг mosdns, опис
 check "копия: без накопленных счётчиков и без IP из DNS" eval '! grep -q "packets [1-9]" /etc/truba/good/truba.nft && ! sed -n "/set gs_direct4/,/}/p" /etc/truba/good/truba.nft | grep -q elements'
 check "копия: mosdns без API, со своими списками доменов" eval '! grep -q "\"api\"" /etc/truba/good/mosdns.json && grep -q /etc/truba/good/geosite/category-ads.txt /etc/truba/good/mosdns.json && [ -s /etc/truba/good/geosite/category-ads.txt ]'
 INODE="$(stat -c %i /etc/truba/good/truba.nft)"
-uci set truba.lists.update_utc='13:00'; uci commit truba
+uci set truba.watchdog.handshake_max='200'; uci commit truba
 reload "правила не меняются"
 check "копия не переписывается, пока правила те же (флеш)" test "$(stat -c %i /etc/truba/good/truba.nft)" = "$INODE"
 
