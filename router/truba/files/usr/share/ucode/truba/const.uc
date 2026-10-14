@@ -19,8 +19,10 @@ export const FW_ZONE = 'truba';
 // (ADR 0014), <зона>_truba_no_ipv6 — правило, закрывающее зоне IPv6-интернет (ADR 0016).
 export const FW_FWD_SUFFIX = '_' + FW_ZONE;
 export const FW_NO6_SUFFIX = FW_FWD_SUFFIX + '_no_ipv6';
-// Тег журнала: под ним пишет служба, по нему «Диагностика» отбирает её строки.
+// Тег журнала: под ним пишет служба, по нему «Журнал» отбирает её строки. У watchdog свой тег: на «Журнале»
+// его строки — отдельный источник; в нём есть LOG_TAG, и logread -e находит их тем же выражением.
 export const LOG_TAG = 'truba';
+export const WATCHDOG_TAG = LOG_TAG + '-watchdog';
 
 // Команда службы и её init-скрипт.
 export const CLI  = '/usr/sbin/truba';
@@ -73,6 +75,23 @@ export const HISTORY = {
 	fine: { step: 5, span: 3600 },
 	min: { step: 60, span: 86400 },
 };
+
+// Трафик по устройствам (ADR 0018): динамические наборы цепочки stats, по одному на Действие и
+// направление. Ключ — IPv4 устройства, у элемента — счётчик. Порядок — как у байтов истории
+// скорости (truba.stats): к устройству и от него — Туннель, Напрямую, Входящие.
+export const DEV_SETS = [ 'dv_tunnel_down', 'dv_tunnel_up', 'dv_direct_down', 'dv_direct_up', 'dv_inbound_down', 'dv_inbound_up' ];
+export const DEV_SET_SIZE = 1024;
+// Срок элемента набора и истории устройства без трафика, с.
+export const DEV_SPAN = 86400;
+// Поминутные средние устройства (мини-график вкладки «Устройства»): шаг и сколько хранится, с.
+export const DEV_HISTORY = { step: 60, span: 3600 };
+export const DEVICES_FILE = RUN_DIR + '/devices.json';
+// Сколько устройств отдаёт devices: самые недавние и все с Политикой. В наборах адресов до DEV_SET_SIZE
+// (в том числе подменённых), а ответ ubus и вкладка столько не вынесут.
+export const DEV_LIST_MAX = 256;
+// «Куда ходит сейчас»: таблица соединений ядра и сколько адресов отдавать.
+export const CONNTRACK = '/proc/net/nf_conntrack';
+export const CONN_TOP = 20;
 
 // Окно последних проверок watchdog для «Обзора»: задержка и потери за ~10 минут при интервале 30 с.
 export const PROBE_WINDOW = 20;

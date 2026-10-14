@@ -42,14 +42,34 @@ T0=$(after_tick)
 for i in 1 2 3; do lan_tcp 1.2.3.4 48081 >/dev/null 2>&1; done
 tun_seen() { [ "$(rf 6 $R "$T0")" -gt 0 ] 2>/dev/null; }
 check "скорость Туннеля от устройств видна в следующей точке" wait_for 15 tun_seen
+# История по устройствам (ADR 0018) — тем же процессом, в том же каталоге в RAM.
+D=/var/run/truba/devices.json
+dev_f() { jsonfilter -i $D -e "@.devices['192.168.1.50'].$1" 2>/dev/null; }
+dev_seen() { [ -n "$(dev_f last)" ]; }
+check "devices.json: устройство с трафиком, в RAM" wait_for 15 dev_seen
+# rpcd devices: устройство из истории — с MAC соседа, зоной его интерфейса и скоростью.
+ubus call truba devices > /tmp/d.json
+dj() { jsonfilter -i /tmp/d.json -e "@.devices[@.ip='192.168.1.50'].$1" 2>/dev/null; }
+LH_MAC="$(ip -n lanhost link show lh0 | awk '/link\/ether/ { print $2 }')"
+check "rpcd devices: зона lan, MAC соседа, источник neigh, скорость есть" \
+	eval '[ "$(dj zone)" = lan ] && [ "$(dj mac)" = "$LH_MAC" ] && [ "$(dj source)" = neigh ] && [ -n "$(dj rate)" ]'
+# Сотни чужих адресов в наборе (подменённые источники, большая mesh-сеть): список ограничен, ответ
+# ubus быстрый — интерфейс адресов без соседа ищется одним вызовом ip, а не процессом на адрес.
+nft add element inet truba dv_tunnel_up "{ $(seq 0 299 | awk '{ printf "%s10.201.%d.%d counter packets 1 bytes 100", (NR > 1 ? "," : ""), int($1 / 256), $1 % 256 }') }"
+many_seen() { [ "$(grep -o '"10\.201\.[0-9]*\.[0-9]*": {"seen' $D | wc -l)" -ge 300 ]; }
+wait_for 15 many_seen
+T0=$(date +%s); ubus -t 20 call truba devices > /tmp/d2.json; T1=$(date +%s)
+check "300 чужих адресов: devices отвечает не дольше 3 с, в списке не больше 256" \
+	eval '[ $((T1 - T0)) -le 3 ] && [ "$(jsonfilter -i /tmp/d2.json -e "@.devices[*].ip" | wc -l)" -le 256 ]'
 ubus call truba rates '{"span":600}' > /tmp/r.json
 check "rpcd rates: время Роутера, точки за 10 минут" eval '[ "$(jsonfilter -i /tmp/r.json -e "@.now")" -ge "$T0" ] && [ "$(rf 4 /tmp/r.json)" -ge 2 ]'
 
 section "перезапуск процесса продолжает историю"
-F0="$(rf 2 $R)"; L0="$(rf 3 $R)"
+F0="$(rf 2 $R)"; L0="$(rf 3 $R)"; S0="$(dev_f seen)"
 kill "$(pgrep -f 'truba stat[s]')"   # procd перезапустит через 5 с
 newer() { [ "$(rf 3 $R)" -gt "$L0" ] 2>/dev/null; }
 check "процесс перезапущен procd, история та же, без разрыва" eval 'wait_for 20 newer && [ "$(rf 2 $R)" = "$F0" ] && [ "$(rf 7 $R "$L0")" = 0 ]'
+check "история устройства продолжена после перезапуска" eval '[ -n "$S0" ] && [ "$(dev_f seen)" = "$S0" ]'
 
 section "счётчики начаты заново — разрыв, а не скачок"
 T1=$(after_tick)

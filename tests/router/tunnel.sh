@@ -98,4 +98,32 @@ kill "$(pgrep -f 'truba watchdo[g]')"   # procd перезапустит чер�
 fresh() { [ "$(health '@.since')" != 1000 ]; }
 check "устаревшая запись: «в порядке с» заново, окно проверок не взято" eval 'wait_for 20 fresh && [ "$(health "@.probes[*]" | wc -l)" -le 1 ]'
 
+section "журнал: watchdog и интерфейс Туннеля"
+# Источники «Журнала» (spec §5.7) различаются по тегу строки: события watchdog — со своим тегом, строки
+# netifd об интерфейсе Туннеля — тоже в truba.log. Ping в никуда (Труба его не пересылает) — «не отвечает»,
+# а при одной неудаче watchdog сразу перезапускает интерфейс.
+uci set truba.watchdog.probe='192.0.2.200'; uci set truba.watchdog.fails='1'; uci commit truba
+reload "ping без ответа"
+tlog() { ubus call truba log '{"lines":2000}' | jsonfilter -e '@.log'; }
+wd_down() { [ "$(health '@.state')" = down ] && tlog | grep -q 'truba-watchdog: Туннель не отвечает'; }
+check "Туннель не отвечает — строка с тегом truba-watchdog" wait_for 40 wd_down
+netifd_lines() { tlog | grep -q "netifd: Interface 'awg0'"; }
+check "строки netifd об интерфейсе Туннеля — в журнале Трубы" wait_for 30 netifd_lines
+uci delete truba.watchdog.probe; uci delete truba.watchdog.fails; uci commit truba
+reload "ping по умолчанию"
+wd_up() { [ "$(health '@.state')" = healthy ] && tlog | grep -q 'truba-watchdog: Туннель восстановлен'; }
+check "Туннель снова отвечает — строка «восстановлен»" wait_for 40 wd_up
+
+section "status: сторож службы"
+# «Состояние» на «Туннеле» и «Обзоре» — по работающему сторожу, а не по переключателю в браузере: в UCI сессии
+# бывают и неприменённые изменения.
+wd_is() { [ "$(truba status | jsonfilter -e '@.watchdog')" = "$1" ]; }
+check "сторож работает — status.watchdog true" wd_is true
+uci set truba.watchdog.enabled='0'; uci commit truba
+reload "сторож выключен"
+check "сторож выключен — status.watchdog false" wait_for 15 wd_is false
+uci set truba.watchdog.enabled='1'; uci commit truba
+reload "сторож снова включён"
+check "сторож снова работает" wait_for 15 wd_is true
+
 finish

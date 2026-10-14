@@ -23,7 +23,7 @@ check "rc.local: переустановка после sysupgrade — одной
 section "применение (Маршрутизация вкл)"
 check "без ошибки" no_error
 check "ubus truba.schema через rpcd: умолчание iface" eval '[ "$(ubus call truba schema | jsonfilter -e @.sections.main.iface.def)" = awg0 ]'
-check "подсети geoip:ru — в gi_direct4, их число — для «DNS и списки»" eval 'in_set gi_direct4 "[[:space:]{,]5\.[0-9]" && [ "$(truba sets | jsonfilter -e "@.geoip.direct")" -gt 0 ]'
+check "подсети geoip:ru — в gi_direct4, их число — для «Правил»" eval 'in_set gi_direct4 "[[:space:]{,]5\.[0-9]" && [ "$(truba sets | jsonfilter -e "@.geoip.direct")" -gt 0 ]'
 check "bypass4: IP Трубы и подсеть Туннеля" eval 'nft get element inet truba bypass4 "{ 198.51.100.2 }" && in_set bypass4 10.77.77.0/30'
 check "lan_if = br-lan" in_set lan_if br-lan
 check "ip rule: метка Туннеля и oif awg0 → 77" eval 'ip rule show | grep -q "fwmark 0x1000000/0xf000000 lookup 77" && ip rule show | grep -q "oif awg0 lookup 77"'
@@ -191,7 +191,7 @@ done
 check "свои сокеты службы (0x80000) — мимо Туннеля" eval 'ip route get 203.0.113.77 mark 0x80000 | grep -q "dev inet0"'
 
 section "mesh-VPN — зона Маршрутизации (ADR 0014)"
-# Зона mesh выбрана в «Маршрутизация → Зоны»: перенаправление mesh → truba заводит сама Труба, узлы
+# Зона mesh выбрана в «Правила → Зоны»: перенаправление mesh → truba заводит сама Труба, узлы
 # сети идут по Категориям, как домашняя сеть. Адрес ms0 — /32: для dnsmasq с --local-service узлы
 # чужие, и он им не отвечает; перехват Трубы подменяет им источник на адрес Роутера.
 mesh_tunnel() { ip netns exec meshhost ucode /repo/tests/lib/tcp_probe.uc client 100.64.0.2 1.2.3.5 48081; }
@@ -339,19 +339,45 @@ nft delete table inet t_dscp; ip netns exec vps nft delete table inet t_dscp
 section "учёт трафика устройств"
 probe >/dev/null 2>&1
 check "входящие: посчитаны в обе стороны" eval 'gt0 c_inbound_down && gt0 c_inbound_up'
+check "входящие: устройство — в dv_inbound_down и dv_inbound_up" eval 'in_set dv_inbound_down 192.168.1.50 && in_set dv_inbound_up 192.168.1.50'
 IN_DOWN="$(bytes c_inbound_down)"
 # 1.2.3.4 нет ни в одной Категории: по Режиму «Всё в туннель» — через Туннель на сервер в netns vps.
 ip -n vps addr add 1.2.3.4/32 dev lo
 check "устройство → Туннель: ответ пришёл, посчитан в обе стороны" eval 'lan_tcp 1.2.3.4 48081 && gt0 c_tunnel_up && gt0 c_tunnel_down'
+check "устройство — в dv_tunnel_up и dv_tunnel_down" eval 'in_set dv_tunnel_up 192.168.1.50 && in_set dv_tunnel_down 192.168.1.50'
+# «Куда ходит сейчас»: соединение только что закрыто, conntrack держит его ещё пару минут. Таблицу служба
+# читает из /proc/net/nf_conntrack; у ядра без него (раннеры CI: CONFIG_NF_CONNTRACK_PROCFS выключен, а на
+# Роутере он есть) ответ — ошибка no_conntrack, а не пустой список.
+conns() { ubus call truba connections '{"ip":"192.168.1.50"}'; }
+cj() { conns | jsonfilter -e "@.addrs[@.addr='1.2.3.4'].$1" 2>/dev/null; }
+F0=$FAILS
+if [ -e /proc/net/nf_conntrack ]; then
+	check "connections: 1.2.3.4 — Туннель, по Режиму" eval '[ "$(cj action)" = tunnel ] && [ "$(cj reason)" = mode ]'
+else
+	check "connections: ядро без /proc/net/nf_conntrack — ошибка no_conntrack" eval '[ "$(conns | jsonfilter -e @.error)" = no_conntrack ]'
+fi
+[ "$FAILS" = "$F0" ] || { conns | head -c 600; echo; }
 # Ответ из Туннеля на исходящее — «Туннель», хотя ct mark он переписывает на «входящее».
 check "исходящее через Туннель не считается входящим" test "$(bytes c_inbound_down)" = "$IN_DOWN"
 # «Интернет напрямую» стенда — Труба по внешнему адресу через ul0; на время — в зоне wan.
 uci add_list firewall.@zone[1].device='ul0'; uci commit firewall; /etc/init.d/firewall reload >/dev/null 2>&1
 TUN_UP="$(bytes c_tunnel_up)"
 check "устройство → напрямую: ответ пришёл, посчитан в обе стороны" eval 'lan_tcp 198.51.100.2 48081 && gt0 c_direct_up && gt0 c_direct_down'
+check "устройство — в dv_direct_up и dv_direct_down" eval 'in_set dv_direct_up 192.168.1.50 && in_set dv_direct_down 192.168.1.50'
 check "напрямую не считается Туннелем" test "$(bytes c_tunnel_up)" = "$TUN_UP"
 uci del_list firewall.@zone[1].device='ul0'; uci commit firewall; /etc/init.d/firewall reload >/dev/null 2>&1
 check "status: трафик Туннеля — из счётчика" test "$(truba status | jsonfilter -e '@.traffic.tunnel.up')" = "$(bytes c_tunnel_up)"
+
+section "набор устройств полон"
+# 1024 чужих адреса: новый элемент в набор не помещается, и update прерывает правило (ADR 0018).
+# Счётчик Действия стоит раньше update, а правила взаимоисключающие: учёт не врёт.
+nft flush set inet truba dv_tunnel_up
+nft add element inet truba dv_tunnel_up "{ $(seq 0 1023 | awk '{ printf "%s10.200.%d.%d", (NR > 1 ? "," : ""), int($1 / 256), $1 % 256 }') }"
+TU="$(bytes c_tunnel_up)"; IU="$(bytes c_inbound_up)"
+lan_tcp 1.2.3.4 48081 >/dev/null 2>&1
+check "набор полон: устройства в нём нет, Туннель посчитан, входящие — нет" \
+	eval '! in_set dv_tunnel_up 192.168.1.50 && [ "$(bytes c_tunnel_up)" -gt "$TU" ] && [ "$(bytes c_inbound_up)" = "$IU" ]'
+nft flush set inet truba dv_tunnel_up
 SINCE="$(applied '@.counters_since')"; TUN_UP="$(bytes c_tunnel_up)"
 
 section "Политика устройства"
@@ -364,6 +390,9 @@ uci -q batch >/dev/null <<-'EOF'
 EOF
 reload "Политика устройства"
 check "MAC — в dev_tunnel" in_set dev_tunnel aa:bb:cc:dd:ee:ff
+dp() { ubus call truba devices | jsonfilter -e "@.devices[@.mac='aa:bb:cc:dd:ee:ff'].$1" 2>/dev/null; }
+check "rpcd devices: устройство с Политикой не в сети — без адреса, из настроек" \
+	eval '[ "$(dp policy)" = tunnel ] && [ "$(dp source)" = config ] && [ -z "$(dp ip)" ]'
 check "счётчики и отсчёт пережили применение" eval '[ "$(bytes c_tunnel_up)" -ge "$TUN_UP" ] && [ "$(applied "@.counters_since")" = "$SINCE" ]'
 offload() { uci set firewall.@defaults[0].flow_offloading="$1"; uci commit firewall; truba status | jsonfilter -e '@.neighbours.offload'; }
 check "status: программное ускорение замечено" eval '[ "$(offload 0)" = false ] && [ "$(offload 1)" = true ]'

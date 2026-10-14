@@ -108,22 +108,38 @@ function counter_decls(names, carry) {
 	return s + '\n';
 }
 
+// Трафик по устройствам (ADR 0018): элемент набора — адрес устройства со своим счётчиком. Элемент
+// появляется с первым пакетом и живёт сутки после последнего; при перезагрузке таблицы — с нуля.
+function dev_sets() {
+	let s = '';
+	for (let n in C.DEV_SETS)
+		s += sprintf('\tset %s {\n\t\ttype ipv4_addr;\n\t\tflags dynamic,timeout;\n\t\ttimeout %ds;\n\t\tsize %d;\n\t\tcounter;\n\t}\n',
+			n, C.DEV_SPAN, C.DEV_SET_SIZE);
+	return s;
+}
+
 // Учёт трафика устройств из зон Трубы. Хук forward видит только транзитные пакеты,
 // уже пропущенные fw4 (приоритет после него), — свой трафик Роутера сюда не попадает.
 // Направление — по интерфейсам и ct direction, а не по ct mark: ответы из Туннеля
 // переписывают её на «входящее». Down — к устройствам, up — от них. Пакеты соединений,
 // ускоренных flowtable (программное ускорение), идут мимо этой цепочки.
+// Каждое правило — сначала счётчик Действия, затем адрес устройства в его набор (ключ — адрес
+// со стороны Роутера: источник от устройства, назначение к нему). Когда набор полон, update нового
+// адреса прерывает правило: return не срабатывает, и пакет идёт к следующим правилам. Поэтому
+// счётчик стоит раньше update, а правила не пересекаются (ct direction, оба интерфейса): пакет из
+// прерванного правила больше ни с чем не совпадёт, и счётчики Действий не врут.
 function stats_chain(iface) {
+	let rule = (cond, cnt, key) => sprintf('\t\t%s counter name c_%s update @dv_%s { ip %s } return\n', cond, cnt, cnt, key);
 	let s = '\n\tchain stats {\n';
 	s += '\t\ttype filter hook forward priority filter + 10; policy accept;\n';
 	s += '\t\tmeta nfproto != ipv4 return\n';
 	s += '\t\tiifname @lan_if oifname @lan_if return\n';
-	s += '\t\tiifname @lan_if oifname ' + iface + ' ct direction original counter name c_tunnel_up return\n';
-	s += '\t\tiifname ' + iface + ' oifname @lan_if ct direction reply counter name c_tunnel_down return\n';
-	s += '\t\tiifname ' + iface + ' oifname @lan_if counter name c_inbound_down return\n';
-	s += '\t\tiifname @lan_if oifname ' + iface + ' counter name c_inbound_up return\n';
-	s += '\t\tiifname @lan_if ct direction original counter name c_direct_up return\n';
-	s += '\t\toifname @lan_if ct direction reply counter name c_direct_down return\n';
+	s += rule('iifname @lan_if oifname ' + iface + ' ct direction original', 'tunnel_up', 'saddr');
+	s += rule('iifname ' + iface + ' oifname @lan_if ct direction reply', 'tunnel_down', 'daddr');
+	s += rule('iifname ' + iface + ' oifname @lan_if ct direction original', 'inbound_down', 'daddr');
+	s += rule('iifname @lan_if oifname ' + iface + ' ct direction reply', 'inbound_up', 'saddr');
+	s += rule('iifname @lan_if oifname != ' + iface + ' ct direction original', 'direct_up', 'saddr');
+	s += rule('iifname != ' + iface + ' oifname @lan_if ct direction reply', 'direct_down', 'daddr');
 	s += '\t}\n';
 	return s;
 }
@@ -208,6 +224,7 @@ export function nft_full(cfg, plan, ctx) {
 	s += set_decl('gs_direct4', 'ipv4_addr', gst ? 'timeout' : null, dns_elems(ctx.gs_direct4, gst), gst);
 	s += set_decl('dev_tunnel', 'ether_addr', null, ctx.dev_tunnel);
 	s += set_decl('dev_direct', 'ether_addr', null, ctx.dev_direct);
+	s += dev_sets();
 	s += counter_decls([ ...CONN_COUNTERS, ...TRAFFIC_COUNTERS ], ctx.counters);
 
 	s += '\tchain prerouting {\n';
@@ -262,6 +279,7 @@ export function nft_minimal(cfg, ctx) {
 	let s = 'table inet ' + C.NFT_TABLE + '\ndelete table inet ' + C.NFT_TABLE + '\n';
 	s += 'table inet ' + C.NFT_TABLE + ' {\n';
 	s += set_decl('lan_if', 'ifname', null, map(ctx.lan_if, q));
+	s += dev_sets();
 	s += counter_decls([ 'c_inbound', ...TRAFFIC_COUNTERS ], ctx.counters);
 	s += '\tchain prerouting {\n';
 	s += PREROUTING_HOOK;

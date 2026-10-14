@@ -16,7 +16,8 @@ section "стенд"
 # Зависимости Трубы уже в образе (tests/run.sh, TEST_PKGS): под procd сети нет.
 
 # Файлы пакета. С каталога Windows они приходят с правами 777, а такие плагины rpcd не загружает.
-cp -a /repo/router/truba/files/. /
+# Без -a: в CI владелец файлов репозитория — пользователь раннера, а в пакете всё принадлежит root.
+cp -R /repo/router/truba/files/. /
 chmod 0755 /usr/sbin/truba /etc/init.d/truba /etc/truba/reinstall.sh /usr/share/truba/uninstall.sh /etc/uci-defaults/90-truba
 chmod 0644 /usr/share/rpcd/ucode/truba-api.uc /usr/share/ucode/truba/*.uc
 # «awg show» выводит то же, что «wg show»: без обёртки watchdog не видит handshake.
@@ -76,6 +77,8 @@ uci -q batch <<-'EOF'
 	commit network
 EOF
 section "стенд: сеть"
+# /tmp/booted ставит rc.local, а netifd procd запускает в фоне: объекта network в ubus может ещё не быть.
+ubus -t 30 wait_for network
 /etc/init.d/network reload
 iface_up() { [ "$(ubus call network.interface."$1" status 2>/dev/null | jsonfilter -e '@.up')" = true ]; }
 if ! { wait_for 20 iface_up lan && wait_for 20 iface_up awg0; }; then fail "стенд: lan и awg0 не поднялись"; finish; fi

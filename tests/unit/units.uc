@@ -17,6 +17,8 @@ import * as F from 'truba.conf';
 import * as N from 'truba.net';
 import * as K from 'truba.check';
 import * as S from 'truba.stats';
+import * as DV from 'truba.devstats';
+import * as DVC from 'truba.devices';
 
 const check = T.check, same = T.same;
 const GOLDEN = ARGV[0] ?? '/repo/tests/golden';
@@ -142,13 +144,32 @@ check('без перехвата DNS: нет ни перехвата, ни по�
 nft_ok('таблицу без перехвата DNS', nohijack);
 
 let notimeout = R.nft_full(mk({ set_timeout: 0 }), plan, ctx_of());
+// Только наборы gs_*: у наборов устройств dv_* свой срок (ADR 0018).
+let gs_blocks = join('', map(match(notimeout, /\tset gs_[a-z0-9]+ \{[^}]*\}/g) ?? [], m => m[0]));
 check('без срока: в наборах IP из DNS нет timeout и expires',
-	!match(notimeout, /timeout|expires/) && index(notimeout, '198.51.100.1') >= 0);
+	length(gs_blocks) && !match(gs_blocks, /timeout|expires/) && index(gs_blocks, '198.51.100.1') >= 0);
 nft_ok('таблицу без срока', notimeout);
 
 let minimal = R.nft_minimal(mk(), ctx_of());
 golden('truba-minimal.nft', minimal);
 nft_ok('минимальную таблицу', minimal);
+
+// Трафик по устройствам (ADR 0018): наборы dv_* — в обеих таблицах, цепочка stats есть в обеих.
+let dv_decl = (n) => sprintf('\tset %s {\n\t\ttype ipv4_addr;\n\t\tflags dynamic,timeout;\n\t\ttimeout 86400s;\n\t\tsize 1024;\n\t\tcounter;\n\t}\n', n);
+check('stats: шесть наборов dv_* в полной и минимальной таблице — dynamic, timeout, size, counter',
+	length(C.DEV_SETS) == 6 && length(filter(C.DEV_SETS, n => index(full, dv_decl(n)) >= 0 && index(minimal, dv_decl(n)) >= 0)) == 6);
+// Счётчик — раньше update: при полном наборе update прерывает правило, и без этого порядка пакет
+// не попал бы в счётчик своего Действия и дошёл бы до следующих правил.
+// Тело цепочки — до закрывающей строки: в правилах есть «{ ip saddr }».
+let stats_body = substr(full, index(full, 'chain stats {'));
+stats_body = substr(stats_body, 0, index(stats_body, '\n\t}\n'));
+let stats_rules = filter(split(stats_body, '\n'), l => index(l, 'counter name') >= 0);
+let stats_bad = filter(stats_rules, (l) => {
+	let m = match(l, /counter name c_([a-z]+)_(up|down) update @dv_([a-z]+)_(up|down) \{ ip (saddr|daddr) \} return$/);
+	return !m || m[1] != m[3] || m[2] != m[4] || m[5] != ((m[2] == 'up') ? 'saddr' : 'daddr');
+});
+check('stats: в каждом правиле учёта счётчик, затем update своего набора, ключ — адрес устройства',
+	length(stats_rules) == 6 && !length(stats_bad), join(' | ', stats_bad));
 
 golden('mosdns.json', sprintf('%.J\n', R.mosdns(mk(), plan, [ 'ntp.example' ])));
 let noapi = R.mosdns(mk({ api: null, lazy_cache_ttl: 0 }), sel, []);
@@ -459,6 +480,31 @@ let x = K.check('b.a.example.com');
 check('домен: видны все совпавшие Категории', same(sort(map(x.geosite, h => h.tag)), [ 'znarrow', 'zwide' ]), sprintf('%J', x.geosite));
 x = K.check('5.6.7.8');
 check('IP: Категория geoip из распакованного файла', x.action == 'direct' && x.reason == 'geoip' && same(x.ips[0].geoip, [ 'ru' ]), sprintf('%J', x.ips));
+// «Куда ходит сейчас» (connections): только Категории geoip с Действием — у private его нет.
+let iv = K.ip_verdicts([ '5.6.7.8', '192.168.5.5' ], null);
+check('решения для соединений: geoip — только Категории с Действием',
+	same(map(iv ?? [], v => v.geoip), [ [ 'ru' ], [] ]) && iv[0].action == 'direct' && iv[0].reason == 'geoip' &&
+	same(K.check('192.168.5.5').ips[0].geoip, [ 'private' ]), sprintf('%J', iv));
+// Категории geoip адресов: у ru на NC-1812 35 тысяч подсетей, а «Куда ходит сейчас» спрашивает до 20 адресов
+// раз в 5 с — подсеть разбирается, только если в её первом октете есть адрес (было 3,7 с на Роутере).
+// Сеть шире /8 захватывает и другие первые октеты.
+let bigv4 = [];
+for (let i = 0; i < 35000; i++)
+	push(bigv4, sprintf('%d.%d.%d.0/24', 1 + (i % 220), (i / 220) & 255, (i / 56320) & 255));
+push(bigv4, '224.0.0.0/4');
+mkdir(C.DATA_DIR + '/geoip');
+writefile(C.DATA_DIR + '/geoip/zbig.v4', join('\n', bigv4) + '\n');
+let ipn = (s) => { let a = iptoarr(s); return (a[0] << 24) | (a[1] << 16) | (a[2] << 8) | a[3]; };
+// 7.0.0.9 — в 7.0.0.0/24; 231.1.2.3 — только в 224.0.0.0/4; 7.200.0.1 — октет есть, подсети нет; 240…249 — мимо.
+let gaddrs = [ '7.0.0.9', '231.1.2.3', '7.200.0.1' ];
+for (let k = 0; k < 17; k++)
+	push(gaddrs, sprintf('%d.1.1.1', 240 + (k % 10)));
+let gt0 = clock(true);
+let gh = K.geoip_hits?.([ { set: 'geoip', tag: 'zbig' } ], map(gaddrs, ipn));
+let gt1 = clock(true), gms = (gt1[0] - gt0[0]) * 1000 + (gt1[1] - gt0[1]) / 1e6;
+check('Категории geoip: 20 адресов × 35 тысяч подсетей — верно и быстрее 150 мс',
+	gh != null && same(gh[0], [ 'zbig' ]) && same(gh[1], [ 'zbig' ]) && same(gh[2], []) &&
+	length(filter(slice(gh, 3), (h) => length(h))) == 0 && gms < 150, sprintf('%d мс, %J', gms, slice(gh ?? [], 0, 4)));
 
 // ---- История скорости (truba stats) без процесса и файлов ----
 
@@ -531,6 +577,193 @@ check('часы назад: точки по возрастанию, минуты
 	same(map(back.points, (x) => x[0]), [ 2000, 2005, 2006 ]) && same(map(back.minutes, (x) => x[0]), [ 1980 ]),
 	sprintf('%J %J', back.points, back.minutes));
 
+// ---- История по устройствам (truba.devstats) без процесса и файлов ----
+
+const A = '192.168.1.50', B = '192.168.1.60', z6 = [ 0, 0, 0, 0, 0, 0 ];
+let h = { last: null, devices: {} };
+DV.add(h, DV.snapshot({ [A]: z6 }, 7, 0, 7195));
+check('устройства: первый замер — скорости нет', h.devices[A]?.rate == null && h.devices[A]?.seen == 7195);
+DV.add(h, DV.snapshot({ [A]: [ 5000, 500, 1000, 100, 0, 0 ], [B]: [ 2500, 0, 0, 0, 0, 0 ] }, 7, 5000, 7200));
+check('устройства: скорость по разнице, байт/с', same(h.devices[A].rate, [ 1000, 100, 200, 20, 0, 0 ]), sprintf('%J', h.devices[A].rate));
+check('устройства: новый элемент — весь его счётчик за шаг', same(h.devices[B]?.rate, [ 500, 0, 0, 0, 0, 0 ]));
+check('устройства: часовая сумма и время трафика',
+	same(h.devices[A].hours, [ [ 7200, 5000, 500, 1000, 100, 0, 0 ] ]) && h.devices[A].last == 7200, sprintf('%J', h.devices[A].hours));
+DV.add(h, DV.snapshot({ [A]: [ 5000, 500, 1000, 100, 0, 0 ] }, 7, 10000, 7205));
+check('устройства: минута (7140, 7200] закрыта средним за покрытые секунды',
+	same(h.devices[A].minutes, [ [ 7200, 1000, 100, 200, 20 ] ]), sprintf('%J', h.devices[A].minutes));
+check('устройства: без трафика — скорость 0, время трафика прежнее', same(h.devices[A].rate, z6) && h.devices[A].last == 7200);
+check('устройства: B — минута с трафиком записана', same(h.devices[B].minutes, [ [ 7200, 500, 0, 0, 0 ] ]), sprintf('%J', h.devices[B].minutes));
+check('устройства: нет в наборах — скорости нет, устройство осталось', h.devices[B] != null && h.devices[B].rate == null);
+DV.add(h, DV.snapshot({ [A]: [ 10, 0, 0, 0, 0, 0 ] }, 8, 15000, 7210));
+check('устройства: новое поколение таблицы — пропуск шага, суммы не уменьшились',
+	h.devices[A].rate == null && same(h.devices[A].hours, [ [ 7200, 5000, 500, 1000, 100, 0, 0 ] ]), sprintf('%J', h.devices[A]));
+// Минута без трафика не пишется: у сотен адресов без трафика нет 60 точек нулей в файле и в ответе ubus.
+DV.add(h, DV.snapshot({ [A]: [ 10, 0, 0, 0, 0, 0 ] }, 8, 20000, 7265));
+check('устройства: минута без трафика не пишется', same(map(h.devices[A].minutes, x => x[0]), [ 7200 ]), sprintf('%J', h.devices[A].minutes));
+
+let dv2 = { last: null, devices: {} };
+DV.add(dv2, DV.snapshot({ [A]: [ 100, 100, 0, 0, 0, 0 ] }, 1, 0, 1000));
+DV.add(dv2, DV.snapshot({ [A]: [ 50, 200, 0, 0, 0, 0 ] }, 1, 5000, 1005));
+check('устройства: счётчик уменьшился — null только у него', same(dv2.devices[A].rate, [ null, 20, 0, 0, 0, 0 ]), sprintf('%J', dv2.devices[A].rate));
+DV.add(dv2, DV.snapshot({ [A]: [ 60, 300, 0, 0, 0, 0 ] }, 1, 80000, 1080));
+check('устройства: перерыв дольше минуты — скорости нет', dv2.devices[A].rate == null);
+
+let dv3 = { last: null, devices: {
+	[A]: { seen: 0, last: 1000, rate: null, acc: null,
+	       minutes: [ [ 96000, 1, 1, 1, 1 ], [ 99960, 2, 2, 2, 2 ] ], hours: [ [ 10800, 1, 1, 1, 1, 1, 1 ], [ 97200, 2, 2, 2, 2, 2, 2 ] ] },
+	[B]: { seen: 0, last: 1000, rate: null, acc: null, minutes: [], hours: [] },
+	'192.168.1.70': { seen: 50000, last: null, rate: null, acc: null, minutes: [], hours: [] },
+} };
+DV.add(dv3, DV.snapshot({ [A]: z6 }, 1, 0, 100000));
+check('устройства: минуты старше часа и часы старше суток отброшены',
+	same(dv3.devices[A].minutes, [ [ 99960, 2, 2, 2, 2 ] ]) && same(dv3.devices[A].hours, [ [ 97200, 2, 2, 2, 2, 2, 2 ] ]), sprintf('%J', dv3.devices[A]));
+check('устройства: без трафика дольше суток и не в наборах — удалено; в наборах или появилось недавно — осталось',
+	dv3.devices[B] == null && dv3.devices[A] != null && dv3.devices['192.168.1.70'] != null);
+check('устройства: day — сумма часовых', same(DV.day({ hours: [ [ 0, 1, 2, 3, 4, 5, 6 ], [ 3600, 10, 20, 30, 40, 50, 60 ] ] }), [ 11, 22, 33, 44, 55, 66 ]));
+
+let dvback = { last: { t: 5000, m: 0, gen: 1, v: { [A]: z6 } }, devices: {
+	[A]: { seen: 0, last: 4990, rate: null, acc: null, minutes: [ [ 4800, 1, 1, 1, 1 ], [ 4980, 1, 1, 1, 1 ] ], hours: [ [ 3600, 1, 1, 1, 1, 1, 1 ] ] },
+} };
+DV.add(dvback, DV.snapshot({ [A]: z6 }, 1, 5000, 4900));
+check('устройства: часы ушли назад — точки не раньше нового времени убраны', same(map(dvback.devices[A].minutes, x => x[0]), [ 4800 ]),
+	sprintf("%J", dvback.devices[A].minutes));
+
+// ---- Список устройств (truba.devices) без ubus и ядра ----
+
+config(`
+config device
+	option name 'off'
+	option mac 'AA:BB:CC:DD:EE:01'
+	option policy 'tunnel'
+	option enabled '0'
+
+config device
+	option mac 'aa:bb:cc:dd:ee:02'
+
+config device
+	option mac 'zz'
+	option policy 'direct'
+
+config device
+	option mac 'aa:bb:cc:dd:ee:03'
+	option policy 'weird'
+`);
+let dbad = [];
+let dsecs = F.device_sections(dbad);
+check('секции устройств: выключенная — «по правилам», без Политики — умолчание схемы, незнакомая — «по правилам», MAC в нижнем регистре',
+	same(dsecs, [ { name: 'off', mac: 'aa:bb:cc:dd:ee:01', policy: 'rules' }, { name: '', mac: 'aa:bb:cc:dd:ee:02', policy: 'tunnel' },
+	              { name: '', mac: 'aa:bb:cc:dd:ee:03', policy: 'rules' } ]), sprintf('%J', dsecs));
+check('секции устройств: неверный MAC с Политикой — пропущен и перечислен', same(map(dbad, x => x.key), [ 'device.mac' ]));
+check('настройки: в наборы Политик — только включённые «туннель» и «напрямую»',
+	same(F.load().devices, [ { name: '', mac: 'aa:bb:cc:dd:ee:02', policy: 'tunnel' } ]), sprintf('%J', F.load().devices));
+// Две секции с одним MAC (прежняя таблица сохраняла заглавными и не проверяла повторы): действует первая —
+// и в наборах ядра, и в списке, и на вкладке. Иначе «напрямую» второй побеждала бы в classify.
+config("config device\n\toption mac 'AA:BB:CC:DD:EE:05'\n\toption policy 'direct'\n\nconfig device\n\toption mac 'aa:bb:cc:dd:ee:05'\n\toption policy 'tunnel'\n");
+check('секции устройств: две с одним MAC — действует первая', same(F.device_sections(), [ { name: '', mac: 'aa:bb:cc:dd:ee:05', policy: 'direct' } ]),
+	sprintf('%J', F.device_sections()));
+// enabled — флаг схемы, как у интерфейса: «off», «no», «false» выключают, а не только «0».
+config("config device\n\toption mac 'aa:bb:cc:dd:ee:06'\n\toption policy 'direct'\n\toption enabled 'off'\n\nconfig device\n\toption mac 'aa:bb:cc:dd:ee:07'\n\toption policy 'direct'\n\toption enabled 'yes'\n");
+check('секции устройств: enabled — флаг схемы', same(map(F.device_sections(), d => d.policy), [ 'rules', 'direct' ]), sprintf('%J', F.device_sections()));
+
+let leases = DVC.parse_leases('1700000000 3C:7C:3F:00:00:9A 192.168.1.20 pc-living *\n1700000000 02:00:00:00:00:21 192.168.1.21 * 01:02\nмусор\n');
+check('аренды: MAC в нижнем регистре, «*» — без имени',
+	same(leases, [ { ip: '192.168.1.20', mac: '3c:7c:3f:00:00:9a', name: 'pc-living' }, { ip: '192.168.1.21', mac: '02:00:00:00:00:21', name: null } ]),
+	sprintf('%J', leases));
+let dhist = { devices: {
+	'192.168.1.20': { seen: 1, last: 900, rate: [ 1, 2, 3, 4, 5, 6 ], minutes: [ [ 960, 1, 1, 1, 1 ] ], hours: [ [ 0, 10, 0, 0, 0, 0, 0 ] ] },
+	'192.168.1.21': { seen: 1, last: 900, rate: null, minutes: [], hours: [] },
+	'100.64.0.9':   { seen: 1, last: 900, rate: null, minutes: [], hours: [] },
+} };
+let dneigh = [ { ip: '192.168.1.30', mac: 'aa:bb:cc:dd:ee:30', dev: 'br-lan' }, { ip: '192.168.1.20', mac: '3c:7c:3f:00:00:9a', dev: 'br-lan' } ];
+let dsec = [ { name: 'TV', mac: '02:00:00:00:00:21', policy: 'rules' }, { name: 'console', mac: 'aa:bb:cc:dd:ee:30', policy: 'tunnel' },
+             { name: 'away', mac: 'aa:bb:cc:dd:ee:99', policy: 'direct' }, { name: 'old', mac: 'aa:bb:cc:dd:ee:98', policy: 'rules' } ];
+let zone_of = (ip, dev) => (dev == 'br-lan' || match(ip, /^192\.168\.1\./)) ? 'lan' : (match(ip, /^100\.64\./) ? 'mesh' : null);
+let dlist = DVC.merge(dhist, leases, dneigh, dsec, zone_of);
+let dby = (k, v) => filter(dlist, d => d[k] == v)[0];
+check('устройства: каждое один раз — из истории, с Политикой по соседу, с Политикой без адреса', length(dlist) == 5,
+	join(' ', map(dlist, d => d.ip ?? d.mac)));
+let d20 = dby('ip', '192.168.1.20');
+check('устройство из истории с арендой: MAC и имя аренды, зона, трафик, сутки — сумма часов',
+	d20?.mac == '3c:7c:3f:00:00:9a' && d20.name == 'pc-living' && d20.source == 'dhcp' && d20.zone == 'lan' && d20.policy == 'rules' &&
+	same(d20.rate, [ 1, 2, 3, 4, 5, 6 ]) && same(d20.minutes, [ [ 960, 1, 1, 1, 1 ] ]) && d20.last == 900 && same(d20.day, [ 10, 0, 0, 0, 0, 0 ]),
+	sprintf('%J', d20));
+check('имя секции устройства важнее имени аренды', dby('ip', '192.168.1.21')?.name == 'TV');
+let d30 = dby('ip', '192.168.1.30');
+check('устройство с Политикой у соседа, без трафика: адрес соседа, источник neigh, трафика нет',
+	d30?.source == 'neigh' && d30.policy == 'tunnel' && d30.name == 'console' && d30.zone == 'lan' && d30.rate == null && d30.day == null &&
+	same(d30.minutes, []), sprintf('%J', d30));
+let daway = dby('mac', 'aa:bb:cc:dd:ee:99');
+check('устройство с Политикой не в сети: без адреса, источник config', daway?.ip == null && daway.source == 'config' && daway.policy == 'direct',
+	sprintf('%J', daway));
+let dmesh = dby('ip', '100.64.0.9');
+check('узел mesh-VPN только по трафику: без MAC и источника, «по правилам», зона по адресу',
+	dmesh?.mac == null && dmesh.source == null && dmesh.policy == 'rules' && dmesh.zone == 'mesh', sprintf('%J', dmesh));
+check('секция «по правилам» без адреса и трафика — не в списке (spec §6.1: без трафика — только с Политикой)',
+	dby('mac', 'aa:bb:cc:dd:ee:98') == null);
+
+// Аренда устарела (адрес уже у другого устройства): MAC — у соседа, имя чужой аренды не берётся.
+let stale = DVC.merge({ devices: { '192.168.1.40': { seen: 1, last: 900, rate: null, minutes: [], hours: [] } } },
+	[ { ip: '192.168.1.40', mac: 'aa:bb:cc:dd:ee:40', name: 'old-phone' } ], [ { ip: '192.168.1.40', mac: 'aa:bb:cc:dd:ee:41', dev: 'br-lan' } ],
+	[], () => 'lan')[0];
+check('устройство: сосед важнее устаревшей аренды — MAC соседа, без чужого имени, источник neigh',
+	stale?.mac == 'aa:bb:cc:dd:ee:41' && stale.name == null && stale.source == 'neigh', sprintf('%J', stale));
+// Процесс stats не пишет (служба остановлена): скорость в файле — старая, её не показывают как текущую.
+let shist = { last: { t: 1000 }, devices: { '192.168.1.40': { seen: 1, last: 990, rate: [ 1, 2, 3, 4, 5, 6 ], minutes: [], hours: [] } } };
+check('устройство: скорость старше трёх шагов — не текущая',
+	DVC.merge(shist, [], [], [], () => null, 2000)[0].rate == null && same(DVC.merge(shist, [], [], [], () => null, 1010)[0].rate, [ 1, 2, 3, 4, 5, 6 ]));
+
+// Список ограничен: в наборах до 1024 адресов, а ответ ubus и вкладка — нет. Остаются самые недавние
+// и все с Политикой.
+let many = { devices: {} };
+for (let i = 0; i < 300; i++)
+	many.devices[sprintf('10.200.%d.%d', i / 256, i % 256)] = { seen: 1, last: 1000 + i, rate: null, minutes: [], hours: [] };
+let capped = DVC.merge(many, [], [ { ip: '10.200.0.0', mac: 'aa:bb:cc:dd:ee:77', dev: 'br-lan' } ],
+	[ { name: 'nas', mac: 'aa:bb:cc:dd:ee:77', policy: 'direct' } ], () => null);
+check('список: не больше DEV_LIST_MAX самых недавних, устройство с Политикой — всегда',
+	length(capped) == C.DEV_LIST_MAX + 1 && filter(capped, d => d.ip == '10.200.1.43')[0] != null &&
+	filter(capped, d => d.ip == '10.200.0.0')[0]?.policy == 'direct' && filter(capped, d => d.ip == '10.200.0.1')[0] == null,
+	sprintf('%d', length(capped)));
+
+// Интерфейс адреса без соседа — по таблицам маршрутов одним вызовом: самый длинный префикс, без default.
+let routes = [ { dst: 'default', gateway: '192.0.2.1', dev: 'eth0' }, { dst: '192.168.1.0/24', dev: 'br-lan' },
+               { dst: '100.64.0.0/10', dev: 'tailscale0', table: '52' }, { dst: '100.64.0.9', dev: 'mesh1' }, { type: 'unreachable', dst: '10.0.0.0/8' } ];
+let rt = DVC.route_table(routes);
+check('маршрут: самый длинный префикс, default и маршруты без интерфейса не в счёт',
+	DVC.route_dev(rt, '100.64.0.9') == 'mesh1' && DVC.route_dev(rt, '100.64.1.1') == 'tailscale0' &&
+	DVC.route_dev(rt, '192.168.1.5') == 'br-lan' && DVC.route_dev(rt, '8.8.8.8') == null && DVC.route_dev(rt, '10.1.1.1') == null);
+
+// ---- Соединения устройства (connections) из образца conntrack ----
+
+let ct_text = join('\n', [
+	'ipv4     2 tcp      6 431999 ESTABLISHED src=192.168.1.50 dst=1.2.3.4 sport=51000 dport=443 packets=10 bytes=1000 src=1.2.3.4 dst=203.0.113.5 sport=443 dport=51000 packets=12 bytes=9000 [ASSURED] mark=16777216 zone=0 use=2',
+	'ipv4     2 udp      17 29 src=192.168.1.50 dst=1.2.3.4 sport=5000 dport=3478 packets=1 bytes=100 [UNREPLIED] src=1.2.3.4 dst=203.0.113.5 sport=3478 dport=5000 packets=0 bytes=0 mark=16777216 zone=0 use=2',
+	'ipv4     2 tcp      6 100 ESTABLISHED src=192.168.1.50 dst=5.6.7.8 sport=51001 dport=80 packets=3 bytes=300 src=5.6.7.8 dst=192.168.1.50 sport=80 dport=51001 packets=3 bytes=400 [ASSURED] mark=33554432 zone=0 use=2',
+	'ipv4     2 tcp      6 100 ESTABLISHED src=192.168.1.60 dst=1.2.3.4 sport=1 dport=443 packets=1 bytes=1 src=1.2.3.4 dst=192.168.1.60 sport=443 dport=1 packets=1 bytes=1 mark=0 zone=0 use=2',
+	'ipv6     10 tcp     6 100 ESTABLISHED src=fd00::50 dst=2001:db8::1 sport=1 dport=443 packets=1 bytes=1 src=2001:db8::1 dst=fd00::50 sport=443 dport=1 packets=1 bytes=1 mark=0 zone=0 use=2',
+	'',
+]);
+let cts = DVC.parse_conntrack(ct_text, '192.168.1.50');
+check('conntrack: только соединения устройства по IPv4, поля первого', length(cts) == 3 &&
+	same(cts[0], { proto: 'tcp', dst: '1.2.3.4', dport: 443, up: 1000, down: 9000, mark: 16777216 }), sprintf('%J', cts));
+// Из файла — построчно (функция-источник строк): большую таблицу не держать в памяти дважды.
+let ct_lines = split(ct_text, '\n'), ct_i = 0;
+check('conntrack: построчный источник — то же, что текст', same(DVC.parse_conntrack(() => ct_lines[ct_i++], '192.168.1.50'), cts));
+// Сроки истории по устройствам — у службы, интерфейс берёт их из схемы (ADR 0015).
+check('схема: шаг и срок поминутной истории устройств', same(F.schema().consts.devices, { step: 60, span: 3600 }), sprintf('%J', F.schema().consts.devices));
+let cg = DVC.group(cts);
+check('conntrack: по адресам, крупнейший первым; протокол и порт — самого крупного соединения',
+	cg.total == 3 && cg.acct && length(cg.addrs) == 2 &&
+	same(cg.addrs[0], { addr: '1.2.3.4', proto: 'tcp', port: 443, conns: 2, up: 1100, down: 9000, mark: 16777216 }), sprintf('%J', cg));
+let noacct = DVC.group(DVC.parse_conntrack(replace(ct_text, / packets=[0-9]+ bytes=[0-9]+/g, ''), '192.168.1.50'));
+check('conntrack: без nf_conntrack_acct — байтов нет, порядок по числу соединений',
+	!noacct.acct && noacct.addrs[0].addr == '1.2.3.4' && noacct.addrs[0].up == null && noacct.addrs[1].down == null, sprintf('%J', noacct));
+let big = [];
+for (let i = 0; i < 5000; i++)
+	push(big, sprintf('ipv4     2 tcp      6 100 ESTABLISHED src=192.168.1.50 dst=198.51.100.%d sport=%d dport=443 packets=1 bytes=%d src=198.51.100.%d dst=192.168.1.50 sport=443 dport=%d packets=1 bytes=1 mark=0 zone=0 use=2',
+		i % 25, 10000 + i, i % 25, i % 25, 10000 + i));
+let bg = DVC.group(DVC.parse_conntrack(join('\n', big), '192.168.1.50'));
+check('conntrack: 5000 соединений к 25 адресам — 20 адресов, всего 5000', length(bg.addrs) == 20 && bg.total == 5000 && bg.addrs[0].addr == '198.51.100.24');
+
 // ---- ubus-API: методы, которые читают файлы, без rpcd ----
 
 let api = loadfile(PLUGIN)()?.truba;
@@ -552,5 +785,7 @@ check('API rates: время Роутера', rr.now >= now);
 check('API check: цель с пробелом или «;» не уходит в командную строку',
 	api.check.call({ args: { target: 'a b' } }).error == 'invalid target' && api.check.call({ args: { target: 'x;reboot' } }).error == 'invalid target');
 check('API nat_result: итога ещё нет — пустой ответ', same(api.nat_result.call(), {}));
+check('API connections: не IPv4 не уходит в командную строку',
+	api.connections?.call({ args: { ip: '1.2.3.4; reboot' } })?.error == 'invalid ip' && api.connections.call({ args: {} }).error == 'invalid ip');
 
 T.finish();

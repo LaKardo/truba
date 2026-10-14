@@ -15,18 +15,23 @@
 		"order": 10,
 		"action": { "type": "view", "path": "truba/overview" }
 	},
+	"admin/services/truba/devices": {
+		"title": "Devices",
+		"order": 15,
+		"action": { "type": "view", "path": "truba/devices" }
+	},
+	"admin/services/truba/rules": {
+		"title": "Rules",
+		"order": 17,
+		"action": { "type": "view", "path": "truba/rules" }
+	},
 	"admin/services/truba/tunnel": {
 		"title": "Tunnel",
 		"order": 20,
 		"action": { "type": "view", "path": "truba/tunnel" }
 	},
-	"admin/services/truba/routing": {
-		"title": "Routing",
-		"order": 30,
-		"action": { "type": "view", "path": "truba/routing" }
-	},
 	"admin/services/truba/dns": {
-		"title": "DNS & lists",
+		"title": "DNS",
 		"order": 40,
 		"action": { "type": "view", "path": "truba/dns" }
 	},
@@ -35,15 +40,18 @@
 		"order": 50,
 		"action": { "type": "view", "path": "truba/inbound" }
 	},
-	"admin/services/truba/diagnostics": {
-		"title": "Diagnostics",
+	"admin/services/truba/log": {
+		"title": "Logs",
 		"order": 60,
-		"action": { "type": "view", "path": "truba/diagnostics" }
+		"action": { "type": "view", "path": "truba/log" }
 	},
-	"admin/services/truba/devices": {
-		"action": { "type": "alias", "path": "admin/services/truba/routing" }
+	"admin/services/truba/routing": {
+		"action": { "type": "alias", "path": "admin/services/truba/rules" }
 	},
 	"admin/services/truba/lists": {
-		"action": { "type": "alias", "path": "admin/services/truba/dns" }
+		"action": { "type": "alias", "path": "admin/services/truba/rules" }
+	},
+	"admin/services/truba/diagnostics": {
+		"action": { "type": "alias", "path": "admin/services/truba/log" }
 	}
 }

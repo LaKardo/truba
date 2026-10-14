@@ -4,9 +4,11 @@
 set -e
 . /repo/tests/lib/check.sh
 
-cp -a /repo/router/truba/files/. /
-cp -a /repo/router/luci-app-truba/htdocs/. /www/
-cp -a /repo/router/luci-app-truba/root/. /
+# Без -a: в CI файлы репозитория принадлежат пользователю раннера, а rpcd выполняет «rc init» только
+# для скрипта root:root. cp -R даёт копиям владельца root и не меняет владельца /etc и других каталогов.
+cp -R /repo/router/truba/files/. /
+cp -R /repo/router/luci-app-truba/htdocs/. /www/
+cp -R /repo/router/luci-app-truba/root/. /
 chmod 0755 /usr/sbin/truba /etc/init.d/truba /etc/truba/reinstall.sh /usr/share/truba/uninstall.sh
 # С каталога Windows файлы приходят с правами 777; rpcd такие плагины и ACL не загружает.
 chmod 0644 /usr/share/rpcd/ucode/truba-api.uc /usr/share/rpcd/acl.d/luci-app-truba.json
@@ -58,6 +60,9 @@ uci -q batch <<-EOF
 	set network.@amneziawg_awg0[-1].public_key='demo'
 	commit network
 EOF
+# /tmp/booted ставит rc.local, а netifd procd запускает в фоне: его объекта network в ubus может ещё не быть,
+# и reload падал бы с «Command failed: Not found» (CI).
+ubus -t 30 wait_for network
 /etc/init.d/network reload
 wan_up() { [ "$(ubus call network.interface.wan status 2>/dev/null | jsonfilter -e '@.up')" = true ]; }
 wait_for 20 wan_up
@@ -65,9 +70,28 @@ wait_for 20 wan_up
 sh /etc/uci-defaults/90-truba
 sh /etc/uci-defaults/luci-truba
 uci set truba.watchdog.enabled='0'; uci commit truba
+# Argon в образе стенда — для снимков в другой теме; при установке он делает себя темой по умолчанию.
+# Проверки идут в Bootstrap, другие темы browser.js включает сам.
+uci set luci.main.mediaurlbase='/luci-static/bootstrap'; uci commit luci
 /etc/init.d/firewall reload >/dev/null 2>&1 || true
 /etc/init.d/rpcd restart
 /etc/init.d/truba enable
 /etc/init.d/truba start
 wait_for 15 ubus call truba status
+# Устройства для вкладки «Устройства» (ADR 0018). Клиентов в домашней сети стенда нет, поэтому
+# элементы наборов с трафиком добавляются вручную: процесс stats видит новые элементы и пишет их
+# в историю. 192.168.1.50 — сосед с MAC (на нём сценарий Политики), 100.64.0.9 — узел mesh-VPN без MAC.
+ip neigh replace 192.168.1.50 lladdr 02:11:22:33:44:55 dev br-lan nud permanent
+D=/var/run/truba/devices.json
+inject() { nft delete element inet truba "$1" "{ $2 }" 2>/dev/null || true; nft add element inet truba "$1" "{ $2 counter packets 10 bytes $3 }"; }
+inject dv_tunnel_down 192.168.1.50 600000
+inject dv_direct_down 100.64.0.9 300000
+dev_seen() { grep -q '"192.168.1.50"' $D && grep -q '"100.64.0.9"' $D; }
+wait_for 15 dev_seen
+# Первый снимок с элементом мог стать точкой отсчёта (прошлый снимок — до загрузки таблицы): ещё
+# порция байт — уже трафик, с ним у устройств есть скорость, сутки и время трафика.
+inject dv_tunnel_down 192.168.1.50 1200000
+inject dv_direct_down 100.64.0.9 600000
+dev_last() { [ -n "$(jsonfilter -i $D -e "@.devices['192.168.1.50'].last")" ] && [ -n "$(jsonfilter -i $D -e "@.devices['100.64.0.9'].last")" ]; }
+wait_for 20 dev_last
 echo "стенд LuCI готов: $STAND_ADDR"

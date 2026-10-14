@@ -70,6 +70,24 @@ const methods = {
 		}
 	},
 
+	// Устройства: трафик из истории (её пишет процесс truba stats), имена, зоны и Политики.
+	devices: {
+		call: function() {
+			return truba('devices');
+		}
+	},
+
+	// Куда устройство ходит сейчас: адреса из conntrack с Действием и причиной.
+	connections: {
+		args: { ip: 'ip' },
+		call: function(req) {
+			let ip = req.args?.ip;
+			if (!U.is_ipv4(ip))
+				return { error: 'invalid ip' };
+			return truba('connections ' + U.shq(ip));
+		}
+	},
+
 	check: {
 		args: { target: 'target', mac: 'mac' },
 		call: function(req) {
@@ -144,12 +162,8 @@ const methods = {
 			let n = int(req.args?.lines ?? 200);
 			if (n < 10 || n > 2000)
 				n = 200;
-			// Труба и mosdns (ошибки DNS-серверов). «invalid msg» — повреждённые запросы
-			// устройств, которые dnsmasq пересылает как есть: это шум, а не ошибка Трубы.
-			let p = popen(sprintf("logread -e '%s\\|mosdns' | grep -v 'invalid msg' | tail -n %d", C.LOG_TAG, n), 'r');
-			let out = p ? p.read('all') : '';
-			p?.close();
-			return { log: out };
+			// Строки отбирает команда truba (state.log): ей нужны настройки, а плагин — тонкий (ADR 0008).
+			return truba('log ' + n);
 		}
 	},
 };

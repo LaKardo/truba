@@ -48,11 +48,39 @@ export function counters_raw() {
 	return out;
 };
 
+// Байты по устройствам из наборов dv_* (ADR 0018): { ip: [ байты по C.DEV_SETS ] }, адреса нет в
+// наборе — 0 на его месте; null — набора нет (таблицы нет или она загружена до наборов). Каждый
+// набор — своим вызовом nft: несколько «list set» в одном вызове находят только последний набор,
+// а «list table» прочитал бы и все подсети geoip.
+export function dev_counters() {
+	let out = {};
+	for (let k, name in C.DEV_SETS) {
+		let r = U.run('nft -j list set inet ' + C.NFT_TABLE + ' ' + name);
+		if (r.code != 0)
+			return null;
+		try {
+			for (let o in json(r.out)?.nftables ?? []) {
+				for (let e in o?.set?.elem ?? []) {
+					let el = (type(e) == 'object') ? e.elem : null;
+					if (type(el?.val) != 'string' || !U.is_ipv4(el.val))
+						continue;
+					out[el.val] ??= [ 0, 0, 0, 0, 0, 0 ];
+					out[el.val][k] = el.counter?.bytes ?? 0;
+				}
+			}
+		}
+		catch (e) {
+			return null;
+		}
+	}
+	return out;
+};
+
 function health_state() {
 	return U.read_json(C.HEALTH_FILE, null);
 }
 
-// sums — с контрольной суммой: она нужна только вкладке «DNS и списки».
+// sums — с контрольной суммой: она нужна только вкладке «Правила».
 function list_info(dir, file, sums) {
 	let p = dir + '/' + file;
 	let st = stat(p);
@@ -94,8 +122,9 @@ function neighbours() {
 
 // Работает ли служба procd (или её инстанс) — по ubus, без pidof. mosdns — инстанс
 // службы truba: чужой mosdns, запущенный отдельно, за Трубу не считается.
-function running(ub, service, instance) {
-	let r = ub?.call('service', 'list', { name: service });
+// r — готовый ответ service list, если он уже есть (status спрашивает его один раз на оба экземпляра).
+function running(ub, service, instance, r) {
+	r ??= ub?.call('service', 'list', { name: service });
 	for (let name, inst in r?.[service]?.instances ?? {})
 		if ((instance == null || name == instance) && inst.running)
 			return true;
@@ -188,10 +217,13 @@ export function status() {
 	let st = N.iface_up(cfg.iface, ub);
 	let applied = U.read_json(C.APPLIED_FILE, null);
 	let raw = counters_raw();
+	let svc = ub?.call('service', 'list', { name: 'truba' });
 	let res = {
 		routing: cfg.routing,
 		mode: cfg.mode,
 		killswitch: cfg.killswitch,
+		// Работает ли сторож Туннеля: «Состояние» показывает его, а не переключатель в браузере.
+		watchdog: running(ub, 'truba', 'watchdog', svc),
 		service: applied != null,
 		applied,
 		tunnel: {
@@ -216,7 +248,7 @@ export function status() {
 		traffic: traffic(raw),
 		neighbours: neighbours(),
 		upnp: upnp_info(cfg, ub),
-		mosdns: running(ub, 'truba', 'mosdns'),
+		mosdns: running(ub, 'truba', 'mosdns', svc),
 		// Адрес API — тот, с которым mosdns запущена (его может не быть, если порт занят).
 		dns_cache: (cfg.routing && applied?.dns_api) ? dns_cache(applied.dns_api, cfg) : null,
 		// Итог последней «Проверки NAT» — кнопкой или watchdog после подъёма Туннеля.
@@ -233,7 +265,7 @@ export function status() {
 	return res;
 };
 
-// Версии Наборов правил для вкладки «DNS и списки»: текущие и предыдущие, с контрольными суммами.
+// Версии Наборов правил для вкладки «Правила»: текущие и предыдущие, с контрольными суммами.
 export function lists() {
 	return {
 		geoip: list_info(C.LISTS_DIR, C.DAT_FILES.geoip, true),
@@ -245,6 +277,15 @@ export function lists() {
 		// Идёт применение настроек (после отката или обновления списков — в фоне).
 		applying: U.lock_busy(C.LOCK_APPLY),
 	};
+};
+
+// Строки для «Журнала» (truba.log): Труба и её watchdog, mosdns (ошибки DNS-серверов) и интерфейс Туннеля
+// (netifd, ядро). Имя интерфейса — как его читает служба, по схеме ^[A-Za-z0-9_]{1,15}$: в выражение оно
+// подставляется как есть. «invalid msg» — повреждённые запросы устройств, которые dnsmasq пересылает как
+// есть: это шум, а не ошибка Трубы.
+export function log(n) {
+	let iface = F.check_value('main', 'iface', cursor().get('truba', 'main', 'iface'));
+	return { log: U.run(sprintf("logread -e '%s\\|mosdns\\|%s' | grep -v 'invalid msg' | tail -n %d", C.LOG_TAG, iface, n)).out };
 };
 
 // Размеры наборов для «Обзора»: geoip — подсетей по Действиям (посчитаны при применении),

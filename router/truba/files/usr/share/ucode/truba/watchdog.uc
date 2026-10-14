@@ -62,7 +62,7 @@ function big_probe(dev, target) {
 // после подъёма Туннеля: ping пакетом во весь MTU дороже обычного.
 const BIG_EVERY = 10;
 
-// «Проверка Туннеля» на «Диагностике»: ping Трубы пакетами трёх размеров разом.
+// «Проверка Туннеля» на «Туннеле»: ping Трубы пакетами трёх размеров разом.
 // Размеры — IP-пакета в байтах: обычный ping (56 байт данных), средний (1000) и во весь MTU Туннеля.
 const TT_SMALL = 84, TT_MID = 1028;
 
@@ -162,7 +162,7 @@ export function run() {
 		let table = N.routes(c, F.tunnel_info(c.iface));
 		U.log(next == 'healthy' ? 'notice' : 'warning',
 			sprintf('Туннель %s (%s); таблица Туннеля: %s',
-				next == 'healthy' ? 'восстановлен' : 'не отвечает', info, table));
+				next == 'healthy' ? 'восстановлен' : 'не отвечает', info, table), C.WATCHDOG_TAG);
 		system([ 'ubus', 'send', 'truba.tunnel', sprintf('%J', { state: next, info, table }) ]);
 	};
 
@@ -218,7 +218,7 @@ export function run() {
 				if (fails >= w.fails) {
 					set_state('down', why, rec);
 					if (fails % w.fails == 0) {
-						U.warn_log('перезапуск интерфейса ' + cfg.iface + ': ' + why);
+						U.log('warn', 'перезапуск интерфейса ' + cfg.iface + ': ' + why, C.WATCHDOG_TAG);
 						system([ 'ifup', cfg.iface ]);
 					}
 				}
