@@ -149,7 +149,13 @@ function upnp_info(cfg, ub) {
 
 // GET по HTTP/1.0 к локальному API — прямо из ucode, без curl и оболочки: status
 // вызывается раз в 5 с. Тело ответа 200 или null (нет ответа, тайм-аут, обрыв).
-function http_get(addr, path, timeout) {
+function http_get(addr, path, timeout, max_size) {
+	max_size ??= 1048576; // 1MB по умолчанию
+	
+	// Валидация path: не должен содержать CRLF (защита от инъекции заголовков)
+	if (match(path, /[\r\n]/))
+		return null;
+	
 	let i = rindex(addr, ':');
 	let s = socket.connect(substr(addr, 0, i), substr(addr, i + 1), { socktype: socket.SOCK_STREAM }, timeout);
 	if (!s)
@@ -157,6 +163,12 @@ function http_get(addr, path, timeout) {
 	let out = '', done = false, end = U.now_ms() + timeout;
 	if (s.send(sprintf('GET %s HTTP/1.0\r\nHost: %s\r\n\r\n', path, addr))) {
 		while (true) {
+			// Проверка лимита размера (защита от memory exhaustion)
+			if (length(out) > max_size) {
+				s.close();
+				return null;
+			}
+			
 			let left = end - U.now_ms();
 			let pr = (left > 0) ? socket.poll(int(left), [ s, socket.POLLIN ]) : null;
 			let chunk = length(pr ?? []) ? s.recv(65536) : null;

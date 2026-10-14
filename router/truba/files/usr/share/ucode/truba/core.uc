@@ -63,6 +63,11 @@ function table_loaded() {
 
 // Поменять местами текущие и предыдущие Наборы правил. Вызывать под блокировкой LOCK_LISTS.
 function swap_lists() {
+	// Проверка, что блокировка удерживается вызывающим (защита от race condition)
+	if (!U.lock_busy(C.LOCK_LISTS)) {
+		die('swap_lists called without LOCK_LISTS held');
+	}
+	
 	let swapped = [];
 	for (let set in [ 'geoip', 'geosite' ]) {
 		let file = C.DAT_FILES[set];
@@ -575,6 +580,13 @@ export function rollback_lists(bg) {
 		return { error: 'busy' };
 	let swapped = swap_lists();
 	lk.close();
+	
+	// Валидация результата swap_lists
+	if (swapped == null || type(swapped) != 'array') {
+		U.warn_log('rollback_lists: некорректный результат swap_lists');
+		return { error: 'invalid_swap_result' };
+	}
+	
 	if (length(swapped)) {
 		U.info('списки: откат ' + join(', ', swapped));
 		reload_service(bg);

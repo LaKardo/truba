@@ -865,6 +865,25 @@ choose_ssh_port() {
 	return 0
 }
 
+# Проверить что порт всё ещё свободен перед применением (защита от race condition).
+# Если порт занят и не был явно задан пользователем, выбрать новый.
+verify_ssh_port() {
+	if port_busy "$SSH_PORT"; then
+		if [ -n "${OPT_SSH_PORT:-}" ]; then
+			die "порт SSH $SSH_PORT уже занят другим процессом"
+		fi
+		warn "порт SSH $SSH_PORT занят — выбираю новый"
+		local old_port=$SSH_PORT
+		SSH_PORT=$(pick_port)
+		# Если порт изменился и была подтверждённая конфигурация, установить fallback
+		if [ "$old_port" != "$SSH_PORT" ] && [ "${SSH_CONFIRMED:-0}" = 1 ]; then
+			SSH_CONFIRMED=0
+			SSH_FALLBACK=${SSH_FALLBACK:-$old_port}
+		fi
+		say "новый порт SSH: $SSH_PORT"
+	fi
+}
+
 cmd_install() {
 	need_root
 	load_state
@@ -895,6 +914,9 @@ cmd_install() {
 	write_sysctl
 	write_awg_conf
 	write_router_conf
+
+	# Проверить порт непосредственно перед применением (защита от race condition)
+	verify_ssh_port
 
 	if [ "${SSH_CONFIRMED:-0}" != 1 ]; then
 		# Запасные порты на время проверки: при смене — прежний, при первой установке — те, что
