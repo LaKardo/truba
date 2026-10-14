@@ -105,10 +105,6 @@ async function waitApply(page) {
 			errors.push(`[${page.url()}] HTTP ${r.status()}: ${r.url()}`);
 	});
 
-	// Прежние общие стили (truba.css) удалены (этап 7): страница их не просит.
-	const oldCss = [];
-	page.on('request', (r) => { if (r.url().includes('/truba/truba.css')) oldCss.push(r.url()); });
-
 	// Вход: имя «root» уже в поле, пароль на чистом стенде пустой.
 	await page.goto(`${base}/cgi-bin/luci/`, { waitUntil: 'networkidle2' });
 	await page.$eval('input[name=luci_password]', (el) => { el.value = ''; });
@@ -178,7 +174,6 @@ async function waitApply(page) {
 		}
 	}
 
-	result(!oldCss.length, 'вкладки не запрашивают truba.css', oldCss[0]);
 	// Контроль самой проверки вкладок: адрес без страницы (LuCI «Page not found») её не проходит. Во второй вкладке
 	// браузера: ответ 404 здесь ожидаем и не должен попасть в ошибки страниц Трубы.
 	const p404 = await browser.newPage();
@@ -195,9 +190,9 @@ async function waitApply(page) {
 	const pressed = (sel) => page.evaluate((sel) => [ ...document.querySelector('.truba-root').shadowRoot.querySelectorAll(sel + ' button') ]
 		.find((b) => b.getAttribute('aria-pressed') == 'true')?.textContent, sel);
 
-	// ---- Отложенные мелочи этапа 1 (этап 7) ----
+	// ---- Общее для вкладок: сетка, график, фокус, нет связи, тема ----
 	const sr = (fn, ...a) => page.evaluate(fn, ...a);
-	// (e) 900 точек — две колонки: в каждом ряду сетки карточки занимают всю ширину, пустой клетки нет.
+	// 900 точек — две колонки: в каждом ряду сетки карточки занимают всю ширину, пустой клетки нет.
 	await page.setViewport({ width: 900, height: 900 });
 	await page.goto(url('overview'), { waitUntil: 'networkidle2' });
 	await settled(page);
@@ -218,7 +213,7 @@ async function waitApply(page) {
 	await page.goto(url('overview'), { waitUntil: 'networkidle2' });
 	await settled(page);
 
-	// (f) Наведение на график скорости: в легенде видно время точки.
+	// Наведение на график скорости: в легенде видно время точки.
 	const cv = await el('.card .chart-box canvas');
 	if (cv) {
 		const b = await cv.boundingBox();
@@ -232,7 +227,7 @@ async function waitApply(page) {
 	result(/\d\d:\d\d/.test(legendTime), '«Обзор»: при наведении на график в легенде видно время', legendTime.replace(/\s+/g, ' '));
 	await page.mouse.move(0, 0);
 
-	// (h) Фокус с клавиатуры не меняет форму переключателя: рамка фокуса — outline, а не border-radius.
+	// Фокус с клавиатуры не меняет форму переключателя: рамка фокуса — outline, а не border-radius.
 	await sr(() => document.querySelector('.truba-root').shadowRoot.querySelector('.hero input[data-opt^="network."]')?.focus());
 	await page.keyboard.press('Tab');
 	const focusShape = await sr(() => {
@@ -242,7 +237,7 @@ async function waitApply(page) {
 	result(focusShape?.fv && focusShape.r == '9px', 'фокус с клавиатуры: у переключателя прежняя форма', JSON.stringify(focusShape));
 	await sr(() => document.querySelector('.truba-root').shadowRoot.activeElement?.blur());
 
-	// (j) Нет связи с Роутером: запросы ubus обрываются — значок; связь вернулась — значка нет.
+	// Нет связи с Роутером: запросы ubus обрываются — значок; связь вернулась — значка нет.
 	const badge = () => sr(() => /No connection to the router/.test(document.querySelector('.truba-root').shadowRoot.querySelector('.head')?.innerText || ''));
 	const until = async (fn, ms) => { for (let i = 0; i < ms / 250; i++) { if (await fn()) return true; await sleep(250); } return false; };
 	let cut = false;
@@ -257,7 +252,7 @@ async function waitApply(page) {
 	await page.setRequestInterception(false);
 	result(offShown && offGone, '«Обзор»: значок «нет связи» — пока запросы не проходят', `${offShown}/${offGone}`);
 
-	// (k) Страницу, которую LuCI так и не вставил в документ, mount не ждёт вечно.
+	// Страницу, которую LuCI так и не вставил в документ, mount не ждёт вечно.
 	const rafs = await sr(async () => {
 		const app = await L.require('truba.ui.app');
 		const raf = window.requestAnimationFrame;
@@ -272,7 +267,7 @@ async function waitApply(page) {
 	});
 	result(rafs[0] > 0 && rafs[0] == rafs[1], 'mount: ожидание вставки страницы кончается', JSON.stringify(rafs));
 
-	// (l) Тема с плавной сменой фона: режим — по фону после перехода, а не в его середине.
+	// Тема с плавной сменой фона: режим — по фону после перехода, а не в его середине.
 	const fade = (dark) => sr((dark) => {
 		const host = document.querySelector('.truba-root');
 		let a = host.parentElement;
@@ -316,7 +311,7 @@ async function waitApply(page) {
 	result(barH.err && barH.var === barH.h, 'панель изменений 375: место под ней — по высоте вместе с ошибкой', JSON.stringify(barH));
 	await page.setViewport({ width: 1280, height: 900 });
 
-	// Поле, очищенное до умолчания (опция снимается), тоже отмечено точкой «изменено» (spec §3.6).
+	// Поле, очищенное до умолчания (опция снимается), тоже отмечено точкой «изменено».
 	await page.goto(url('dns'), { waitUntil: 'networkidle2' });
 	await settled(page);
 	const portSaved = await sr(async () => (await L.require('uci')).get('truba', 'dns', 'port') ?? null);
@@ -332,17 +327,7 @@ async function waitApply(page) {
 	await page.goto(url('overview'), { waitUntil: 'networkidle2' });
 	await settled(page);
 
-	// Старые адреса «Маршрутизации» и списков открывают «Правила» (spec §3.1).
-	for (const old of [ 'routing', 'lists' ]) {
-		await page.goto(url(old), { waitUntil: 'networkidle2' });
-		await settled(page);
-		result(await shadowHas(page, '.card.rules-cats'), `адрес ${old} открывает «Правила»`);
-	}
-	await page.goto(url('diagnostics'), { waitUntil: 'networkidle2' });
-	await settled(page);
-	result(await shadowHas(page, '.card.log'), 'адрес diagnostics открывает «Журнал»');
-
-	// «Куда пойдёт» на «Правилах» (была «Проверить домен/IP» на «Диагностике»): IP из geoip:ru.
+	// «Куда пойдёт» на «Правилах»: IP из geoip:ru.
 	await page.goto(url('rules'), { waitUntil: 'networkidle2' });
 	await settled(page);
 	await (await el('.where input[name="target"]'))?.type('77.88.8.8');
@@ -578,7 +563,7 @@ async function waitApply(page) {
 		goodUtc.apply === false && goodUtc.uci == '05:30', '«Правила»: время обновления — неверное не пишется и держит «Применить»', JSON.stringify({ badUtc, goodUtc }));
 	await Promise.all([ page.waitForNavigation({ waitUntil: 'networkidle2' }).catch(() => {}), tap('.changes [data-act="reset"]') ]);
 
-	// «DNS» (spec §5.5): состояние mosdns и кэша — только то, что mosdns отдаёт (§6.3); поля кэша и порта; Наборов
+	// «DNS»: состояние mosdns и кэша — только то, что mosdns отдаёт; поля кэша и порта; Наборов
 	// правил здесь нет. Числа плиток — с разделителями разрядов браузера или «—», не NaN.
 	await page.goto(url('dns'), { waitUntil: 'networkidle2' });
 	await settled(page);
@@ -601,7 +586,7 @@ async function waitApply(page) {
 		await settled(page);
 	}
 
-	// Серверы DNS (spec §5.5, kit.UpstreamList): запрос идёт ко всем серверам пути сразу — порядок не важен.
+	// Серверы DNS (kit.UpstreamList): запрос идёт ко всем серверам пути сразу — порядок не важен.
 	const ups = (card) => page.evaluate((card) => {
 		const r = document.querySelector('.truba-root').shadowRoot, c = r.querySelector(`.card.${card}`);
 		const lis = [ ...(c?.querySelectorAll('.ups li') || []) ];
@@ -633,23 +618,23 @@ async function waitApply(page) {
 	const dnsSch = (await ubus('truba', 'schema')).sections.dns;
 	const prevUp = { tunnel_upstream: await uciUp('tunnel_upstream'), direct_upstream: await uciUp('direct_upstream') };
 	const effUp = (o) => prevUp[o] ? [].concat(prevUp[o]) : dnsSch[o].def;
-	// (a) Списки — действующие адреса: из настроек, без них — умолчание схемы.
+	// Списки — действующие адреса: из настроек, без них — умолчание схемы.
 	let ut = await ups('ups-tunnel'), ud = await ups('ups-direct');
 	result(JSON.stringify(ut.rows) == JSON.stringify(effUp('tunnel_upstream')) && JSON.stringify(ud.rows) == JSON.stringify(effUp('direct_upstream')),
 		'«DNS»: списки серверов — действующие адреса', JSON.stringify({ ut: ut.rows, ud: ud.rows }));
-	// (b) Неверный адрес не добавляется: ошибка под полем, изменений нет.
+	// Неверный адрес не добавляется: ошибка под полем, изменений нет.
 	await typeUp('ups-tunnel', 'htps://1.1.1.1/dns-query');
 	await addUp('ups-tunnel');
 	ut = await ups('ups-tunnel');
 	result(/Expected https:/.test(ut.err) && ut.rows.length == effUp('tunnel_upstream').length && !/Unapplied changes/.test(ut.bar),
 		'«DNS»: неверный адрес не добавляется', JSON.stringify(ut));
-	// (c) Повтор — ошибка, список тот же.
+	// Повтор — ошибка, список тот же.
 	await typeUp('ups-tunnel', effUp('tunnel_upstream')[0]);
 	await addUp('ups-tunnel');
 	ut = await ups('ups-tunnel');
 	result(/already in the list/.test(ut.err) && ut.rows.length == effUp('tunnel_upstream').length, '«DNS»: повтор адреса — ошибка', JSON.stringify(ut));
 	await typeUp('ups-tunnel', '');
-	// (d) Без списка в настройках — умолчание; удалить сервер и вернуть его (в конец) — ноль изменений.
+	// Без списка в настройках — умолчание; удалить сервер и вернуть его (в конец) — ноль изменений.
 	// uci commit на стенде сам запускает применение: ждать его, иначе позднее применение засчиталось бы следующему шагу.
 	t0 = await time();
 	await setUp('tunnel_upstream', null);
@@ -667,7 +652,7 @@ async function waitApply(page) {
 	t0 = await time();
 	await setUp('tunnel_upstream', prevUp.tunnel_upstream);
 	await applied(t0, () => true);
-	// (e) Верный адрес добавляется по Enter — точка «изменено», одно изменение.
+	// Верный адрес добавляется по Enter — точка «изменено», одно изменение.
 	await page.goto(url('dns'), { waitUntil: 'networkidle2' });
 	await settled(page);
 	const newUp = 'tls://dns.example@192.0.2.53';
@@ -676,7 +661,7 @@ async function waitApply(page) {
 	await sleep(300);
 	ud = await ups('ups-direct');
 	result(ud.rows.includes(newUp) && ud.warn == 1 && /Unapplied changes: 1/.test(ud.bar), '«DNS»: адрес добавляется по Enter, с точкой «изменено»', JSON.stringify(ud));
-	// (f) Неверный текст в поле держит «Применить» и «Save & Apply» LuCI; очищен — применяется.
+	// Неверный текст в поле держит «Применить» и «Save & Apply» LuCI; очищен — применяется.
 	await typeUp('ups-tunnel', 'htps://x');
 	const heldUp = await ups('ups-direct');
 	await page.evaluate(() => [ ...document.querySelectorAll('.cbi-page-actions *') ]
@@ -693,7 +678,7 @@ async function waitApply(page) {
 	await waitApply(page);
 	result(await applied(t0, async (st) => st.mosdns && !(st.applied.invalid || []).length && [].concat(await uciUp('direct_upstream') || []).includes(newUp)),
 		'«DNS»: новый сервер Напрямую — «Применить» дошло до службы');
-	// (g) Последний сервер не удаляется.
+	// Последний сервер не удаляется.
 	await page.goto(url('dns'), { waitUntil: 'networkidle2' });
 	await settled(page);
 	for (let i = 0; i < 5 && (await ups('ups-direct')).rows.length > 1; i++) {
@@ -703,7 +688,7 @@ async function waitApply(page) {
 	ud = await ups('ups-direct');
 	result(ud.rows.length == 1 && JSON.stringify(ud.off) == '[true]', '«DNS»: последний сервер не удаляется', JSON.stringify(ud));
 	await Promise.all([ page.waitForNavigation({ waitUntil: 'networkidle2' }).catch(() => {}), tap('.changes [data-act="reset"]') ]);
-	// (h) Неверный адрес из сохранённых настроек: помечен, удаляется, применение без предупреждений.
+	// Неверный адрес из сохранённых настроек: помечен, удаляется, применение без предупреждений.
 	t0 = await time();
 	await setUp('direct_upstream', [ ...[].concat(await uciUp('direct_upstream') || []), 'htps://bad.example' ]);
 	await applied(t0, (st) => (st.applied.invalid || []).some((x) => x.key == 'dns.direct_upstream'));
@@ -717,7 +702,7 @@ async function waitApply(page) {
 	await waitApply(page);
 	result(JSON.stringify(ud.bad) == '["htps://bad.example"]' && await applied(t0, async (st) => !(st.applied.invalid || []).length &&
 		![].concat(await uciUp('direct_upstream') || []).includes('htps://bad.example')), '«DNS»: неверный сохранённый адрес помечен и удаляется', JSON.stringify(ud));
-	// (j) Набранный верный адрес и сразу «Save & Apply» LuCI настоящим нажатием мыши (фокус остаётся в поле):
+	// Набранный верный адрес и сразу «Save & Apply» LuCI настоящим нажатием мыши (фокус остаётся в поле):
 	// адрес применяется. Уход из поля не должен сдвигать страницу под нажатой кнопкой — иначе клик теряется.
 	await page.goto(url('dns'), { waitUntil: 'networkidle2' });
 	await settled(page);
@@ -738,7 +723,7 @@ async function waitApply(page) {
 	await settled(page);
 	const resetDns = () => Promise.all([ page.waitForNavigation({ waitUntil: 'networkidle2' }).catch(() => {}), tap('.changes [data-act="reset"]') ]);
 	const appBad = () => page.evaluate(async () => (await L.require('truba.ui.app')).changes.get().bad);
-	// (k) Повтор в поле: ошибка видна, но «Применить» не держит (сервер уже в списке); строку удалили — ошибка
+	// Повтор в поле: ошибка видна, но «Применить» не держит (сервер уже в списке); строку удалили — ошибка
 	// не остаётся, набранный адрес снова можно добавить.
 	ud = await ups('ups-direct');
 	await typeUp('ups-direct', ud.rows[0]);
@@ -750,7 +735,7 @@ async function waitApply(page) {
 	result(/already in the list/.test(k1.err) && k1.held === 0 && !k2.err && k2.held === 0,
 		'«DNS»: повтор в поле не держит «Применить», ошибка не устаревает', JSON.stringify({ k1, k2 }));
 	await resetDns();
-	// (l) Последний — это последний верный сервер: строки-дубли и неверные не в счёт; удаляется одна строка.
+	// Последний — это последний верный сервер: строки-дубли и неверные не в счёт; удаляется одна строка.
 	t0 = await time();
 	await setUp('direct_upstream', [ 'udp://192.0.2.1', 'udp://192.0.2.1', 'htps://bad.example' ]);
 	await applied(t0, () => true);
@@ -764,7 +749,7 @@ async function waitApply(page) {
 		JSON.stringify(l2.off) == '[true,false]' && /at least one/i.test(l2.titles[0]), '«DNS»: последний верный сервер не удаляется, дубль удаляется по одному',
 		JSON.stringify({ l1, l2 }));
 	await resetDns();
-	// (m) Адрес, сохранённый одной строкой (option, не list): одна строка, как у службы; добавить и удалить — ноль
+	// Адрес, сохранённый одной строкой (option, не list): одна строка, как у службы; добавить и удалить — ноль
 	// изменений; строка с пробелом — один неверный адрес, а не два.
 	t0 = await time();
 	await setUp('tunnel_upstream', 'udp://10.77.77.1');
@@ -788,7 +773,7 @@ async function waitApply(page) {
 	t0 = await time();
 	await setUp('tunnel_upstream', prevUp.tunnel_upstream);
 	await applied(t0, () => true);
-	// (n) Доступность: поле и кнопка называют свой путь; удаление последней строки с клавиатуры не теряет фокус.
+	// Доступность: поле и кнопка называют свой путь; удаление последней строки с клавиатуры не теряет фокус.
 	await page.goto(url('dns'), { waitUntil: 'networkidle2' });
 	await settled(page);
 	const names = await page.evaluate(() => [ 'ups-tunnel', 'ups-direct' ].map((c) => {
@@ -805,7 +790,7 @@ async function waitApply(page) {
 		'«DNS»: поле и кнопка с именем пути, фокус после удаления строки остаётся в списке', JSON.stringify({ names, focus: n1.focus }));
 	await resetDns();
 
-	// «Входящие» (spec §5.6): «Проверка NAT» и UPnP / NAT-PMP. На стенде есть miniupnpd (TEST_PKGS в run.sh),
+	// «Входящие»: «Проверка NAT» и UPnP / NAT-PMP. На стенде есть miniupnpd (TEST_PKGS в run.sh),
 	// а Туннель — dummy: проверка NAT кончается ошибкой, но текстом, а не undefined:NaN.
 	const openInbound = async () => {
 		await page.goto(url('inbound'), { waitUntil: 'networkidle2' });
@@ -843,7 +828,7 @@ async function waitApply(page) {
 	result(await applied(t0, (st) => st.upnp?.enabled === false) && /No active mappings\./.test(upnpText),
 		'«Входящие»: UPnP выкл — «Применить» дошло до службы; без отображений — «No active mappings.»', upnpText.replace(/\s+/g, ' ').slice(0, 120));
 
-	// Пробросы портов из Туннеля (spec §5.6): правка в окне на вкладке, «Применить» — панелью изменений; итог —
+	// Пробросы портов из Туннеля: правка в окне на вкладке, «Применить» — панелью изменений; итог —
 	// секции firewall у ubus. Устройство стенда 192.168.1.50 — в зоне lan.
 	const fwds = async () => Object.values((await ubus('uci', 'get', { config: 'firewall', type: 'redirect' })).values || {})
 		.filter((s) => s.src == 'truba');
@@ -877,7 +862,7 @@ async function waitApply(page) {
 		await openInbound();
 	};
 
-	// (a) Новый проброс: строка с точкой «изменено», одно изменение; «Применить» — секция redirect зоны Туннеля.
+	// Новый проброс: строка с точкой «изменено», одно изменение; «Применить» — секция redirect зоны Туннеля.
 	await openInbound();
 	await openDlg('[data-act="fwd-add"]');
 	await fill('name', 'Test web');
@@ -898,12 +883,12 @@ async function waitApply(page) {
 		'«Входящие»: новый проброс — строка с точкой, «Применить» пишет секцию firewall', JSON.stringify({ dA, rowsA, barA, fA }));
 	const sidA = fA['.name'];
 
-	// (b) Внешний порт вне 1–65535 — ошибка у поля, «Save» недоступна.
+	// Внешний порт вне 1–65535 — ошибка у поля, «Save» недоступна.
 	await openDlg('[data-act="fwd-add"]');
 	await fill('ext', '70000');
 	const dB = await dlg();
 	result(dB?.errs.some((e) => /1–65535/.test(e)) && dB.save === true, '«Входящие»: внешний порт вне 1–65535 — ошибка, «Save» недоступна', JSON.stringify(dB));
-	// (c) Диапазон, который пересекает сохранённый 8080/tcp: при tcp+udp — ошибка, при udp — нет. «Отмена» — без изменений.
+	// Диапазон, который пересекает сохранённый 8080/tcp: при tcp+udp — ошибка, при udp — нет. «Отмена» — без изменений.
 	await fill('ext', '8000-8100');
 	await pick('dev', '192.168.1.50');
 	const dC1 = await dlg();
@@ -916,7 +901,7 @@ async function waitApply(page) {
 		'«Входящие»: пересечение внешних портов при общем протоколе — ошибка; другой протокол — нет; «Отмена» — без изменений',
 		JSON.stringify({ dC1, dC2, barC }));
 
-	// (d) Переключатель строки: выкл — enabled '0'; снова вкл — опции нет (как до выключения).
+	// Переключатель строки: выкл — enabled '0'; снова вкл — опции нет (как до выключения).
 	await tap(`.fwd li[data-sid="${sidA}"] input[type="checkbox"]`);
 	await applyFwd();
 	const offA = (await fwds()).find((s) => s['.name'] == sidA)?.enabled;
@@ -933,7 +918,7 @@ async function waitApply(page) {
 	result(offA === '0' && rowOff?.on === false && rowOnPending.on === true && rowOnPending.off === false && !('enabled' in onA) && onA.dest_port == '80',
 		'«Входящие»: переключатель проброса — enabled 0, обратно — строка включена сразу, в настройках — без опции', JSON.stringify({ offA, rowOff, rowOnPending, onA }));
 
-	// (e) Опции, заданные в «Межсетевом экране», правка на вкладке не трогает. Неверный сохранённый внешний порт — ошибка
+	// Опции, заданные в «Межсетевом экране», правка на вкладке не трогает. Неверный сохранённый внешний порт — ошибка
 	// сразу при открытии окна, а не после ухода из поля: иначе «Save» недоступна без видимой причины.
 	await ubus('uci', 'set', { config: 'firewall', section: sidA, values: { reflection: '0', src_ip: '198.51.100.0/24', src_dport: '0' } });
 	await ubus('uci', 'commit', { config: 'firewall' });
@@ -950,7 +935,7 @@ async function waitApply(page) {
 	result(dE?.title == 'Port forward' && dE.del && fE.src_dport == '8080' && fE.dest_port == '8081' && fE.reflection == '0' && fE.src_ip == '198.51.100.0/24' && fE.dest == 'lan' &&
 		fE.proto == 'tcp' && fE.name == 'Test web' && fE.target == 'DNAT', '«Входящие»: правка проброса — чужие опции на месте', JSON.stringify({ dE, fE }));
 
-	// (f) IP вручную вне известных сетей — секция без зоны назначения; затем «Delete» в окне — секции нет.
+	// IP вручную вне известных сетей — секция без зоны назначения; затем «Delete» в окне — секции нет.
 	await openDlg('[data-act="fwd-add"]');
 	await fill('ext', '25565');
 	await pick('dev', 'other');
@@ -965,7 +950,7 @@ async function waitApply(page) {
 	result(fF.dest_ip == '10.9.9.9' && !('dest' in fF) && fF.proto == 'tcp udp' && goneF, '«Входящие»: IP вручную — без зоны назначения; «Delete» — секции нет',
 		JSON.stringify({ fF, goneF }));
 
-	// (g) «Delete» проброса из (a). Строки, открывшей окно, больше нет — фокус переходит на «Add», а не теряется.
+	// «Delete» проброса из (a). Строки, открывшей окно, больше нет — фокус переходит на «Add», а не теряется.
 	await openDlg(`.fwd li[data-sid="${sidA}"] [data-act="fwd-edit"]`);
 	await tap('dialog.dlg[open] [data-act="fwd-delete"]');
 	await sleep(300);
@@ -981,7 +966,7 @@ async function waitApply(page) {
 	result(!left.some((s) => s['.name'] == sidA) && !rowsG.length && /No port forwards from the tunnel yet/.test(await pageText(page)) && goBelow && focusG == 'fwd-add',
 		'«Входящие»: «Delete» — фокус на «Add», секции нет, на карточке — «нет пробросов», ссылка — своей строкой', JSON.stringify({ left, rowsG, goBelow, focusG }));
 
-	// «Туннель» (spec §5.4): состояние, подключение к Трубе, контроль. На стенде awg0 — dummy с пиром
+	// «Туннель»: состояние, подключение к Трубе, контроль. На стенде awg0 — dummy с пиром
 	// 203.0.113.10:51820 (stand.sh).
 	await page.goto(url('tunnel'), { waitUntil: 'networkidle2' });
 	await settled(page);
@@ -1027,7 +1012,7 @@ async function waitApply(page) {
 		goodMtu.apply === false && goodMtu.uci === '1280', '«Туннель»: MTU — неверное не пишется и держит «Применить» и «Save & Apply»', JSON.stringify({ badMtu, goodMtu }));
 	await Promise.all([ page.waitForNavigation({ waitUntil: 'networkidle2' }).catch(() => {}), tap('.changes [data-act="reset"]') ]);
 	await settled(page);
-	// Импорт router.conf (Решение 5): файл в зону — UCI браузера; адрес, строка «Протокол» и поля — новые. S1 меньше
+	// Импорт router.conf: файл в зону — UCI браузера; адрес, строка «Протокол» и поля — новые. S1 меньше
 	// 12 при защите заголовков — ошибка у поля.
 	fs.writeFileSync(`${out}/router.conf`, [ '[Interface]', 'PrivateKey = cHJpdmF0ZS1rZXktZm9yLXRlc3RzLW9ubHk=', 'Address = 10.77.77.2/30', 'MTU = 1313',
 		'Jc = 4', 'S1 = 20', 'S2 = 40', 'H1 = 100-200', 'HeaderProtectionKey = aHBrLWZvci10ZXN0cw==', '[Peer]', 'PublicKey = cHVibGljLWtleS1mb3ItdGVzdHMtb25seQ==',
@@ -1133,7 +1118,7 @@ async function waitApply(page) {
 
 	await page.goto(url('tunnel'), { waitUntil: 'networkidle2' });
 	await settled(page);
-	// ---- Отложенные мелочи этапа 4 (этап 7) ----
+	// ---- «Туннель»: состояние, ввод и импорт ----
 	// «Состояние» — то, что действует у службы: сторож, выключенный в браузере и не применённый, ещё работает.
 	// Строка «Сторож Туннеля» до и после переключения в браузере — одна и та же.
 	const stateWd = () => page.evaluate(() => document.querySelector('.truba-root').shadowRoot.querySelector('.card.state .kv dd')?.innerText || '');
@@ -1193,7 +1178,7 @@ async function waitApply(page) {
 	await Promise.all([ page.waitForNavigation({ waitUntil: 'networkidle2' }).catch(() => {}), tap('.changes [data-act="reset"]') ]);
 	await settled(page);
 
-	// ---- Вёрстка «Туннеля» (замечания с Роутера после 1.2.0-r1) ----
+	// ---- Вёрстка «Туннеля» ----
 	// Значок состояния и переключатель в заголовке карточки стоят на одной средней линии, а не на базовой линии текста.
 	const mid = await page.evaluate(() => {
 		const a = document.querySelector('.truba-root').shadowRoot.querySelector('.card.state .card-h .aside');
@@ -1242,7 +1227,7 @@ async function waitApply(page) {
 	result(awgW.j && awgW.s && awgW.h && awgW.i && awgW.sj && awgW.groups >= 4 && awgW.side && awgN.stacked && awgN.over <= 0,
 		'«Туннель»: параметры AWG группами по строкам; зона файла и поле текста — рядом, на телефоне — одно под другим', JSON.stringify({ awgW, awgN }));
 
-	// «Журнал» (spec §5.7): строки Трубы, её watchdog, mosdns и интерфейса Туннеля — новые сверху; уровень,
+	// «Журнал»: строки Трубы, её watchdog, mosdns и интерфейса Туннеля — новые сверху; уровень,
 	// источники, «Следить» и «Скачать». На стенде есть строки netifd об awg0 — источник awg.
 	await page.goto(url('log'), { waitUntil: 'networkidle2' });
 	await settled(page);
@@ -1456,7 +1441,7 @@ async function waitApply(page) {
 		return r.top >= 0 && r.bottom <= window.innerHeight;
 	});
 	result(inView, 'панель изменений на 1280×900 — в пределах экрана');
-	// (g) Несохранённое изменение переключателя отмечено точкой «изменено», как у полей (spec §3.6).
+	// Несохранённое изменение переключателя отмечено точкой «изменено», как у полей.
 	const heroDot = () => shadowHas(page, '.hero .sw .dot.warn');
 	const dot1 = await heroDot();
 	await (await shadowSel(page, 'input[data-opt="truba.main.routing"]')).click();
@@ -1465,7 +1450,7 @@ async function waitApply(page) {
 	await (await shadowSel(page, 'input[data-opt="truba.main.routing"]')).click();
 	await sleep(200);
 	result(dot1 && !dot0 && await heroDot(), '«Обзор»: у изменённого переключателя — точка «изменено»', `${dot1}/${dot0}`);
-	// (i) Панель изменений: пока идёт сохранение, второе нажатие «Применить» его не повторяет; отказ — текстом на панели.
+	// Панель изменений: пока идёт сохранение, второе нажатие «Применить» его не повторяет; отказ — текстом на панели.
 	await sr(async () => {
 		const u = await L.require('uci');
 		window.__save = u.save;
@@ -1592,7 +1577,7 @@ async function waitApply(page) {
 	result(log375.doc <= log375.win && log375.tr <= 0 && cols375.rows > 0 && cols375.bad === 0,
 		'«Журнал» 375: без горизонтальной прокрутки, время — одной строкой', JSON.stringify({ ...log375, cols375 }));
 	await page.screenshot({ path: `${out}/log-375.png`, fullPage: true });
-	// (i) «DNS» на телефоне: длинный адрес DoH переносится, поле и кнопка — без горизонтальной прокрутки.
+	// «DNS» на телефоне: длинный адрес DoH переносится, поле и кнопка — без горизонтальной прокрутки.
 	await page.goto(url('dns'), { waitUntil: 'networkidle2' });
 	await settled(page);
 	const longUp = 'https://dns.very-long-resolver-name.example.com/dns-query-with-a-long-path';
@@ -1610,7 +1595,7 @@ async function waitApply(page) {
 		'«DNS» 375: длинный адрес — без горизонтальной прокрутки, поле адреса полной высоты', JSON.stringify(dns375));
 	await page.screenshot({ path: `${out}/dns-375.png`, fullPage: true });
 	await resetDns();
-	// (o) Пометка неверного сохранённого адреса на телефоне не сжимает адрес в узкую колонку.
+	// Пометка неверного сохранённого адреса на телефоне не сжимает адрес в узкую колонку.
 	t0 = await time();
 	await setUp('direct_upstream', [ ...effUp('direct_upstream'), 'htps://bad-resolver.example/dns-query' ]);
 	await applied(t0, () => true);
@@ -1621,7 +1606,7 @@ async function waitApply(page) {
 	t0 = await time();
 	await setUp('direct_upstream', prevUp.direct_upstream);
 	await applied(t0, () => true);
-	// (h) «Входящие» на телефоне: строка проброса с длинным именем и окно правки — без горизонтальной прокрутки.
+	// «Входящие» на телефоне: строка проброса с длинным именем и окно правки — без горизонтальной прокрутки.
 	const longFwd = (await ubus('uci', 'add', { config: 'firewall', type: 'redirect', values: { name: 'A very long port forward name for the home media server',
 		src: 'truba', target: 'DNAT', proto: 'tcp udp', src_dport: '30000-30100', dest_ip: '192.168.1.50', dest_port: '30000' } })).section;
 	await ubus('uci', 'commit', { config: 'firewall' });

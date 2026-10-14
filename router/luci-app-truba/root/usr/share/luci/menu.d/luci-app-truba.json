@@ -44,14 +44,5 @@
 		"title": "Logs",
 		"order": 60,
 		"action": { "type": "view", "path": "truba/log" }
-	},
-	"admin/services/truba/routing": {
-		"action": { "type": "alias", "path": "admin/services/truba/rules" }
-	},
-	"admin/services/truba/lists": {
-		"action": { "type": "alias", "path": "admin/services/truba/rules" }
-	},
-	"admin/services/truba/diagnostics": {
-		"action": { "type": "alias", "path": "admin/services/truba/log" }
 	}
 }
