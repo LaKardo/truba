@@ -54,7 +54,15 @@ function big_probe(dev, target) {
 	let mtu = iface_mtu(dev);
 	if (mtu < MTU_MIN_V4)
 		return null;
-	let s = ping_stats(U.run(sprintf('ping -c 3 -W %d -s %d -I %s %s', PING_WAIT, mtu - ICMP_HDR, U.shq(dev), U.shq(target))).out);
+	
+	// Вычислить размер данных и проверить валидность (защита от некорректного MTU)
+	let data_size = mtu - ICMP_HDR;
+	if (data_size <= 0 || data_size > 65507) { // max IP payload
+		U.warn_log(sprintf('invalid MTU for big_probe: mtu=%d, data_size=%d, dev=%s', mtu, data_size, dev));
+		return null;
+	}
+	
+	let s = ping_stats(U.run(sprintf('ping -c 3 -W %d -s %d -I %s %s', PING_WAIT, data_size, U.shq(dev), U.shq(target))).out);
 	return { ok: s.received >= 2, sent: s.sent, received: s.received, size: mtu, time: time() };
 }
 

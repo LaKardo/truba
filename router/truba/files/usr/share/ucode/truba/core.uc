@@ -63,6 +63,11 @@ function table_loaded() {
 
 // Поменять местами текущие и предыдущие Наборы правил. Вызывать под блокировкой LOCK_LISTS.
 function swap_lists() {
+	// Проверка, что блокировка удерживается вызывающим (защита от race condition)
+	if (!U.lock_busy(C.LOCK_LISTS)) {
+		die('swap_lists called without LOCK_LISTS held');
+	}
+	
 	let swapped = [];
 	for (let set in [ 'geoip', 'geosite' ]) {
 		let file = C.DAT_FILES[set];
