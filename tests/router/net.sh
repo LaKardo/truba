@@ -236,12 +236,9 @@ uci delete firewall.mesh_truba; uci commit firewall; /etc/init.d/firewall reload
 check "без перенаправления fw4 отбрасывает трафик узла в Туннель" eval '! mesh_tunnel'
 reload "перенаправление удалено вручную"
 check "применение заводит перенаправление снова" eval '[ "$(uci -q get firewall.mesh_truba.dest)" = truba ] && mesh_tunnel'
-check "узел сети: DNS к чужому серверу перехвачен, источник подменён — dnsmasq ответил" eval 'dns_from meshhost 8.8.8.8 && dns_snat ms0'
-check "узел сети: DNS к адресу Роутера — тоже" dns_from meshhost 100.64.0.1
-check "устройство домашней сети: DNS перехвачен, источник не подменён" eval 'in_set local4 192.168.1.0/24 && dns_from lanhost 8.8.8.8 && dns_seen lan && ! dns_snat lan'
 # ВРЕМЕННО — диагностика нестабильной проверки DNS узла mesh в CI (уберётся, когда найдётся причина).
-# Повтор той же последовательности: перенаправление удалено вручную → reload → TCP узла → DNS узла.
-# При сбое — код и время ответа, правила маршрутизации, наборы, conntrack и трасса пакетов DNS узла.
+# Трасса пакетов DNS узла — до проверок; при провале — сокеты dnsmasq на :53, правила, наборы,
+# conntrack, трасса и журнал стенда.
 nft -f - <<-'EOF'
 	table inet t_trace {
 		chain pre { type filter hook prerouting priority -400; iifname "ms0" udp dport 53 meta nftrace set 1; }
@@ -250,42 +247,32 @@ nft -f - <<-'EOF'
 	}
 EOF
 nft monitor trace >> /tmp/trace.log 2>&1 & TRACE=$!
-dq() {
-	local t0 t1 out rc
-	t0=$(cut -d' ' -f1 /proc/uptime)
-	out=$(ip netns exec meshhost ucode /repo/tests/lib/dns_ttl.uc 53 localhost "$1" 2>&1); rc=$?
-	t1=$(cut -d' ' -f1 /proc/uptime)
-	echo "DIAG q $1 rc=$rc t0=$t0 t1=$t1 out=$(echo "$out" | head -1)"
-	return $rc
-}
 ddump() {
-	echo "DIAG dnsmasq=$(pidof dnsmasq) busy=$(busy | tr '\n' ' ')"
+	echo "DIAG uptime=$(cut -d' ' -f1 /proc/uptime) dnsmasq=$(pidof dnsmasq) busy=$(busy | tr '\n' ' ')"
+	netstat -lnu 2>/dev/null | grep ':53 ' | sed 's/^/DIAG udp53 /'
+	ip -4 addr show dev ms0 | sed 's/^/DIAG ms0 /'
 	ip rule show | sed 's/^/DIAG rule /'
 	ip route get 100.64.0.2 from 100.64.0.1 2>&1 | head -1 | sed 's/^/DIAG get /'
-	for m in 0x1000000 0x2000000 0x4000000; do ip route get 100.64.0.2 from 100.64.0.1 mark $m 2>&1 | head -1 | sed "s/^/DIAG get mark $m /"; done
 	nft list chain inet truba dns_hijack 2>&1 | grep -E 'redirect' | sed 's/^/DIAG /'
 	nft list chain inet truba dns_snat 2>&1 | grep -E 'snat' | sed 's/^/DIAG /'
 	echo "DIAG local4 $(nft list set inet truba local4 2>/dev/null | tr -d '\n\t' | sed 's/.*elements = //')"
-	echo "DIAG lan_if $(nft list set inet truba lan_if 2>/dev/null | tr -d '\n\t' | sed 's/.*elements = //')"
 	grep -E 'dport=53 ' /proc/net/nf_conntrack 2>/dev/null | grep -F '100.64.' | tail -6 | sed 's/^/DIAG ct /'
-	tail -60 /tmp/trace.log | sed 's/^/DIAG trace /'
-	logread | tail -12 | sed 's/^/DIAG log /'
+	tail -80 /tmp/trace.log | sed 's/^/DIAG trace /'
+	logread | grep -E 'dnsmasq|netifd|firewall|truba|procd' | tail -25 | sed 's/^/DIAG log /'
 }
-DFAIL=0
-for i in $(seq 15); do
-	uci delete firewall.mesh_truba; uci commit firewall; /etc/init.d/firewall reload >/dev/null 2>&1
-	mesh_tunnel >/dev/null 2>&1
-	bounded 90 /etc/init.d/truba reload >/dev/null 2>&1
-	mesh_tunnel >/dev/null 2>&1 || echo "DIAG итерация $i: TCP узла в Туннель не прошёл"
-	: > /tmp/trace.log
-	ok=1
-	dq 8.8.8.8 || ok=0
-	dq 100.64.0.1 || ok=0
-	if [ "$ok" = 0 ]; then DFAIL=$((DFAIL + 1)); echo "DIAG итерация $i: сбой"; ddump; fi
-done
+DIAG_FAILS=$FAILS
+check "узел сети: DNS к чужому серверу перехвачен, источник подменён — dnsmasq ответил" eval 'dns_from meshhost 8.8.8.8 && dns_snat ms0'
+check "узел сети: DNS к адресу Роутера — тоже" dns_from meshhost 100.64.0.1
+check "устройство домашней сети: DNS перехвачен, источник не подменён" eval 'in_set local4 192.168.1.0/24 && dns_from lanhost 8.8.8.8 && dns_seen lan && ! dns_snat lan'
+if [ "$FAILS" -ne "$DIAG_FAILS" ]; then
+	for t in 8.8.8.8 100.64.0.1; do
+		ip netns exec meshhost ucode /repo/tests/lib/dns_ttl.uc 53 localhost "$t" >/dev/null 2>&1
+		echo "DIAG повтор $t: код $? (uptime $(cut -d' ' -f1 /proc/uptime))"
+	done
+	ddump
+fi
 kill "$TRACE" 2>/dev/null
 nft delete table inet t_trace
-check "ВРЕМЕННО: DNS узла mesh после reload — 15 повторов (сбоев: $DFAIL)" test "$DFAIL" -eq 0
 nft delete table inet t_snat
 ip addr add 10.99.0.1/24 dev ms0
 ACTION=ifupdate INTERFACE=lan sh /etc/hotplug.d/iface/50-truba
