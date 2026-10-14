@@ -41,7 +41,7 @@
 		"action": { "type": "view", "path": "truba/inbound" }
 	},
 	"admin/services/truba/log": {
-		"title": "Log",
+		"title": "Logs",
 		"order": 60,
 		"action": { "type": "view", "path": "truba/log" }
 	},

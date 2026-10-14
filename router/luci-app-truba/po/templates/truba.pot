@@ -134,6 +134,7 @@ msgid "The check failed: %s"
 msgstr ""
 
 #: htdocs/luci-static/resources/truba/common.js
+msgctxt "truba"
 msgid "The check failed."
 msgstr ""
 
@@ -202,6 +203,7 @@ msgid "the file cannot be read, the current one is kept"
 msgstr ""
 
 #: htdocs/luci-static/resources/truba/common.js
+msgctxt "truba"
 msgid "updated"
 msgstr ""
 
@@ -366,10 +368,12 @@ msgid "not configured"
 msgstr ""
 
 #: htdocs/luci-static/resources/truba/common.js
+msgctxt "truba"
 msgid "disabled"
 msgstr ""
 
 #: htdocs/luci-static/resources/truba/common.js
+msgctxt "truba"
 msgid "down"
 msgstr ""
 
@@ -398,7 +402,7 @@ msgid "Inbound"
 msgstr ""
 
 #: menu.d
-msgid "Log"
+msgid "Logs"
 msgstr ""
 
 #: htdocs/luci-static/resources/truba/ui/flow.js
@@ -438,6 +442,7 @@ msgid "invalid address, not used"
 msgstr ""
 
 #: htdocs/luci-static/resources/truba/ui/kit.js
+msgctxt "truba"
 msgid "Remove"
 msgstr ""
 
@@ -478,6 +483,7 @@ msgid "geosite categories containing the domain"
 msgstr ""
 
 #: htdocs/luci-static/resources/truba/ui/kit.js
+msgctxt "truba"
 msgid "none"
 msgstr ""
 
@@ -518,6 +524,7 @@ msgid "Fix the highlighted fields"
 msgstr ""
 
 #: htdocs/luci-static/resources/truba/ui/kit.js
+msgctxt "truba"
 msgid "Reset"
 msgstr ""
 
@@ -574,6 +581,7 @@ msgid "Not a MAC address"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/devices.js
+msgctxt "truba"
 msgid "Name"
 msgstr ""
 
@@ -606,6 +614,7 @@ msgid "All"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/devices.js
+msgctxt "truba"
 msgid "Active"
 msgstr ""
 
@@ -874,6 +883,7 @@ msgid "Port forwards from the tunnel"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/inbound.js
+msgctxt "truba"
 msgid "Enabled"
 msgstr ""
 
@@ -918,6 +928,7 @@ msgid "Sources"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/log.js
+msgctxt "truba"
 msgid "Follow"
 msgstr ""
 
@@ -1178,6 +1189,7 @@ msgid "missing"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/rules.js
+msgctxt "truba"
 msgid "Mode"
 msgstr ""
 
@@ -1534,15 +1546,43 @@ msgid "AmneziaWG parameters"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/tunnel.js
-msgid "H1–H4: a number or a range «from-to»; must match the Truba."
+msgid "Junk packets"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/tunnel.js
-msgid "Decoy packets before the handshake (CPS format); may differ from the Truba."
+msgid "Jc — how many, Jmin–Jmax — their size in bytes; may differ from the Truba."
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/tunnel.js
-msgid "AmneziaWG 3.1: random bytes added to data packets instead of padding to a multiple of 16, so packet lengths do not share one remainder; a range «from-to». May differ from the Truba; comes with router.conf."
+msgid "Packet prefixes"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/tunnel.js
+msgid "Random bytes before packets of each type; must match the Truba."
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/tunnel.js
+msgid "Headers"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/tunnel.js
+msgid "A number or a range «from-to»; must match the Truba."
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/tunnel.js
+msgid "Decoy packets"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/tunnel.js
+msgid "Sent before the handshake (CPS format); may differ from the Truba."
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/tunnel.js
+msgid "Come with router.conf."
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/tunnel.js
+msgid "Random bytes added to data packets instead of padding to a multiple of 16, so packet lengths do not share one remainder; a range «from-to». May differ from the Truba."
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/tunnel.js
@@ -1598,6 +1638,7 @@ msgid "Address"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/tunnel.js
+msgctxt "truba"
 msgid "MTU"
 msgstr ""
 
@@ -1619,6 +1660,10 @@ msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/tunnel.js
 msgid "Pings the Truba inside the tunnel with packets of three sizes, up to the whole tunnel MTU. Shows loss of large packets that a normal ping does not see: with it pages open slowly and downloads stall."
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/tunnel.js
+msgid "AmneziaWG keys and parameters"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/tunnel.js

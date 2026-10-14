@@ -78,7 +78,7 @@ const CHECK_ERRORS = {
 function checkErrorText(r) {
 	if (CHECK_ERRORS[r?.error])
 		return _('Not checked: %s').format(CHECK_ERRORS[r.error]);
-	return r?.message ? _('The check failed: %s').format(r.message) : _('The check failed.');
+	return r?.message ? _('The check failed: %s').format(r.message) : _('The check failed.', 'truba');
 }
 
 // Долгая проверка (NAT, Туннель): rpcd запускает её в фоне и отвечает сразу, а итог —
@@ -167,7 +167,7 @@ function setResult(s) {
 	if (!s)
 		return '—';
 	return s.ok
-		? '%s, %s'.format(s.changed ? _('updated') : _('no changes'), VIA_LABELS[s.via] || s.via)
+		? '%s, %s'.format(s.changed ? _('updated', 'truba') : _('no changes'), VIA_LABELS[s.via] || s.via)
 		: _('failed — %s').format((s.errors || []).map(setError).join('; ') || '?');
 }
 
@@ -647,9 +647,9 @@ function tunnelState(st) {
 	if (!t.configured)
 		return [ 'warn', _('not configured') ];
 	if (t.disabled)
-		return [ 'warn', _('disabled') ];
+		return [ 'warn', _('disabled', 'truba') ];
 	if (!t.up)
-		return [ 'err', _('down') ];
+		return [ 'err', _('down', 'truba') ];
 	if (h.state == 'down')
 		return [ 'err', _('not responding') ];
 	return [ 'ok', _('working') ];
@@ -716,7 +716,7 @@ const TABS = {
 	tunnel: _('Tunnel'),
 	dns: _('DNS'),
 	inbound: _('Inbound'),
-	log: _('Log')
+	log: _('Logs')
 };
 function tabUrl(tab) {
 	return L.url('admin/services/truba/' + tab);

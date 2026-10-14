@@ -115,6 +115,26 @@ async function waitApply(page) {
 	await Promise.all([ page.waitForNavigation({ waitUntil: 'networkidle2' }), page.keyboard.press('Enter') ]);
 	session = await page.evaluate(() => ({ sid: L.env.sessionid, path: L.env.ubuspath }));
 
+	// Переводы Трубы — её собственные. LuCI отдаёт браузеру строки всех каталогов разом, и при одинаковом msgid
+	// берётся чужой перевод: «MTU» в каталоге LuCI — разметка <abbr>, «Log» — «Системный журнал». На стенде стоят
+	// русские каталоги LuCI и межсетевого экрана. Ни один из них не должен переводить строку Трубы иначе, чем её
+	// po. Совпавшим msgid нужен контекст «truba». Заголовки меню тема тоже переводит в браузере — _(title) без
+	// контекста: заголовок вкладки не должен совпадать со строкой каталога LuCI с другим переводом.
+	const poRu = fs.readFileSync('/repo/router/luci-app-truba/po/ru/truba.po', 'utf8').split(/\n\s*\n/).map((b) => {
+		const f = (k) => { const m = b.match(new RegExp('^' + k + ' (".*")$', 'm')); return m ? JSON.parse(m[1]) : null; };
+		return { ctx: f('msgctxt'), id: f('msgid'), str: f('msgstr') };
+	}).filter((e) => e.id);
+	const foreign = await page.evaluate(async (entries) => {
+		const src = await (await fetch(L.url('admin/translations', 'ru'))).text();
+		const tr = new Function('window', src + '; return window.TR;')({});
+		// Ключ — как у _() в cbi.js: «контекст \u0001 строка», sfh.
+		const key = (e) => sfh((e.ctx != null ? trimws(e.ctx) + '\u0001' : '') + trimws(e.id));
+		return { n: Object.keys(tr).length,
+			bad: entries.filter((e) => tr[key(e)] !== undefined && tr[key(e)] !== e.str).map((e) => `${e.ctx ? e.ctx + '|' : ''}${e.id} → ${tr[key(e)]}`) };
+	}, poRu);
+	result(foreign.n > 1000 && poRu.length > 100 && !foreign.bad.length, 'переводы: чужие каталоги не подменяют строки Трубы',
+		`${foreign.n} строк каталогов, ${poRu.length} строк po; ${foreign.bad.join('; ')}`);
+
 	// «Обзор» на новом интерфейсе — сразу после старта службы, пока история скорости почти пуста:
 	// пустые и единичные ряды uPlot не должны давать ошибок JS (их собирает page.on выше).
 	await page.goto(url('overview'), { waitUntil: 'networkidle2' });
@@ -967,10 +987,10 @@ async function waitApply(page) {
 	await settled(page);
 	const tun = await page.evaluate(() => {
 		const r = document.querySelector('.truba-root').shadowRoot;
-		// Раскладка карточки: зона импорта — во всю ширину карточки, а не узкой колонкой чужой сетки.
-		const card = r.querySelector('.card.peer'), drop = card?.querySelector('.drop');
+		// Раскладка: импорт — своя карточка, зона во всю её ширину, а не узкой колонкой чужой сетки.
+		const card = r.querySelector('.card.awg'), drop = card?.querySelector('.drop');
 		return { stats: r.querySelectorAll('.card.state .stat').length, on: r.querySelector('input[data-opt="network.awg0.disabled"]')?.checked,
-			conn: (card?.innerText || '').replace(/\s+/g, ' ').slice(0, 100),
+			conn: (r.querySelector('.card.peer')?.innerText || '').replace(/\s+/g, ' ').slice(0, 100),
 			wide: (card && drop) ? +(drop.getBoundingClientRect().width / card.clientWidth).toFixed(2) : 0 };
 	});
 	result(tun.stats == 4 && tun.on === true && /203\.0\.113\.10:51820/.test(tun.conn) && tun.wide >= 0.8,
@@ -1016,10 +1036,10 @@ async function waitApply(page) {
 	// Ждать карточку, смонтированную заново: «AmneziaWG 3.1» прежняя показывает на миг раньше, а её поле S1 —
 	// ещё прежнее (пустое). Иначе раскрылся бы блок прежней карточки, а набор ушёл бы мимо поля.
 	await page.waitForFunction(() => {
-		const c = document.querySelector('.truba-root')?.shadowRoot?.querySelector('.card.peer');
-		return /AmneziaWG 3\.1/.test(c?.innerText || '') && c.querySelector('input[data-opt="network.awg0.awg_s1"]')?.value == '20';
+		const r = document.querySelector('.truba-root')?.shadowRoot, c = r?.querySelector('.card.peer');
+		return /AmneziaWG 3\.1/.test(c?.innerText || '') && r.querySelector('input[data-opt="network.awg0.awg_s1"]')?.value == '20';
 	}, { timeout: 5000 }).catch(() => {});
-	await page.evaluate(() => document.querySelector('.truba-root').shadowRoot.querySelectorAll('.card.peer details.fold').forEach((d) => { d.open = true; }));
+	await page.evaluate(() => document.querySelector('.truba-root').shadowRoot.querySelectorAll('.card.awg details.fold').forEach((d) => { d.open = true; }));
 	const imp = await page.evaluate(async () => {
 		const u = await L.require('uci'), r = document.querySelector('.truba-root').shadowRoot;
 		return { text: (r.querySelector('.card.peer')?.innerText || '').replace(/\s+/g, ' ').slice(0, 160), proto: u.get('network', 'awg0', 'proto'),
@@ -1038,7 +1058,7 @@ async function waitApply(page) {
 	await page.keyboard.type('5');
 	imp.s1Mid = await s1h?.evaluate((e) => ({ value: e.value, connected: e.isConnected }));
 	await page.keyboard.press('Tab');
-	imp.s1Err = await page.waitForFunction(() => document.querySelector('.truba-root').shadowRoot.querySelector('.card.peer .field.bad [role="alert"]')?.textContent,
+	imp.s1Err = await page.waitForFunction(() => document.querySelector('.truba-root').shadowRoot.querySelector('.card.awg .field.bad [role="alert"]')?.textContent,
 		{ timeout: 5000 }).then((h) => h.jsonValue()).catch(() => '');
 	imp.s1Typed = await page.evaluate(() => {
 		const r = document.querySelector('.truba-root').shadowRoot, i = r.querySelector('input[data-opt="network.awg0.awg_s1"]');
@@ -1057,15 +1077,20 @@ async function waitApply(page) {
 		return { err: r.querySelector('.drop .err-text')?.textContent || '', bar: !!r.querySelector('.changes') };
 	});
 	result(/No PrivateKey/.test(badConf.err) && !badConf.bar, '«Туннель»: неверная вставка — ошибка под зоной, изменений нет', JSON.stringify(badConf));
-	// Туннель не настроен (секции интерфейса нет): пояснение и импорт, переключатель недоступен.
+	// Туннель не настроен (секции интерфейса нет): пояснение и импорт в «Подключении к Трубе», карточки ключей и
+	// параметров нет, переключатель недоступен. Рядом с карточкой контроля не остаётся пустого места: зона и поле
+	// для текста в половине ширины — одно под другим.
 	await page.evaluate(async () => (await L.require('truba.ui.app')).remove('network', 'awg0'));
 	await sleep(300);
 	const nc = await page.evaluate(() => {
-		const r = document.querySelector('.truba-root').shadowRoot;
-		return { text: (r.querySelector('.card.peer')?.innerText || '').replace(/\s+/g, ' ').slice(0, 100), drop: !!r.querySelector('.card.peer .drop'),
-			sw: r.querySelector('input[data-opt="network.awg0.disabled"]')?.disabled };
+		const r = document.querySelector('.truba-root').shadowRoot, c = r.querySelector('.card.peer');
+		const b = c?.getBoundingClientRect(), last = c?.lastElementChild?.getBoundingClientRect();
+		return { text: (c?.innerText || '').replace(/\s+/g, ' ').slice(0, 100), drop: !!r.querySelector('.card.peer .drop'), awg: !!r.querySelector('.card.awg'),
+			sw: r.querySelector('input[data-opt="network.awg0.disabled"]')?.disabled, h: Math.round(b?.height),
+			empty: (b && last) ? Math.round(b.bottom - parseFloat(getComputedStyle(c).paddingBottom) - last.bottom) : null };
 	});
-	result(/not configured yet/.test(nc.text) && nc.drop && nc.sw === true, '«Туннель»: не настроен — пояснение, импорт, переключатель недоступен', JSON.stringify(nc));
+	result(/not configured yet/.test(nc.text) && nc.drop && !nc.awg && nc.sw === true && nc.empty != null && nc.empty <= Math.max(80, nc.h / 4),
+		'«Туннель»: не настроен — пояснение и импорт в «Подключении», переключатель недоступен, рядом нет пустого места', JSON.stringify(nc));
 	// Импорт после удаления секции в браузере: интерфейс снова есть, карточка — с адресом из файла.
 	await (await el('.card.peer .drop input[type="file"]'))?.uploadFile(`${out}/router.conf`);
 	const reimp = await page.waitForFunction(() => /198\.51\.100\.7:40243/.test(document.querySelector('.truba-root')?.shadowRoot?.querySelector('.card.peer')?.innerText || ''),
@@ -1148,15 +1173,15 @@ async function waitApply(page) {
 	});
 	result(dz.taPrevented && /large/.test(dz.err) && !!dz.label, '«Туннель»: импорт — предел размера, drop на поле текста, имя поля', JSON.stringify(dz));
 	// После ошибки файла вставка текста показывает свою ошибку, а не прежнюю «слишком большой».
-	await (await el('.card.peer .drop textarea'))?.type('[Peer]\nPublicKey = x');
-	await tap('.card.peer .drop [data-act="import"]');
+	await (await el('.card.awg .drop textarea'))?.type('[Peer]\nPublicKey = x');
+	await tap('.card.awg .drop [data-act="import"]');
 	await sleep(300);
-	const dzErr = await page.evaluate(() => document.querySelector('.truba-root').shadowRoot.querySelector('.card.peer .drop .err-text')?.textContent || '');
+	const dzErr = await page.evaluate(() => document.querySelector('.truba-root').shadowRoot.querySelector('.card.awg .drop .err-text')?.textContent || '');
 	result(/No PrivateKey/.test(dzErr), '«Туннель»: после ошибки файла — ошибка вставленного текста', dzErr);
 	// Фокус с клавиатуры на выборе файла виден рамкой фокуса у зоны.
 	await page.evaluate(() => document.querySelector('.truba-root').shadowRoot.querySelector('.card.peer [data-act="tunnel-test"]')?.focus());
 	let zoneRing = null;
-	for (let i = 0; i < 12 && !zoneRing?.file; i++) {
+	for (let i = 0; i < 16 && !zoneRing?.file; i++) {
 		await page.keyboard.press('Tab');
 		zoneRing = await page.evaluate(() => {
 			const r = document.querySelector('.truba-root').shadowRoot, a = r.activeElement;
@@ -1167,6 +1192,55 @@ async function waitApply(page) {
 	await page.evaluate(() => document.querySelector('.truba-root').shadowRoot.activeElement?.blur());
 	await Promise.all([ page.waitForNavigation({ waitUntil: 'networkidle2' }).catch(() => {}), tap('.changes [data-act="reset"]') ]);
 	await settled(page);
+
+	// ---- Вёрстка «Туннеля» (замечания с Роутера после 1.2.0-r1) ----
+	// Значок состояния и переключатель в заголовке карточки стоят на одной средней линии, а не на базовой линии текста.
+	const mid = await page.evaluate(() => {
+		const a = document.querySelector('.truba-root').shadowRoot.querySelector('.card.state .card-h .aside');
+		const c = (e) => { const b = e?.getBoundingClientRect(); return b ? b.top + b.height / 2 : NaN; };
+		return Math.abs(c(a?.querySelector('.badge')) - c(a?.querySelector('.sw')));
+	});
+	result(mid <= 1, '«Туннель»: значок состояния — на одной линии с переключателем', String(mid));
+	// Импорт и параметры AWG занимают свою карточку во всю ширину. Рядом с длинной карточкой не остаётся пустого
+	// места: на Роутере «Подключение» с раскрытыми параметрами тянулось на всю страницу, а соседняя «Если Туннель
+	// не отвечает» оставалась пустой. Пустое место — у карточки в ряду из нескольких: от её содержимого до низа.
+	const slack = () => page.evaluate(() => {
+		const rows = {};
+		for (const c of document.querySelector('.truba-root').shadowRoot.querySelectorAll('.grid > .card')) {
+			const b = c.getBoundingClientRect(), last = c.lastElementChild?.getBoundingClientRect();
+			const empty = Math.round(b.bottom - parseFloat(getComputedStyle(c).paddingBottom) - (last?.bottom ?? b.top));
+			(rows[Math.round(b.top)] ||= []).push({ cls: c.className.trim(), h: Math.round(b.height), empty });
+		}
+		return Object.values(rows).filter((x) => x.length > 1).flat().filter((x) => x.empty > Math.max(80, x.h / 4));
+	});
+	const folds = (open) => page.evaluate((open) => document.querySelector('.truba-root').shadowRoot.querySelectorAll('details.fold').forEach((d) => { d.open = open; }), open);
+	const slackShut = await slack();
+	await folds(true);
+	await sleep(200);
+	const slackOpen = await slack();
+	result(!slackShut.length && !slackOpen.length && await shadowHas(page, '.card.awg.w3 details.fold'),
+		'«Туннель»: импорт и параметры AWG — своя карточка во всю ширину, рядом нет пустого места', JSON.stringify({ slackShut, slackOpen }));
+	// Параметры AWG — группами: мусорные пакеты, добавки, заголовки — каждая одной строкой; приманки — по две
+	// в строке. Зона файла и поле для текста стоят рядом и одной высоты.
+	const awgLay = () => page.evaluate(() => {
+		const r = document.querySelector('.truba-root').shadowRoot;
+		const box = (k) => r.querySelector(`input[data-opt="network.awg0.awg_${k}"]`)?.getBoundingClientRect();
+		const row = (ks) => ks.every((k) => box(k) && Math.abs(box(k).top - box(ks[0]).top) <= 1);
+		const zone = r.querySelector('.card.awg .drop .zone')?.getBoundingClientRect(), ta = r.querySelector('.card.awg .drop textarea')?.getBoundingClientRect();
+		const tr = r.querySelector('.tr');
+		return { j: row([ 'jc', 'jmin', 'jmax' ]), s: row([ 's1', 's2', 's3', 's4' ]), h: row([ 'h1', 'h2', 'h3', 'h4' ]), i: row([ 'i1', 'i2' ]) && row([ 'i3', 'i4' ]),
+			sj: !!box('s1') && box('s1').top > box('jc').top + 1, groups: r.querySelectorAll('.card.awg .awg-g').length,
+			side: !!zone && !!ta && Math.abs(zone.top - ta.top) <= 1 && ta.left >= zone.right && Math.abs(zone.height - ta.height) <= 1,
+			stacked: !!zone && !!ta && ta.top >= zone.bottom, over: Math.max(document.documentElement.scrollWidth - innerWidth, tr.scrollWidth - tr.clientWidth) };
+	});
+	const awgW = await awgLay();
+	await page.setViewport({ width: 375, height: 812 });
+	await sleep(300);
+	const awgN = await awgLay();
+	await page.setViewport({ width: 1280, height: 900 });
+	await folds(false);
+	result(awgW.j && awgW.s && awgW.h && awgW.i && awgW.sj && awgW.groups >= 4 && awgW.side && awgN.stacked && awgN.over <= 0,
+		'«Туннель»: параметры AWG группами по строкам; зона файла и поле текста — рядом, на телефоне — одно под другим', JSON.stringify({ awgW, awgN }));
 
 	// «Журнал» (spec §5.7): строки Трубы, её watchdog, mosdns и интерфейса Туннеля — новые сверху; уровень,
 	// источники, «Следить» и «Скачать». На стенде есть строки netifd об awg0 — источник awg.

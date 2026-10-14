@@ -79,6 +79,7 @@ msgstr "%d мин назад"
 msgid "%d h ago"
 msgstr "%d ч назад"
 
+msgctxt "truba"
 msgid "Name"
 msgstr "Название"
 
@@ -106,6 +107,7 @@ msgstr "Ошибка: %s"
 msgid "geosite categories containing the domain"
 msgstr "Категории geosite, в которых есть домен"
 
+msgctxt "truba"
 msgid "none"
 msgstr "нет"
 
@@ -163,6 +165,7 @@ msgstr "Устройства открывают порты сами; miniupnpd �
 msgid "Package luci-app-upnp is not installed."
 msgstr "Пакет luci-app-upnp не установлен."
 
+msgctxt "truba"
 msgid "disabled"
 msgstr "выключен"
 
@@ -196,6 +199,7 @@ msgstr "Текущая версия"
 msgid "Previous version"
 msgstr "Предыдущая версия"
 
+msgctxt "truba"
 msgid "updated"
 msgstr "обновлён"
 
@@ -265,6 +269,7 @@ msgstr "работает"
 msgid "not responding"
 msgstr "не отвечает"
 
+msgctxt "truba"
 msgid "down"
 msgstr "не поднят"
 
@@ -337,6 +342,7 @@ msgstr "Сбросить Действия всех Категорий этого
 msgid "Which traffic goes through the tunnel. Categories are taken from geoip.dat and geosite.dat as they are; new categories are never created."
 msgstr "Какой трафик идёт через Туннель. Категории берутся из geoip.dat и geosite.dat как есть; новые Категории не создаются."
 
+msgctxt "truba"
 msgid "Mode"
 msgstr "Режим"
 
@@ -367,11 +373,9 @@ msgstr "Импортировать"
 msgid "AmneziaWG interface %s. Settings are stored in the standard network configuration and are also visible in Network → Interfaces."
 msgstr "Интерфейс AmneziaWG %s. Настройки хранятся в стандартной конфигурации сети и видны также в «Сеть → Интерфейсы»."
 
+msgctxt "truba"
 msgid "MTU"
 msgstr "MTU"
-
-msgid "Decoy packets before the handshake (CPS format); may differ from the Truba."
-msgstr "Пакеты-приманки перед рукопожатием (формат CPS); могут отличаться от Трубы."
 
 msgid "Keepalive, s"
 msgstr "Keepalive, с"
@@ -441,9 +445,6 @@ msgstr "Случайные хвосты (RandomTrailers)"
 
 msgid "Content padding"
 msgstr "Добавка к пакетам"
-
-msgid "AmneziaWG 3.1: random bytes added to data packets instead of padding to a multiple of 16, so packet lengths do not share one remainder; a range «from-to». May differ from the Truba; comes with router.conf."
-msgstr "AmneziaWG 3.1: случайные байты к пакетам данных вместо дополнения до кратного 16, чтобы длины пакетов не давали один остаток; диапазон «от-до». Может отличаться от Трубы; приходит с router.conf."
 
 msgid "Leave empty with random trailers: the module would use the padding instead of them"
 msgstr "Со случайными хвостами оставьте пустым: модуль взял бы добавку вместо них"
@@ -694,6 +695,7 @@ msgstr "UPnP выкл"
 msgid "manual forwards: %d"
 msgstr "вручную: %d"
 
+msgctxt "truba"
 msgid "Remove"
 msgstr "Убрать"
 
@@ -778,6 +780,7 @@ msgstr "на Роутере нет места для временных файл
 msgid "Unapplied changes: %d"
 msgstr "Не применено изменений: %d"
 
+msgctxt "truba"
 msgid "Reset"
 msgstr "Сбросить"
 
@@ -862,6 +865,7 @@ msgstr "Имя, IP или MAC"
 msgid "Filter"
 msgstr "Фильтр"
 
+msgctxt "truba"
 msgid "Active"
 msgstr "Активные"
 
@@ -892,6 +896,7 @@ msgstr "Соединений: %d"
 msgid "domain or IP"
 msgstr "домен или IP"
 
+msgctxt "truba"
 msgid "The check failed."
 msgstr "Проверить не удалось."
 
@@ -1057,9 +1062,6 @@ msgstr "Число или диапазон «от-до» в пределах 0�
 msgid "Enter a whole number"
 msgstr "Введите целое число"
 
-msgid "Log"
-msgstr "Журнал"
-
 msgid "Handshake"
 msgstr "Рукопожатие"
 
@@ -1086,9 +1088,6 @@ msgstr "выкл"
 
 msgid "AmneziaWG parameters"
 msgstr "Параметры AmneziaWG"
-
-msgid "H1–H4: a number or a range «from-to»; must match the Truba."
-msgstr "H1–H4: число или диапазон «от-до»; должны совпадать с Трубой."
 
 msgid "set"
 msgstr "задан"
@@ -1132,6 +1131,7 @@ msgstr "Ошибки"
 msgid "Sources"
 msgstr "Источники"
 
+msgctxt "truba"
 msgid "Follow"
 msgstr "Следить"
 
@@ -1234,6 +1234,7 @@ msgstr "Пусто — тот же, что внешний"
 msgid "Delete"
 msgstr "Удалить"
 
+msgctxt "truba"
 msgid "Enabled"
 msgstr "Включён"
 
@@ -1257,3 +1258,39 @@ msgstr "Файл не читается: %s"
 
 msgid "Keeps the provider NAT mapping open so inbound connections via the Truba IP reach the router. A range «from-to» (AmneziaWG 3.1) gives a random period, so an idle tunnel has no steady rhythm. Empty — no keepalive."
 msgstr "Держит открытым отображение в NAT провайдера, чтобы входящие через IP Трубы доходили до Роутера. Диапазон «от-до» (AmneziaWG 3.1) даёт случайный период: у простаивающего Туннеля нет ровного ритма. Пусто — без keepalive."
+
+msgid "AmneziaWG keys and parameters"
+msgstr "Ключи и параметры AmneziaWG"
+
+msgid "Junk packets"
+msgstr "Мусорные пакеты"
+
+msgid "Jc — how many, Jmin–Jmax — their size in bytes; may differ from the Truba."
+msgstr "Jc — сколько, Jmin–Jmax — их размер в байтах; могут отличаться от Трубы."
+
+msgid "Packet prefixes"
+msgstr "Префиксы пакетов"
+
+msgid "Random bytes before packets of each type; must match the Truba."
+msgstr "Случайные байты перед пакетами каждого типа; должны совпадать с Трубой."
+
+msgid "Headers"
+msgstr "Заголовки"
+
+msgid "A number or a range «from-to»; must match the Truba."
+msgstr "Число или диапазон «от-до»; должны совпадать с Трубой."
+
+msgid "Decoy packets"
+msgstr "Пакеты-приманки"
+
+msgid "Sent before the handshake (CPS format); may differ from the Truba."
+msgstr "Отправляются перед рукопожатием (формат CPS); могут отличаться от Трубы."
+
+msgid "Come with router.conf."
+msgstr "Приходят с router.conf."
+
+msgid "Random bytes added to data packets instead of padding to a multiple of 16, so packet lengths do not share one remainder; a range «from-to». May differ from the Truba."
+msgstr "Случайные байты к пакетам данных вместо дополнения до кратного 16, чтобы длины пакетов не давали один остаток; диапазон «от-до». Может отличаться от Трубы."
+
+msgid "Logs"
+msgstr "Журнал"

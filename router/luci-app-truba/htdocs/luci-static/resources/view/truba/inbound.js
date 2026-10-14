@@ -30,7 +30,7 @@ function NatCard({ st }) {
 		<${kit.KV} rows=${s.rows.map(([ k, v, lv ]) => [ k, lv ? html`<${kit.Dot} level=${lv} /> ${v}` : v ])} />
 		<p class="mu">${'%s: %s'.format(_('Checked'), s.when)}</p>
 		<${kit.Fold} title=${_('STUN servers')}>
-			${s.servers.length ? html`<ul class="nat-srv">${s.servers.map((x) => html`<li class="num">${x}</li>`)}</ul>` : html`<${kit.Empty} text=${_('none')} />`}
+			${s.servers.length ? html`<ul class="nat-srv">${s.servers.map((x) => html`<li class="num">${x}</li>`)}</ul>` : html`<${kit.Empty} text=${_('none', 'truba')} />`}
 		</${kit.Fold}>
 		<p class="mu">${_('This checks the Truba layer only. For the full RFC 5780 test run NatTypeTester on a PC in the home network whose device policy is «All via tunnel».')}</p>
 	</${kit.Card}>`;
@@ -119,7 +119,7 @@ function FwdDialog({ row, devices, onClose, onDeleted }) {
 	return html`<${kit.Dialog} open=${true} title=${row ? _('Port forward') : _('New port forward')} confirm=${_('Save')}
 		disabled=${Object.keys(errs).length > 0} onConfirm=${save} onClose=${onClose}>
 		<div class="fwd-form">
-			${field('name', _('Name'), input('name'))}
+			${field('name', _('Name', 'truba'), input('name'))}
 			<div class="cols">
 				${field('proto', _('Protocol'), (a) => html`<select ...${a} value=${v.proto} onChange=${set('proto')}>
 					${protos.map(([ x, l ]) => html`<option value=${x} selected=${x == v.proto}>${l}</option>`)}
@@ -157,7 +157,7 @@ function FwdCard({ devices }) {
 				<b>${r.name || '—'}${app.pending('firewall', r.sid) ? html` <${kit.Dot} level="warn" label=${_('changed, not applied yet')} />` : ''}</b>
 				<span class="num">${'%s %s → %s:%s'.format(PROTOS[r.proto] || r.proto, r.ext, r.who || '?', r.port)}</span>
 			</button>
-			<${kit.Switch} label=${_('Enabled')} aria=${'%s: %s'.format(r.name || '%s %s'.format(PROTOS[r.proto] || r.proto, r.ext), _('Enabled'))}
+			<${kit.Switch} label=${_('Enabled', 'truba')} aria=${'%s: %s'.format(r.name || '%s %s'.format(PROTOS[r.proto] || r.proto, r.ext), _('Enabled', 'truba'))}
 				opt=${'firewall.' + r.sid + '.enabled'} dot=${false} checked=${r.on} onChange=${(on) => toggle(r.sid, on)} />
 		</li>`)}</ul>` : html`<${kit.Empty} text=${_('No port forwards from the tunnel yet.')} />`}
 		<div><${kit.Go} href=${L.url('admin/network/firewall/forwards')} label=${_('More options: Network → Firewall')} /></div>
