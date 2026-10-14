@@ -2,7 +2,7 @@
 'require baseclass';
 'require uci';
 
-// Интерфейс Туннеля AmneziaWG (spec §5.4): разбор router.conf, перенос его в настройки network и проверки
+// Интерфейс Туннеля AmneziaWG: разбор router.conf, перенос его в настройки network и проверки
 // опций интерфейса. Это опции network, а не Трубы: в truba.schema их нет, пределы и проверки — свои.
 
 // Ключи .conf (без регистра) → опции UCI протокола amneziawg.
@@ -136,7 +136,7 @@ function rangeError(v, max) {
 // Заголовки H1–H4 — 32-битные числа.
 const H_MAX = 4294967295;
 
-// Параметр AWG k (имя без awg_): проверки прежней страницы. S1–S4 и добавка к пакетам зависят от ключа
+// Ошибка параметра AWG k (имя без awg_). S1–S4 и добавка к пакетам зависят от ключа
 // защиты заголовков и RandomTrailers — они приходят импортом router.conf.
 function paramError(iface, k, v) {
 	v = String(v ?? '');
@@ -173,6 +173,6 @@ function version(iface) {
 }
 
 return baseclass.extend({
-	IFACE_KEYS, IFACE_BOOL, PEER_KEYS, NUM_PARAMS, CPS_PARAMS,
+	IFACE_KEYS, IFACE_BOOL, NUM_PARAMS, CPS_PARAMS,
 	parseConf, applyConf, peerSection, configured, mtuError, rangeError, paramError, version
 });

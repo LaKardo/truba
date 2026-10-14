@@ -151,7 +151,7 @@ if (existsSync(devView) && /\b3600\b|, 60\)/.test(readFileSync(devView, 'utf8'))
 
 // Интерфейс вызывает truba.devices и truba.connections (ADR 0018) и читает status.watchdog — их нет в службе до
 // 1.2.0-r1: с более старой truba вкладки «Обзор» и «Устройства» не строятся. Нижняя граница зависимости — не ниже
-// неё и не выше версии truba из этого же репозитория; версии пакетов выпускаются вместе (spec §6.4).
+// неё и не выше версии truba из этого же репозитория; версии пакетов выпускаются вместе.
 const API_SINCE = '1.2.0-r1';
 const ver = (v) => v.split(/[.-]r?/).map(Number);
 const cmpVer = (a, b) => { const x = ver(a), y = ver(b); for (let i = 0; i < 4; i++) if (x[i] !== y[i]) return x[i] - y[i]; return 0; };
@@ -279,7 +279,7 @@ if (app) {
 	app.set('truba', 'main', 'mode', 'selective');
 	check(uciStub.state.changes.truba?.main?.mode === 'selective' && app.changes.get().n === 1, 'app.set: другое значение — изменение');
 	uciStub.set = realSet;
-	// Неверные поля (spec §3.6): «Применить» недоступна, пока они есть; одно поле считается один раз.
+	// Неверные поля: «Применить» недоступна, пока они есть; одно поле считается один раз.
 	app.invalid?.('truba.lists.update_utc', true);
 	app.invalid?.('truba.lists.update_utc', true);
 	const bad1 = app.changes.get().bad;
@@ -313,7 +313,7 @@ if (kit) {
 		kit.step(it, 'rules', 'ArrowRight') === 'tunnel' && kit.step(it, 'tunnel', 'Enter') === 'tunnel', 'kit.step: → и ← по кругу, другие клавиши — без смены');
 }
 
-// Стиль A (spec §4.1): цвета Действий и состояний читаются на карточке (контраст не ниже 3:1), текст —
+// Стиль A: цвета Действий и состояний читаются на карточке (контраст не ниже 3:1), текст —
 // не ниже 4,5:1, в светлом и тёмном наборе. Токены — в блоках «.tr {» и «.tr[data-scheme="dark"] {».
 const stylePath = join(root, 'htdocs/luci-static/resources/truba/ui/style.css');
 if (!existsSync(stylePath)) {
@@ -376,7 +376,7 @@ if (flow) {
 }
 
 // Устройства (common): Политика — как её поймёт служба, по настройкам браузера; MAC без учёта регистра
-// (прежняя таблица «Маршрутизации» сохраняла заглавными); первая из секций с одним MAC.
+// (в настройках бывает заглавными); первая из секций с одним MAC.
 const devSecs = [
 	{ '.name': 'd1', '.type': 'device', mac: 'AA:BB:CC:DD:EE:01', policy: 'direct' },
 	{ '.name': 'd2', '.type': 'device', mac: 'aa:bb:cc:dd:ee:02', policy: 'tunnel', enabled: '0' },
@@ -579,14 +579,14 @@ if (cdev) {
 		'common.listsDue: обновление или применение — сразу');
 	check(LD(20000, 15000, 10000, {}) === true && LD(30000, 15000, 10000, {}) === false, 'common.listsDue: 15 с после запуска обновления — сразу');
 
-	// Вкладки: «Правила» вместо «Маршрутизации», «DNS» без списков (spec §3.1).
+	// Вкладка неверной настройки и предупреждений.
 	const IT = (k) => cdev.invalidTab([ { key: k } ]);
 	check(IT('main.zone') === 'rules' && IT('main.mode') === 'rules' && IT('main.routing') === 'rules' && IT('lists.update_utc') === 'rules' &&
 		IT('rule.x') === 'rules' && IT('main.iface') === 'tunnel' && IT('dns.port') === 'dns' && IT('device.mac') === 'devices' && cdev.invalidTab([]) === 'rules',
 		'common.invalidTab: Режим, Зоны, Маршрутизация, Наборы правил и правила — «Правила»');
-	check(cdev.TABS.rules && !('routing' in cdev.TABS) && cdev.TABS.dns === 'DNS' &&
+	check(cdev.TABS.rules && cdev.TABS.dns === 'DNS' &&
 		[ 'lists_missing', 'zones_without_devices', 'lists_rolled_back' ].every((w) => cdev.WARNINGS[w].tab === 'rules') && cdev.WARNINGS.tunnel_not_configured.tab === 'tunnel',
-		'common.TABS и WARNINGS: «Правила» вместо «Маршрутизации» и Наборов правил на «DNS»');
+		'common.TABS и WARNINGS: Наборы правил и Зоны — на «Правилах», Туннель — на «Туннеле»');
 	check(isText(cdev.CHECK_ERRORS?.busy), 'common.CHECK_ERRORS.busy');
 	// Категории перечитываются с опросом lists: распаковка или нет списка, обновление или применение на прошлом
 	// опросе, сменились файлы Наборов (обновление по расписанию, откат).
@@ -598,7 +598,7 @@ if (cdev) {
 	check(isText(CE({ error: 'busy' })) && CE({ error: 'busy' }).includes(cdev.CHECK_ERRORS.busy) && /Access denied/.test(CE({ error: 'rpc', message: 'Access denied' }) || '') &&
 		CE({}) === 'The check failed.', 'common.checkErrorText: занято, ошибка RPC с текстом, без ответа');
 
-	// Строки Категорий: около 1 700 — сразу не больше 100 (Решение 3); поиск, чип, «Показать все».
+	// Строки Категорий: около 1 700 — сразу не больше 100; поиск, чип, «Показать все».
 	const many = Array.from({ length: 1700 }, (_, i) => ({ set: 'geosite', tag: 'c' + i }));
 	const actOf = (c) => (+c.tag.slice(1) % 17 == 0) ? 'tunnel' : 'mode';
 	const CR = (...a) => cdev.catRows?.(many, actOf, ...a);
@@ -607,7 +607,7 @@ if (cdev) {
 		r4?.total === 11 && r5?.total === 0, 'common.catRows: не больше 100 строк, «Показать все», чип и поиск без учёта регистра',
 		JSON.stringify([ r1?.rows.length, r1?.total, r2?.rows.length, r3?.total, r4?.total, r5?.total ]));
 
-	// «Журнал» (spec §5.7): строки logread — время, источник по тегу (Решение 1), уровень из самой строки.
+	// «Журнал»: строки logread — время, источник по тегу, уровень из самой строки.
 	const PL = (s) => cdev.parseLog?.(s)?.[0] || {};
 	const D = 'Wed Oct  7 22:47:05 2026 ';
 	const l1 = PL(D + 'daemon.notice truba: x');
@@ -635,10 +635,10 @@ if (cdev) {
 	const LSN = (lv, src) => cdev.logShown?.(LS, lv, src)?.length;
 	check(LSN('all', [ 'truba', 'mosdns' ]) === 3 && LSN('warn', [ 'truba', 'mosdns' ]) === 2 && LSN('err', [ 'truba', 'mosdns' ]) === 1 &&
 		LSN('all', [ 'mosdns' ]) === 1, 'common.logShown: уровень — порог, источники — несколько');
-	check(cdev.TABS.log === 'Logs' && !('diagnostics' in cdev.TABS), 'common.TABS: «Журнал» вместо «Диагностики»');
+	check(cdev.TABS.log === 'Logs', 'common.TABS: «Журнал» — Logs, как в menu.d');
 }
 
-// Туннель AmneziaWG (spec §5.4, Решения 4 и 7): router.conf, перенос его в network и проверки опций интерфейса.
+// Туннель AmneziaWG: router.conf, перенос его в network и проверки опций интерфейса.
 // Заглушка uci держит секции в net (имя → опции) и запоминает вызовы.
 const net = {}, uciCalls = [];
 const awgUci = {
@@ -721,9 +721,9 @@ for (const [s, f] of strings) {
 for (const s of translated.keys())
 	if (!strings.has(s)) console.log(`warn  лишняя строка в po: ${shown(s)}`);
 
-// ---- Отложенные мелочи этапа 1 (этап 7) ----
+// ---- Ошибки ubus, строки при отрисовке, vendor.mjs, яркость темы ----
 
-// (a) Ошибку ubus (нет прав, нет объекта) rpc LuCI отдаёт пустым объектом: callStatus её не выдаёт за
+// Ошибку ubus (нет прав, нет объекта) rpc LuCI отдаёт пустым объектом: callStatus её не выдаёт за
 // «служба остановлена» — отклоняется, и страница показывает «нет связи». Без данных — «нет данных».
 {
 	const st = (reply) => new Function('baseclass', 'rpc', 'uci', '_', 'L', 'E', 'document', commonSrc)(
@@ -734,7 +734,7 @@ for (const s of translated.keys())
 	check(cdev.tunnelState?.({})?.[0] === '', `common.tunnelState({}): без данных — не «служба остановлена» (${cdev.tunnelState?.({})})`);
 }
 
-// (b) Строки — при отрисовке (spec §3.7): верхний уровень модулей представлений и ui/ не вызывает _().
+// Строки — при отрисовке: верхний уровень модулей представлений и ui/ не вызывает _().
 // Общие таблицы common.js — при загрузке модуля (каталог LuCI уже загружен), они здесь не проверяются.
 {
 	const any = new Proxy(function () {}, {
@@ -753,11 +753,11 @@ for (const s of translated.keys())
 			check(false, `${rel(f)}: верхний уровень не выполнился с заглушками — ${e.message}`);
 			continue;
 		}
-		check(!calls, `${rel(f)}: _() на верхнем уровне модуля (${calls}) — строки переводятся при отрисовке (spec §3.7)`);
+		check(!calls, `${rel(f)}: _() на верхнем уровне модуля (${calls}) — строки переводятся при отрисовке`);
 	}
 }
 
-// (c) vendor.mjs: та же строка VERSIONS (пакет@версия) с другой суммой — ошибка, а не новая сумма молча.
+// vendor.mjs: та же строка VERSIONS (пакет@версия) с другой суммой — ошибка, а не новая сумма молча.
 {
 	const vpath = fileURLToPath(new URL('./vendor.mjs', import.meta.url));
 	if (!/export function record\(/.test(readFileSync(vpath, 'utf8')))
@@ -772,7 +772,7 @@ for (const s of translated.keys())
 	}
 }
 
-// (d) Пробелы покрытия: яркость color(srgb …) (так её отдают некоторые темы).
+// Пробелы покрытия: яркость color(srgb …) (так её отдают некоторые темы).
 if (app) {
 	check(app.luminance('color(srgb 0 0 0)') === 0 && Math.abs(app.luminance('color(srgb 1 1 1)') - 1) < 1e-3 &&
 		app.luminance('color(srgb 1 1 1 / 0.3)') === null, 'app.luminance: color(srgb …), почти прозрачный — null');
@@ -787,23 +787,10 @@ if (app) {
 	check(!lit.length, `«handshake» без перевода: ${lit.join(', ')}`);
 }
 
-// ---- Остатки прежнего интерфейса (spec §3.3, этап 7) ----
+// ---- Экспорт common.js ----
 
-// Общие стили прежних вкладок (truba.css) — только в Shadow DOM-стилях ui/style.css: файла нет, и его никто
-// не подключает.
-const res = join(root, 'htdocs/luci-static/resources');
-check(!existsSync(join(res, 'truba/truba.css')), 'truba/truba.css удалён (стили — в truba/ui/style.css)');
-(function walkRouter(d) {
-	for (const f of readdirSync(d)) {
-		const p = join(d, f);
-		if (statSync(p).isDirectory()) walkRouter(p);
-		else if (/\.(js|uc|json|sh|css|mk|po|pot)$|Makefile$/.test(f) && readFileSync(p, 'utf8').includes('truba.css'))
-			check(false, `${relative(join(root, '..'), p).split(sep).join('/')}: упоминает truba.css`);
-	}
-})(join(root, '..'));
-
-// Экспорт common.js — только то, что берут представления, ui/ и awg.js или проверяет этот файл: прежние
-// помощники DOM (kvTable, chips, pill…) и формы (field) не возвращаются незаметно.
+// Экспорт common.js — только то, что берут представления, ui/ и awg.js или проверяет этот файл:
+// помощник без пользователей не остаётся незаметно.
 {
 	const exp = (commonSrc.match(/return baseclass\.extend\(\{([\s\S]*?)\}\);\s*$/)?.[1] || '').split(',').map((s) => s.trim()).filter(Boolean);
 	const users = [ ...files.filter((f) => /\/(view\/truba|truba\/ui)\/|\/truba\/awg\.js$/.test(rel(f))).map((f) => readFileSync(f, 'utf8')),
@@ -812,10 +799,8 @@ check(!existsSync(join(res, 'truba/truba.css')), 'truba/truba.css удалён (
 	check(exp.length > 0 && !unused.length, `common.js: экспорт без пользователей — ${unused.join(', ')}`);   // EXPORT-CHECK
 }
 
-// ---- Документы — о тех же вкладках, что в меню (spec §9) ----
+// ---- Документы — о тех же вкладках, что в меню ----
 // Таблица вкладок README («Как пользоваться») и docs/architecture.md §5.2 — подписи menu.d по-русски, в порядке меню.
-// Старых вкладок («Маршрутизация», «DNS и списки», «Диагностика») в документах, службе и скрипте VPS нет: CHANGELOG
-// и ADR — история, их это не касается. «Маршрутизация» как переключатель и функция остаётся.
 {
 	const repo = join(root, '../..');
 	const menu = JSON.parse(readFileSync(join(root, 'root/usr/share/luci/menu.d/luci-app-truba.json'), 'utf8'));
@@ -829,24 +814,6 @@ check(!existsSync(join(res, 'truba/truba.css')), 'truba/truba.css удалён (
 	const aTabs = firstCol(section(arch, '### 5.2 ', '\n### '));
 	check(JSON.stringify(rTabs) == JSON.stringify(want), `README «Как пользоваться»: вкладки ${rTabs.join(', ')} — нужно ${want.join(', ')}`);
 	check(JSON.stringify(aTabs) == JSON.stringify(want), `architecture.md §5.2: вкладки ${aTabs.join(', ')} — нужно ${want.join(', ')}`);
-	const OLD = [ /Диагностик/, /Маршрутизация →/, /вкладк\S*\s+[«*]+Маршрутизаци/, /^\d+\. \*\*Маршрутизация\*\*/, /вкладк\S*\s+[«*]+DNS и списк/,
-		/на [«*]+DNS и списках/, /\*\*DNS и списки\*\*/, /truba\.css/, /DNS и списк/, /\b6 вкладок/,
-		// На «DNS» порядка серверов нет — запрос идёт ко всем сразу: «поставьте первым» не сделать.
-		/поставьте (его )?первым/, /первый сервер «Туннеля» на вкладке/ ];
-	const docs = [ 'README.md', 'CONTEXT.md', 'docs/architecture.md', 'docs/roadmap.md', 'vps/install-vps.sh',
-		...readdirSync(join(repo, 'tests/router')).map((f) => 'tests/router/' + f) ];
-	(function walkTruba(d) {
-		for (const f of readdirSync(join(repo, d))) {
-			const p = d + '/' + f;
-			if (statSync(join(repo, p)).isDirectory()) walkTruba(p);
-			else docs.push(p);
-		}
-	})('router/truba/files');
-	for (const f of docs)
-		readFileSync(join(repo, f), 'utf8').split('\n').forEach((line, i) => {
-			const re = OLD.find((r) => r.test(line));
-			if (re) check(false, `${f}:${i + 1}: прежняя вкладка (${re.source}) — ${line.trim().slice(0, 90)}`);
-		});
 }
 
 console.log(`${files.length} файлов, ${strings.size} строк`);

@@ -2,7 +2,7 @@
 
 Домашняя сеть через собственный VPS: **Труба** (VPS на Ubuntu 24.04) отдаёт **Роутеру** (ImmortalWrt 25.12) весь свой публичный IP по **Туннелю** AmneziaWG, а Роутер сам решает, какой трафик пускать через Туннель, и делает Full cone NAT. Трафик распределяется по Категориям из [geoip.dat](https://github.com/kirilllavrov/geoip-builder) и [geosite.dat](https://github.com/kirilllavrov/geosite-builder), которые используются без изменений. Всё управляется из LuCI: «Службы → Труба».
 
-Версия 1.1 — что в неё входит, в [CHANGELOG.md](CHANGELOG.md).
+Версия 1.2 — что в неё входит, в [CHANGELOG.md](CHANGELOG.md).
 
 | Документ | О чём |
 |---|---|
