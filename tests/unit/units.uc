@@ -239,6 +239,12 @@ config("config dns 'dns'\n\toption port ''\n\nconfig watchdog 'watchdog'\n\topti
 dcfg = F.load();
 check('схема: пустая опция — умолчание, а не неверное значение', dcfg.dns.port == 5335 && dcfg.watchdog.probe == '' && !length(dcfg.invalid),
 	sprintf('%J', dcfg.invalid));
+// Число больше int64 int() читает как NaN, а сравнения с NaN ложны: такой порт проходил проверку.
+const NINES80 = replace(sprintf('%080d', 0), /0/g, '9');
+config("config dns 'dns'\n\toption port '" + NINES80 + "'\n");
+dcfg = F.load();
+check('схема: число больше int64 — неверное, по умолчанию', dcfg.dns.port === 5335 && dcfg.dns.api == '127.0.0.1:5336' &&
+	same(dcfg.invalid, [ { key: 'dns.port', value: NINES80 } ]), sprintf('%J %J', dcfg.dns.port, dcfg.invalid));
 
 // /etc/config/truba из пакета — полный образец настроек: совпадает со схемой в обе стороны.
 // Расхождения конфига text со схемой: опции не из схемы, не равные её умолчанию, недостающие.

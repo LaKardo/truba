@@ -112,7 +112,10 @@ export function check_value(sec, key, raw, bad) {
 		if (raw === '')
 			return o.def;
 		let n = (type(raw) == 'int') ? raw : ((type(raw) == 'string' && match(raw, /^[0-9]+$/)) ? int(raw) : null);
-		if (n == null || n < o.lo || n > o.hi || (o.min && n > 0 && n < o.min))
+		// Число больше int64 int() читает как NaN (double), а любое сравнение с NaN ложно: без
+		// проверки типа порт из 80 цифр прошёл бы пределы, и dnsmasq с сервером 127.0.0.1#NaN
+		// не запустился бы — сеть без DNS и DHCP.
+		if (type(n) != 'int' || n < o.lo || n > o.hi || (o.min && n > 0 && n < o.min))
 			return invalid(raw);
 		return n;
 	case 'pattern':
