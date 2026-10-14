@@ -6,8 +6,12 @@ import { popen, readfile } from 'fs';
 import * as C from 'truba.const';
 import * as U from 'truba.util';
 
+// rpcd работает с umask 077: без своей маски файлы, которые пишут запущенные им команды (Наборы
+// правил, состояние, распакованные списки), получали бы права 600, а из cron и консоли — 644.
+const CLI = 'umask 022; ' + C.CLI;
+
 function truba(args) {
-	let p = popen(C.CLI + ' ' + args + ' 2>/dev/null', 'r');
+	let p = popen(CLI + ' ' + args + ' 2>/dev/null', 'r');
 	if (!p)
 		return { error: 'exec' };
 	let out = p.read('all');
@@ -20,11 +24,11 @@ function truba(args) {
 	}
 }
 
-// Проверки NAT и Туннеля идут секунды, а rpcd обслуживает вызовы по одному: пока он ждёт
-// проверку, стоит весь LuCI. Поэтому проверка запускается в фоне, а итог интерфейс забирает
-// отдельным вызовом, когда в нём появится время не раньше started.
+// Проверки NAT и Туннеля и обновление Наборов правил идут секунды, а rpcd обслуживает вызовы
+// по одному: пока он ждёт, стоит весь LuCI. Поэтому они запускаются в фоне, а итог интерфейс
+// забирает отдельным вызовом, когда в нём появится время не раньше started.
 function background(args) {
-	system('( ' + C.CLI + ' ' + args + ' >/dev/null 2>&1 & )');
+	system('( ' + CLI + ' ' + args + ' >/dev/null 2>&1 & )');
 	return { started: time() };
 }
 
@@ -140,11 +144,11 @@ const methods = {
 		}
 	},
 
+	// Итог — lists.last со временем не раньше started.
 	update_lists: {
 		args: { force: false },
 		call: function(req) {
-			system('( ' + C.CLI + ' update-lists' + (req.args?.force ? ' -f' : '') + ' >/dev/null 2>&1 & )');
-			return { started: true };
+			return background('update-lists' + (req.args?.force ? ' -f' : ''));
 		}
 	},
 

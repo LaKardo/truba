@@ -31,10 +31,9 @@ check "table 77: default и подсеть Туннеля через awg0" eval 
 check "dnsmasq → mosdns без кэша, исходные значения сохранены" eval 'uci -q get dhcp.@dnsmasq[0].server | grep -q "127.0.0.1#5335" && [ "$(uci -q get dhcp.@dnsmasq[0].cachesize)" = 0 ] && [ -f /etc/truba/state/dnsmasq.json ]'
 check "status: mosdns — инстанс службы truba" test "$(truba status | jsonfilter -e '@.mosdns')" = true
 check "API mosdns: счётчики кэша только на 127.0.0.1:5336" eval 'curl -s -m 2 http://127.0.0.1:5336/metrics | grep -q "^mosdns_cache_query_total" && ! netstat -lnt | grep ":5336 " | grep -qv "127.0.0.1:5336"'
-# Время обновления хранится в UTC, а cron работает по местному времени Роутера (в образе — +0800).
+# Наборы правил выходят в разное время суток: проверка — каждый час, в начале часа.
 NEXT="$(truba status | jsonfilter -e '@.lists.next')"; NOW="$(date +%s)"
-H="$(date -d "@$NEXT" +%H | sed "s/^0//")"; M="$(date -d "@$NEXT" +%M | sed "s/^0//")"
-check "cron: 12:00 UTC по местному времени, следующий запуск — в ближайшие сутки" eval 'grep -q "^$M $H \* \* \* /usr/sbin/truba update-lists" /etc/crontabs/root && [ $((NEXT % 86400)) -eq 43200 ] && [ "$NEXT" -gt "$NOW" ] && [ "$NEXT" -le $((NOW + 86400)) ]'
+check "cron: каждый час, следующий запуск — начало следующего часа" eval 'grep -q "^0 \* \* \* \* /usr/sbin/truba update-lists" /etc/crontabs/root && [ $((NEXT % 3600)) -eq 0 ] && [ "$NEXT" -gt "$NOW" ] && [ "$NEXT" -le $((NOW + 3600)) ]'
 check "geosite: узкие Категории раньше широких (category-cdn-ru раньше category-ru)" eval 'applied "@.geosite_order[*]" | xargs | grep -q "category-cdn-ru=direct.* category-ru=direct"'
 check "lists: контрольные суммы есть, а в status их нет (опрос раз в 5 с)" eval 'truba lists | jsonfilter -e "@.geoip.sha256" | grep -qE "^[0-9a-f]{64}$" && [ -z "$(truba status | jsonfilter -e "@.lists.geoip.sha256")" ]'
 

@@ -52,6 +52,27 @@ PREV="$(sha256sum < /etc/truba/lists/prev/geosite.dat)"; T_APPLIED="$(applied '@
 lists_step update-lists -f
 check "предыдущая версия — по-прежнему версия для отката, настройки применены заново" eval '[ "$(sha256sum < /etc/truba/lists/prev/geosite.dat)" = "$PREV" ] && applied_after "$T_APPLIED"'
 
+section "проверка без изменений: только контрольные суммы"
+# Проверка идёт каждый час: пока сумма у источника та же, сам файл (мегабайты) не скачивается.
+mkdir -p /root/src-off; mv /root/src/geoip.dat /root/src/geosite.dat /root/src-off/
+lists_step update-lists
+check "оба набора — без изменений, файлы у источника не понадобились" eval '[ "$(grep -o "\"ok\": true, \"changed\": false" /etc/truba/state/lists.json | wc -l)" -eq 2 ]'
+mv /root/src-off/* /root/src/
+
+section "«Обновить сейчас» через rpcd"
+# rpcd работает с umask 077: скачанные файлы и состояние — с обычными правами, как из cron.
+ucode -L '/repo/tests/lib/*.uc' /repo/tests/lib/mkdat.uc geoip /root/src/geoip.dat zzrpcd 198.18.1.0/24
+(cd /root/src && sha256sum geoip.dat > geoip.dat.sha256sum)
+T_LISTS="$(jsonfilter -i /etc/truba/state/lists.json -e '@.time')"; sleep 1
+ubus call truba update_lists '{ "force": false }' > /tmp/ul.json
+STARTED="$(jsonfilter -i /tmp/ul.json -e '@.started')"
+# Итог для интерфейса — lists.last со временем не раньше started.
+checked_since() { [ "$(jsonfilter -i /etc/truba/state/lists.json -e '@.time')" -ge "$1" ]; }
+check "ответ сразу — время запуска, проверка прошла в фоне" eval '[ "$STARTED" -gt "$T_LISTS" ] && wait_for 60 checked_since "$STARTED" && wait_for 60 idle'
+unstick
+perm() { ls -l "$1" | cut -c1-10; }   # stat в образе нет
+check "geoip.dat заменён, права 644 у файла и состояния" eval 'cmp -s /etc/truba/lists/geoip.dat /root/src/geoip.dat && [ "$(perm /etc/truba/lists/geoip.dat)" = -rw-r--r-- ] && [ "$(perm /etc/truba/state/lists.json)" = -rw-r--r-- ]'
+
 section "скачанный файл не разбирается"
 # Контрольная сумма у источника честная: файл скачан целиком, но повреждён (или нового формата).
 CUR="$(sha256sum < /etc/truba/lists/geosite.dat)"

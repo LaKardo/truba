@@ -139,6 +139,10 @@ msgid "The check failed."
 msgstr ""
 
 #: htdocs/luci-static/resources/truba/common.js
+msgid "the service did not answer"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/common.js
 msgid "UPnP is enabled, but miniupnpd is not installed: install luci-app-upnp."
 msgstr ""
 
@@ -1298,15 +1302,7 @@ msgid "The main source is fetched through the tunnel; the mirror always goes dir
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/rules.js
-msgid "Update time (UTC)"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/rules.js
-msgid "Format: HH:MM"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/rules.js
-msgid "geoip.dat is published every three days around 10–11 UTC, geosite.dat irregularly, usually by 09 UTC; at 12:00 a new release is picked up the same day. Converted to the router time zone for cron."
+msgid "Checked every hour: until a new release is out, only the checksums are downloaded."
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/rules.js
@@ -1411,6 +1407,14 @@ msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/rules.js
 msgid "for all devices"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/rules.js
+msgid "Rule sets checked: %s"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/rules.js
+msgid "The update did not start."
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/tunnel.js

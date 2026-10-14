@@ -280,10 +280,10 @@ if (app) {
 	check(uciStub.state.changes.truba?.main?.mode === 'selective' && app.changes.get().n === 1, 'app.set: другое значение — изменение');
 	uciStub.set = realSet;
 	// Неверные поля: «Применить» недоступна, пока они есть; одно поле считается один раз.
-	app.invalid?.('truba.lists.update_utc', true);
-	app.invalid?.('truba.lists.update_utc', true);
+	app.invalid?.('truba.dns.ttl_max', true);
+	app.invalid?.('truba.dns.ttl_max', true);
 	const bad1 = app.changes.get().bad;
-	app.invalid?.('truba.lists.update_utc', false);
+	app.invalid?.('truba.dns.ttl_max', false);
 	check(bad1 === 1 && app.changes.get().bad === 0, `app.invalid: неверное поле — bad 1, снова верное — 0 (${bad1}, ${app.changes.get().bad})`);
 	app.toast?.('Done');
 	const t1 = app.toasts?.get();
@@ -403,7 +403,8 @@ const devSecs = [
 ];
 const devSchema = { sections: {
 	device: { enabled: { type: 'bool', def: true }, policy: { type: 'enum', values: [ 'tunnel', 'direct', 'rules' ], def: 'tunnel' } },
-	lists: { update_utc: { type: 'pattern', re: '^([01]?[0-9]|2[0-3]):[0-5][0-9]$', def: '12:00' }, geoip_url: { type: 'string', def: 'https://x' } },
+	main: { iface: { type: 'pattern', re: '^[A-Za-z0-9_]{1,15}$', def: 'awg0' } },
+	lists: { geoip_url: { type: 'string', def: 'https://x' } },
 	dns: { set_timeout: { type: 'int', def: 86400, lo: 0, hi: 604800, min: 600 } },
 	watchdog: { probe: { type: 'ipv4', def: '' } }
 }, upstream_schemes: [ 'udp', 'tcp', 'tcp+pipeline', 'tls', 'tls+pipeline', 'https', 'h3', 'quic', 'doq' ], consts: { fw_zone: 'truba' } };
@@ -563,8 +564,8 @@ if (cdev) {
 	// Поле по схеме: текст ошибки или null — та же проверка, что у службы (conf.uc, check_value).
 	const FE = (...a) => cdev.fieldError?.(...a);
 	const isText = (x) => typeof x === 'string' && x.length > 0;
-	check(isText(FE('lists', 'update_utc', '25:00')) && FE('lists', 'update_utc', '05:30') === null && FE('lists', 'update_utc', '') === null,
-		'common.fieldError: pattern — 25:00 неверно, 05:30 и пусто — верно');
+	check(isText(FE('main', 'iface', 'awg-0')) && FE('main', 'iface', 'awg0') === null && FE('main', 'iface', '') === null,
+		'common.fieldError: pattern — awg-0 неверно, awg0 и пусто — верно');
 	check(isText(FE('dns', 'set_timeout', '300')) && isText(FE('dns', 'set_timeout', '604801')) && isText(FE('dns', 'set_timeout', '1e3')) &&
 		FE('dns', 'set_timeout', '0') === null && FE('dns', 'set_timeout', '600') === null, 'common.fieldError: int — пределы и min, 0 — верно');
 	check(isText(FE('watchdog', 'probe', '1.2.3')) && isText(FE('watchdog', 'probe', '1.2.3.256')) && FE('watchdog', 'probe', '10.0.0.1') === null,
@@ -572,16 +573,25 @@ if (cdev) {
 	check(isText(FE('device', 'policy', 'weird')) && FE('device', 'policy', 'direct') === null && FE('lists', 'geoip_url', 'anything') === null &&
 		FE('lists', 'nope', 'x') === null, 'common.fieldError: enum; string и опция не из схемы — без проверки');
 
-	// Опрос Наборов правил: раз в 30 с, а пока идёт обновление или применение и 15 с после «Обновить сейчас» — каждый раз.
+	// Опрос Наборов правил: раз в 30 с, а пока идёт обновление или применение и 15 с после «Откатить» — каждый раз.
 	const LD = (...a) => cdev.listsDue?.(...a);
 	check(LD(30000, 0, -Infinity, {}) === true && LD(29999, 0, -Infinity, {}) === false, 'common.listsDue: граница 30 с');
 	check(LD(1000, 0, -Infinity, { updating: true }) === true && LD(1000, 0, -Infinity, { applying: true }) === true && LD(1000, 0, -Infinity, null) === false,
 		'common.listsDue: обновление или применение — сразу');
-	check(LD(20000, 15000, 10000, {}) === true && LD(30000, 15000, 10000, {}) === false, 'common.listsDue: 15 с после запуска обновления — сразу');
+	check(LD(20000, 15000, 10000, {}) === true && LD(30000, 15000, 10000, {}) === false, 'common.listsDue: 15 с после «Откатить» — сразу');
+
+	// «Обновить сейчас»: итог — lists.last не раньше started; ни итога, ни идущего обновления через 15 с — не запустилось.
+	const LK = (...a) => cdev.listsKick?.(...a), kick = { at: 1000, since: 500 };
+	check(LK(null, {}, 99999) === null && LK(kick, { last: { time: 499 } }, 5000) === null && LK(kick, { last: { time: 500 } }, 2000) === 'done' &&
+		LK(kick, { last: { time: 499 }, updating: true }, 60000) === null && LK(kick, { last: { time: 499 } }, 16000) === 'lost' && LK(kick, null, 16000) === 'lost',
+		'common.listsKick: итог не раньше запуска; идёт обновление — ждать; 15 с без того и другого — не запустилось');
+	const okSet = { ok: true, changed: true, via: 'direct' }, badSet = { ok: false, errors: [ 'mirror: download failed' ] };
+	check(cdev.listsSummary?.({ sets: { geoip: okSet, geosite: badSet } }) === 'geoip — ' + cdev.setResult(okSet) + '; geosite — ' + cdev.setResult(badSet),
+		'common.listsSummary: итог обоих наборов одной строкой');
 
 	// Вкладка неверной настройки и предупреждений.
 	const IT = (k) => cdev.invalidTab([ { key: k } ]);
-	check(IT('main.zone') === 'rules' && IT('main.mode') === 'rules' && IT('main.routing') === 'rules' && IT('lists.update_utc') === 'rules' &&
+	check(IT('main.zone') === 'rules' && IT('main.mode') === 'rules' && IT('main.routing') === 'rules' && IT('lists.geoip_url') === 'rules' &&
 		IT('rule.x') === 'rules' && IT('main.iface') === 'tunnel' && IT('dns.port') === 'dns' && IT('device.mac') === 'devices' && cdev.invalidTab([]) === 'rules',
 		'common.invalidTab: Режим, Зоны, Маршрутизация, Наборы правил и правила — «Правила»');
 	check(cdev.TABS.rules && cdev.TABS.dns === 'DNS' &&
@@ -732,6 +742,11 @@ for (const s of translated.keys())
 	const stopped = await st({ service: false }).callStatus().then((x) => x.service === false ? 'resolved' : '?', () => 'rejected');
 	check(empty == 'rejected' && stopped == 'resolved', `common.callStatus: ответ без service — ошибка, { service: false } — ответ (${empty}, ${stopped})`);
 	check(cdev.tunnelState?.({})?.[0] === '', `common.tunnelState({}): без данных — не «служба остановлена» (${cdev.tunnelState?.({})})`);
+	// Фоновая проверка: без started в ответе она не запущена — ошибка, а не прежний итог за новый.
+	const nat = new Function('baseclass', 'rpc', 'uci', '_', 'L', 'E', 'document', commonSrc)(baseclass,
+		{ declare: (o) => () => Promise.resolve(o.method == 'nat_result' ? { time: 5, ok: true } : {}) }, devUci, (s) => s, stub, stub, { querySelector: () => true });
+	const natRun = await nat.runNatTest().then((x) => 'resolved ' + JSON.stringify(x), (e) => 'rejected ' + e.message);
+	check(/^rejected ./.test(natRun), `common.runNatTest: ответ без started — ошибка, а не прежний итог (${natRun})`);
 }
 
 // Строки — при отрисовке: верхний уровень модулей представлений и ui/ не вызывает _().
