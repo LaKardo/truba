@@ -54,14 +54,14 @@ function big_probe(dev, target) {
 	let mtu = iface_mtu(dev);
 	if (mtu < MTU_MIN_V4)
 		return null;
-	
+
 	// Вычислить размер данных и проверить валидность (защита от некорректного MTU)
 	let data_size = mtu - ICMP_HDR;
-	if (data_size <= 0 || data_size > 65507) { // max IP payload
+	if (data_size > 65507) { // max IP payload
 		U.warn_log(sprintf('invalid MTU for big_probe: mtu=%d, data_size=%d, dev=%s', mtu, data_size, dev));
 		return null;
 	}
-	
+
 	let s = ping_stats(U.run(sprintf('ping -c 3 -W %d -s %d -I %s %s', PING_WAIT, data_size, U.shq(dev), U.shq(target))).out);
 	return { ok: s.received >= 2, sent: s.sent, received: s.received, size: mtu, time: time() };
 }
@@ -93,7 +93,7 @@ function run_tunnel_test() {
 	let sizes = [ TT_SMALL ];
 	if (mtu > TT_MID)
 		push(sizes, TT_MID);
-	if (mtu > TT_SMALL)
+	if (mtu > TT_SMALL && mtu - ICMP_HDR <= 65507)
 		push(sizes, mtu);
 	let dir = trim(U.run('mktemp -d ' + C.TT_TMP + '.XXXXXX').out);
 	if (substr(dir, 0, length(C.TT_TMP) + 1) != C.TT_TMP + '.')

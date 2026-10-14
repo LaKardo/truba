@@ -163,12 +163,6 @@ function http_get(addr, path, timeout, max_size) {
 	let out = '', done = false, end = U.now_ms() + timeout;
 	if (s.send(sprintf('GET %s HTTP/1.0\r\nHost: %s\r\n\r\n', path, addr))) {
 		while (true) {
-			// Проверка лимита размера (защита от memory exhaustion)
-			if (length(out) > max_size) {
-				s.close();
-				return null;
-			}
-			
 			let left = end - U.now_ms();
 			let pr = (left > 0) ? socket.poll(int(left), [ s, socket.POLLIN ]) : null;
 			let chunk = length(pr ?? []) ? s.recv(65536) : null;
@@ -177,6 +171,11 @@ function http_get(addr, path, timeout, max_size) {
 			if (chunk == '') {
 				done = true;
 				break;
+			}
+			// Проверка лимита размера перед добавлением данных (защита от memory exhaustion)
+			if (length(out) + length(chunk) > max_size) {
+				s.close();
+				return null;
 			}
 			out += chunk;
 		}
