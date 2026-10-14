@@ -240,6 +240,35 @@ check "узел сети: DNS к чужому серверу перехваче�
 check "узел сети: DNS к адресу Роутера — тоже" dns_from meshhost 100.64.0.1
 check "устройство домашней сети: DNS перехвачен, источник не подменён" eval 'in_set local4 192.168.1.0/24 && dns_from lanhost 8.8.8.8 && dns_seen lan && ! dns_snat lan'
 nft delete table inet t_snat
+# dnsmasq с bind-dynamic иногда не открывает сокет на адрес, появившийся вскоре после его старта, — тогда
+# перехват отправляет запросы узлов в никуда (в CI так падали проверки выше). Состояние воспроизводится
+# настройкой: dnsmasq перезапускается без ms0, затем настройки возвращаются без перезапуска — работающий
+# dnsmasq адрес ms0 так и не слушает, а после перезапуска будет.
+listens53() { netstat -lnu | grep -q " $1:53 "; }
+dnsmasq_no_ms0() {
+	uci add_list dhcp.@dnsmasq[0].notinterface='ms0'; uci commit dhcp
+	/etc/init.d/dnsmasq restart >/dev/null 2>&1
+	wait_for 10 eval '! listens53 100.64.0.1 && listens53 192.168.1.1'
+}
+dnsmasq_ms0_back() { uci del_list dhcp.@dnsmasq[0].notinterface='ms0'; uci commit dhcp; }
+dnsmasq_no_ms0; dnsmasq_ms0_back
+check "dnsmasq без сокета на адресе ms0: DNS узла сети не работает" eval '! listens53 100.64.0.1 && ! dns_from meshhost 8.8.8.8'
+reload "dnsmasq без сокета на адресе зоны"
+check "применение перезапустило dnsmasq: адрес ms0 слушается, DNS узла работает, в журнале — почему" eval \
+	'listens53 100.64.0.1 && dns_from meshhost 8.8.8.8 && logread | grep -q "dnsmasq не слушает 100.64.0.1 (ms0)"'
+# Без применения то же находит процесс truba stats: раз в минуту.
+dnsmasq_no_ms0; dnsmasq_ms0_back
+check "truba stats находит адрес зоны без сокета и перезапускает dnsmasq" wait_for 75 listens53 100.64.0.1
+# dnsmasq намеренно не слушает ms0: перезапуск не помогает — он один, а не на каждое применение и каждую минуту.
+dnsmasq_no_ms0
+PID0="$(pidof dnsmasq)"
+reload "dnsmasq настроен без ms0"
+PID1="$(pidof dnsmasq)"
+reload "dnsmasq настроен без ms0, ещё раз"
+check "dnsmasq настроен без ms0: перезапуск один, в журнале — что DNS зоны не работает" eval \
+	'[ "$PID1" != "$PID0" ] && [ "$(pidof dnsmasq)" = "$PID1" ] && logread | grep -q "и после перезапуска не слушает 100.64.0.1 (ms0)"'
+dnsmasq_ms0_back; /etc/init.d/dnsmasq restart >/dev/null 2>&1
+check "dnsmasq снова слушает ms0" wait_for 10 listens53 100.64.0.1
 ip addr add 10.99.0.1/24 dev ms0
 ACTION=ifupdate INTERFACE=lan sh /etc/hotplug.d/iface/50-truba
 check "новая подсеть Роутера — в local4 после события интерфейса (hotplug)" in_set local4 10.99.0.0/24

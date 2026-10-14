@@ -261,6 +261,9 @@ function apply_config(res, prev) {
 		if (readfile(C.STAMP_FILE) != res.gkey)
 			writefile(C.STAMP_FILE, res.gkey);
 		N.dnsmasq_enable(cfg.dns.port);
+		// Перехват направляет DNS устройств зон на адреса их устройств — их должен слушать dnsmasq.
+		if (cfg.dns_hijack)
+			N.dns_heal(ctx.lan_if);
 	}
 	else
 		N.dnsmasq_restore();
