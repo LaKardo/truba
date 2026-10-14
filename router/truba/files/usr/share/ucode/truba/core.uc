@@ -577,6 +577,13 @@ export function rollback_lists(bg) {
 		return { error: 'busy' };
 	let swapped = swap_lists();
 	lk.close();
+	
+	// Валидация результата swap_lists
+	if (swapped == null || type(swapped) != 'array') {
+		U.warn_log('rollback_lists: некорректный результат swap_lists');
+		return { error: 'invalid_swap_result' };
+	}
+	
 	if (length(swapped)) {
 		U.info('списки: откат ' + join(', ', swapped));
 		reload_service(bg);

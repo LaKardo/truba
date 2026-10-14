@@ -86,6 +86,10 @@ function run_tunnel_test() {
 	if (!target)
 		return { error: 'no_target' };
 	let mtu = iface_mtu(st.device);
+	if (mtu < MTU_MIN_V4) {
+		U.warn_log(sprintf('tt_test: invalid MTU %d for device %s', mtu, st.device));
+		return { error: 'invalid_mtu' };
+	}
 	let sizes = [ TT_SMALL ];
 	if (mtu > TT_MID)
 		push(sizes, TT_MID);
