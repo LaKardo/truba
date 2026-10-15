@@ -57,7 +57,7 @@ function Flow({ devices, block, tunnel, direct, caption }) {
 			${branch(html, L.ltun, 'l-tun', w.tun)}
 			${branch(html, L.ldir, 'l-dir', w.dir)}
 			${node(html, L.dev, 'node', 10, _('Devices'), '', (devices != null) ? [ [ _('%d active').format(devices), 't-mu' ] ] : [])}
-			${node(html, L.router, 'router', 12, _('Router'), '', [ [ _('block: %s').format(common.fmtNum(block)), 't-blk' ] ])}
+			${node(html, L.router, 'router', 12, _('Router'), '', [ [ _('IP block: %s').format(common.fmtNum(block)), 't-blk' ] ])}
 			${node(html, L.tun, 'n-tun', 10, _('Tunnel'), 't-tun', rates(tunnel))}
 			${node(html, L.dir, 'n-dir', 10, _('Direct'), 't-dir', rates(direct))}
 		</svg>`;
