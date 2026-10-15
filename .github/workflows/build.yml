@@ -71,7 +71,7 @@ jobs:
     outputs:
       versions: ${{ steps.v.outputs.versions }}
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - id: v
         # Ввод — через окружение, а не подстановкой в текст скрипта: так он остаётся данными.
         env:
@@ -95,7 +95,7 @@ jobs:
     env:
       IWRT_VERSION: ${{ matrix.version }}
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # Пакеты AmneziaWG меняются, только когда меняются их источники, шаги сборки (AWG_BUILD_REV)
       # или версия ImmortalWrt (а с ней ядро). Иначе берём их из опубликованного фида этой же
@@ -346,7 +346,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Текущее содержимое Pages
         run: |
           mkdir -p site
