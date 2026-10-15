@@ -1,6 +1,6 @@
 #!/bin/sh
 # DNS: классификация mosdns по Категориям (на синтетических Категориях и подставных DNS-серверах),
-# Блок, AAAA, «Проверить домен/IP» с наборами из ядра, запасной сервер DNS, TTL в кэше и для устройств, сброс кэша при смене серверов, ленивый кэш и его дамп, занятый порт API,
+# Блок, AAAA и HTTPS, «Проверить домен/IP» с наборами из ядра, запасной сервер DNS, TTL в кэше и для устройств, сброс кэша при смене серверов, ленивый кэш и его дамп, занятый порт API,
 # срок IP из DNS в наборах (ADR 0007), неверные настройки.
 . /repo/tests/router/stand.sh
 
@@ -8,11 +8,13 @@ section "классификация: подставные серверы и си
 # Серверы «Туннеля» и «Напрямую» отвечают на всё своим адресом: по ответу видно, какой путь
 # выбрал mosdns. Не test-net и не частные адреса — их dnsmasq отбрасывает (stop-dns-rebind),
 # а «Проверить домен/IP» резолвит через dnsmasq.
-upstream() {   # upstream ПОРТ АДРЕС
-	dnsmasq --conf-file=/dev/null --port="$1" --listen-address=127.0.0.1 --bind-interfaces --no-resolv --no-hosts \
-		--address="/#/$2" --local-ttl=2 --pid-file="/tmp/up-$1.pid"
+upstream() {   # upstream ПОРТ АДРЕС [ПАРАМЕТРЫ dnsmasq]
+	p="$1" a="$2"; shift 2
+	dnsmasq --conf-file=/dev/null --port="$p" --listen-address=127.0.0.1 --bind-interfaces --no-resolv --no-hosts \
+		--address="/#/$a" --local-ttl=2 --pid-file="/tmp/up-$p.pid" "$@"
 }
-upstream 5401 44.0.0.1
+# HTTPS-запись (тип 65) с ipv4hint 44.0.0.9: приоритет 1, цель «.», ключ 4, длина 4, адрес.
+upstream 5401 44.0.0.1 --dns-rr=zz-tun.trubatest,65,000100000400042c000009
 upstream 5402 44.0.0.2
 L=/etc/truba/lists
 ucode -L '/repo/tests/lib/*.uc' /repo/tests/lib/mkdat.uc geosite $L/geosite.dat zzdirect \
@@ -48,6 +50,9 @@ check "Категория «Туннель» — через «Туннель», 
 ADS="$(sed -n '1s/^domain://p' /var/lib/truba/geosite/category-ads.txt)"
 check "Блок ($ADS из category-ads) → NXDOMAIN, и поддомен тоже" eval 'nx "$ADS" && nx "sub.$ADS"'
 check "AAAA → пустой ответ" eval '[ -z "$(ask zz-tun.trubatest AAAA)" ]'
+# ipv4hint в HTTPS-записи клиент взял бы мимо A-ответа, и адрес не попал бы в набор Категории.
+check "HTTPS (SVCB) → пустой ответ, хотя сервер «Туннеля» его отдаёт" eval \
+	'ucode /repo/tests/lib/dns_ttl.uc 5401 zz-tun.trubatest 127.0.0.1 65 | grep -q "^rr 65" && [ -z "$(ucode /repo/tests/lib/dns_ttl.uc "$(dns_port)" zz-tun.trubatest 127.0.0.1 65)" ]'
 check "Проверить домен: IP из DNS «Напрямую» — через набор в ядре" eval 'truba check zz-full.trubatest > /tmp/c1 && grep -q "\"reason\": \"geosite_ip\"" /tmp/c1 && grep -q "\"action\": \"direct\"" /tmp/c1'
 check "Проверить IP: geoip:ru — через набор в ядре" eval 'truba check 77.88.8.8 > /tmp/c2 && grep -q "\"reason\": \"geoip\"" /tmp/c2 && [ "$(jsonfilter -i /tmp/c2 -e "@.ips[0].sets.gi_direct")" = true ]'
 check "status и sets: счётчики кэша и IP из DNS" eval '[ "$(truba status | jsonfilter -e "@.dns_cache.query")" -gt 0 ] && [ "$(truba status | jsonfilter -e "@.dns_cache.max")" -eq 65536 ] && [ "$(truba sets | jsonfilter -e "@.dns.direct")" -ge 1 ] && [ "$(truba sets | jsonfilter -e "@.dns.tunnel")" -ge 1 ]'

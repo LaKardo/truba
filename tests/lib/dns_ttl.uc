@@ -1,15 +1,16 @@
 // Запрос A к DNS-серверу (по умолчанию 127.0.0.1): печатает «IP TTL» на каждую A-запись ответа (tests/router).
+// TYPE — другой тип запроса (номер): записи не-A печатаются как «rr ТИП».
 // Нет ответа за 3 с — код 1.
-//   ucode dns_ttl.uc PORT NAME [SERVER]
+//   ucode dns_ttl.uc PORT NAME [SERVER] [TYPE]
 'use strict';
 
 import * as socket from 'socket';
 
-const port = +ARGV[0], name = ARGV[1], server = ARGV[2] ?? '127.0.0.1';
+const port = +ARGV[0], name = ARGV[1], server = ARGV[2] ?? '127.0.0.1', qtype = +(ARGV[3] ?? 1);
 let q = chr(0x12, 0x34, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0);
 for (let l in split(name, '.'))
 	q += chr(length(l)) + l;
-q += chr(0, 0, 1, 0, 1);
+q += chr(0, qtype >> 8, qtype & 255, 0, 1);
 
 const s = socket.create(socket.AF_INET, socket.SOCK_DGRAM);
 s.connect({ address: server, port });
@@ -43,5 +44,7 @@ for (let i = 0; i < u16(6); i++) {
 	let type = u16(o), ttl = u32(o + 4), len = u16(o + 8);
 	if (type == 1)
 		printf('%d.%d.%d.%d %d\n', ord(r, o + 10), ord(r, o + 11), ord(r, o + 12), ord(r, o + 13), ttl);
+	else
+		printf('rr %d\n', type);
 	o += 10 + len;
 }

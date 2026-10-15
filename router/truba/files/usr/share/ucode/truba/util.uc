@@ -161,9 +161,10 @@ export function cidr_contains(cidr, ip) {
 };
 
 // IPv4-адреса имени через nslookup (busybox); server — DNS-сервер, по умолчанию системный.
+// Только запрос A: без -type busybox шлёт ещё и AAAA, а ответ на него не нужен.
 // Адреса ответа идут после строки «Name:», до неё — адрес самого DNS-сервера.
 export function nslookup(host, server) {
-	let r = run('nslookup ' + shq(host) + (server ? ' ' + shq(server) : ''));
+	let r = run('nslookup -type=A ' + shq(host) + (server ? ' ' + shq(server) : ''));
 	let ips = [], answer = false;
 	for (let line in split(r.out, '\n')) {
 		if (match(line, /^Name:/))

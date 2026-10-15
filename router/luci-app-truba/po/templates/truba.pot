@@ -74,6 +74,10 @@ msgid "shared CDN address: Tunnel wins over Direct"
 msgstr ""
 
 #: htdocs/luci-static/resources/truba/common.js
+msgid "router's own host (NTP, list mirrors, Truba endpoint) — resolved directly"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/common.js
 msgid "geoip category"
 msgstr ""
 

@@ -93,7 +93,9 @@ export function prune_cache_dumps(keep) {
 export function mosdns(cfg, plan, router_hosts, gsdir) {
 	let plugins = [];
 	let main = [
-		{ matches: [ 'qtype 28' ], exec: 'reject 0' },   // AAAA → пусто: Маршрутизация только IPv4 (ADR 0005)
+		// AAAA и HTTPS (SVCB) → пусто: Маршрутизация только IPv4 (ADR 0005); ipv4hint/ipv6hint
+		// в HTTPS-записи обошли бы nftset — клиент взял бы адрес не из A-ответа.
+		{ matches: [ 'qtype 28 65' ], exec: 'reject 0' },
 	];
 
 	if (length(router_hosts)) {

@@ -52,6 +52,9 @@ msgstr "Категория geosite с Действием «Блок» (DNS от�
 msgid "shared CDN address: Tunnel wins over Direct"
 msgstr "общий CDN-адрес: Туннель побеждает Напрямую"
 
+msgid "router's own host (NTP, list mirrors, Truba endpoint) — resolved directly"
+msgstr "свой хост Роутера (NTP, зеркала списков, endpoint Трубы) — резолвится напрямую"
+
 msgid "geoip category"
 msgstr "Категория geoip"
 

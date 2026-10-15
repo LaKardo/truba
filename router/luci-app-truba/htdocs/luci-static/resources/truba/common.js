@@ -37,6 +37,7 @@ const REASON_LABELS = {
 	geosite_ip: _('IP was resolved for a geosite category'),
 	geosite_block: _('geosite category with action Block (DNS answers NXDOMAIN)'),
 	shared_ip: _('shared CDN address: Tunnel wins over Direct'),
+	router_host: _('router\'s own host (NTP, list mirrors, Truba endpoint) — resolved directly'),
 	geoip: _('geoip category'),
 	mode: _('no category matched — the mode default applies'),
 	changed: _('decided before the settings changed')

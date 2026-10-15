@@ -255,7 +255,7 @@
 			"args": [
 				{
 					"matches": [
-						"qtype 28"
+						"qtype 28 65"
 					],
 					"exec": "reject 0"
 				},

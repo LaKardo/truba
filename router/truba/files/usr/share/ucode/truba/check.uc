@@ -268,6 +268,11 @@ export function check(target, mac) {
 		if (decisive && res.reason == 'geosite_ip' && res.action != decisive.action)
 			res.reason = 'shared_ip';   // общий CDN-адрес: Туннель побеждает Напрямую
 	}
+	else if (m.router_host) {
+		// Адресов нет, а Режим ни при чём: свой хост Роутера mosdns отдаёт напрямую.
+		res.action = 'direct';
+		res.reason = 'router_host';
+	}
 	else {
 		res.action = decisive?.action ?? plan.mode_default;
 		res.reason = decisive ? 'geosite' : 'mode';

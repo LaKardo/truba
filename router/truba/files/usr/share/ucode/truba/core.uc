@@ -131,7 +131,7 @@ function save_good(cfg, plan, ctx, hosts, res) {
 
 	if (changed || meta.time == null)
 		U.write_json(C.GOOD_META, { time: time(), routing: res.routing, mode: res.mode, port: cfg.dns.port,
-		                            vps: res.vps, gkey: res.gkey, geoip_sizes: res.geoip_sizes,
+		                            vps: res.vps, endpoint: res.endpoint, gkey: res.gkey, geoip_sizes: res.geoip_sizes,
 		                            missing: res.missing, geosite_order: res.geosite_order });
 }
 
@@ -150,6 +150,17 @@ function load_good() {
 	return meta;
 }
 
+// IP Трубы. Имя endpoint не отрезолвилось (DNS ещё не поднят при старте, сбой upstream) —
+// прежний адрес того же endpoint: без него в bypass4 нет адреса Трубы и её трафик ушёл бы в неё же.
+function vps_ip(tinfo, prev) {
+	let vps = F.vps_ip(tinfo);
+	if (vps == null && tinfo.endpoint && prev.endpoint == tinfo.endpoint && U.is_ipv4(prev.vps)) {
+		U.warn_log('endpoint ' + tinfo.endpoint + ' не резолвится — прежний адрес ' + prev.vps);
+		vps = prev.vps;
+	}
+	return vps;
+}
+
 // Применить настройки; итог — в res. Ошибка nft — res.error, остальное — исключением.
 // res.loaded — новая таблица уже в ядре.
 function apply_config(res, prev) {
@@ -159,7 +170,7 @@ function apply_config(res, prev) {
 	let st = N.iface_up(cfg.iface, ub);
 	let lan_if = F.zone_devices(cfg.zones, ub);
 	ub?.disconnect();
-	let vps = F.vps_ip(tinfo);
+	let vps = vps_ip(tinfo, prev);
 	// Счётчики прежней таблицы переносятся в новую: учёт идёт с запуска службы, а не с последнего применения.
 	let ctx = { lan_if, bypass4: bypass4(vps, tinfo), socket_mark: socket_mark_ok(), vps, counters: S.counters_raw() };
 	if (!ctx.socket_mark)
@@ -175,6 +186,7 @@ function apply_config(res, prev) {
 	res.routing = cfg.routing;
 	res.mode = cfg.mode;
 	res.vps = vps;
+	res.endpoint = tinfo.endpoint;
 	res.missing = [];
 	res.invalid = cfg.invalid;
 	res.socket_mark = ctx.socket_mark;
@@ -268,7 +280,7 @@ function keep_running(res, prev) {
 		let good = load_good();
 		if (good) {
 			out = { ...out, fallback: 'last_good', good_time: good.time, routing: good.routing, mode: good.mode,
-			        vps: good.vps, gkey: good.gkey, geoip_sizes: good.geoip_sizes, missing: good.missing ?? [],
+			        vps: good.vps, endpoint: good.endpoint, gkey: good.gkey, geoip_sizes: good.geoip_sizes, missing: good.missing ?? [],
 			        geosite_order: good.geosite_order, counters_since: time(), mosdns: good.mosdns };
 			if (good.mosdns) {
 				writefile(C.STAMP_FILE, good.gkey ?? '');
@@ -375,7 +387,7 @@ export function refresh_bypass() {
 		return;
 	let cfg = F.load();
 	let tinfo = F.tunnel_info(cfg.iface);
-	let s = refill('bypass4', bypass4(F.vps_ip(tinfo), tinfo));
+	let s = refill('bypass4', bypass4(vps_ip(tinfo, prev), tinfo));
 	if (set_loaded('local4'))
 		s += refill('local4', F.local_subnets());
 	let tmp = C.RUN_DIR + '/bypass.nft';

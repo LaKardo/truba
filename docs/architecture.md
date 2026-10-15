@@ -536,7 +536,7 @@ plugins:
   - tag: main
     type: sequence
     args:
-      - { matches: [ qtype 28 ], exec: reject 0 }        # AAAA → пустой ответ: Маршрутизация только IPv4, IPv6-интернет закрыт (ADR 0005)
+      - { matches: [ qtype 28 65 ], exec: reject 0 }     # AAAA и HTTPS (SVCB) → пустой ответ: Маршрутизация только IPv4, IPv6-интернет закрыт (ADR 0005); ipv4hint в HTTPS обошёл бы nftset
       - { matches: [ qname $c_router ], exec: goto flow_router }
       # порядок генерируется: от узких Категорий к широким; при равенстве Блок → Туннель → Напрямую.
       # Соседние Категории с одним Действием — один domain_set: решает то же, что первая из них

@@ -7,7 +7,7 @@
 // UPDATE_GOLDEN=1 — записать эталоны заново (tests/run.sh монтирует репозиторий на запись).
 'use strict';
 
-import { readfile, writefile, mkdir, popen } from 'fs';
+import { readfile, writefile, mkdir, popen, unlink } from 'fs';
 import { cursor } from 'uci';
 import * as T from 'tlib';
 import * as C from 'truba.const';
@@ -531,6 +531,19 @@ let mdom = (d, hosts) => K.match_domain?.(d, [ { tag: 'zkw', count: 1 } ], () =>
 check('домен: свой хост Роутера — router_host, Категория совпала, но не решает в mosdns',
 	mdom('ntp.kwtest.io', [ 'NTP.kwtest.io' ])?.router_host === true && mdom('ntp.kwtest.io', [])?.router_host === false &&
 	mdom('ntp.kwtest.io', [])?.decisive?.tag == 'zkw', sprintf('%J', mdom('ntp.kwtest.io', [ 'ntp.kwtest.io' ])));
+// Адресов нет (здесь DNS не отвечает) — итог «Напрямую»: mosdns резолвит свой хост мимо Категорий и Режима.
+let sys0 = readfile('/etc/config/system');
+writefile('/etc/config/system', "config timeserver 'ntp'\n\tlist server 'ntp.kwtest.io'\n");
+x = K.check('ntp.kwtest.io');
+check('домен: свой хост Роутера без адресов — Напрямую, router_host',
+	x.action == 'direct' && x.reason == 'router_host' && x.router_host === true && x.decisive == null,
+	sprintf('%s/%s %J', x.action, x.reason, x.ips));
+x = K.check('my-kwtest.example.io');
+check('домен: чужой хост с той же Категорией — по-прежнему Блок', x.action == 'block', x.action);
+if (sys0 != null)
+	writefile('/etc/config/system', sys0);
+else
+	unlink('/etc/config/system');
 x = K.check('5.6.7.8');
 check('IP: Категория geoip из распакованного файла', x.action == 'direct' && x.reason == 'geoip' && same(x.ips[0].geoip, [ 'ru' ]), sprintf('%J', x.ips));
 // «Куда ходит сейчас» (connections): только Категории geoip с Действием — у private его нет.
