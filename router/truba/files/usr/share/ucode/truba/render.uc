@@ -1,4 +1,4 @@
-// Генерация таблицы nftables `inet truba` и конфига mosdns.
+// Генерация таблицы nftables `inet truba`.
 'use strict';
 
 import * as C from 'truba.const';
@@ -157,6 +157,18 @@ function dns_snat_chain() {
 	return s;
 }
 
+// Перехват DNS устройств зон (в dnsmasq Роутера) и подмена источника для чужих подсетей.
+// Приоритет dstnat - 5: после prerouting Трубы, раньше dstnat fw4 и dns_redirect dnsmasq.
+function dns_chains(cfg) {
+	if (!cfg.dns_hijack)
+		return '';
+	let s = '\n\tchain dns_hijack {\n';
+	s += '\t\ttype nat hook prerouting priority dstnat - 5; policy accept;\n';
+	s += '\t\tmeta nfproto ipv4 iifname @lan_if meta l4proto { tcp, udp } th dport 53 redirect to :53\n';
+	s += '\t}\n';
+	return s + dns_snat_chain();
+}
+
 // timeout — срок элементов по умолчанию, с (набор с flags timeout).
 function set_decl(name, typ, flags, elems, timeout) {
 	let s = '\tset ' + name + ' {\n\t\ttype ' + typ + ';\n';
@@ -260,14 +272,7 @@ export function nft_full(cfg, plan, ctx) {
 	s += persist_chain();
 	s += stats_chain(iface);
 	s += output_chain(ctx);
-
-	if (cfg.dns_hijack) {
-		s += '\n\tchain dns_hijack {\n';
-		s += '\t\ttype nat hook prerouting priority dstnat - 5; policy accept;\n';
-		s += '\t\tmeta nfproto ipv4 iifname @lan_if meta l4proto { tcp, udp } th dport 53 redirect to :53\n';
-		s += '\t}\n';
-		s += dns_snat_chain();
-	}
+	s += dns_chains(cfg);
 
 	s += '}\n';
 	return s;
@@ -294,145 +299,4 @@ export function nft_minimal(cfg, ctx) {
 	s += output_chain(ctx);
 	s += '}\n';
 	return s;
-};
-
-// Сколько держать простаивающее соединение с сервером DNS, с. mosdns по умолчанию закрывает DoH
-// через 30 с, хотя серверы держат его дольше (Cloudflare — 400 с, Google — 240 с), и первый промах
-// кэша после паузы ждёт новые TCP и TLS: через Туннель это +100…170 мс. 360 с — чуть меньше, чем
-// у Cloudflare (запасной DoH «Туннеля» по умолчанию): соединение закрывает mosdns, а не сервер в
-// тот момент, когда к нему уходит запрос. В паузах до 6 минут промах «Туннеля» тогда идёт по
-// открытому DoH, дольше — через unbound на Трубе, которому новое соединение почти ничего не стоит
-// (ADR 0013). Если сервер закроет соединение раньше (Google — через 240 с, Яндекс — через 30 с),
-// mosdns откроет новое. У DoT срок действует только с pipelining (tls+pipeline://), у UDP
-// соединений нет.
-const UPSTREAM_IDLE = 360;
-
-// Сколько кэш держит ответ свежим, с. Дольше — устаревший ответ живёт заметно дольше ttl_max:
-// - после обновления списков домен, перешедший в другую Категорию, ещё получает ответ прежнего сервера
-//   (маршрут при этом сразу по новой Категории);
-// - mosdns 5.3.3 не пишет в дамп время сохранения, и после перезапуска ответы из дампа уходят
-//   с TTL 1, пока запись не устареет: устройства переспрашивают раз в секунду.
-// Час покрывает TTL большинства ответов, которые ttl_max обрезал бы (у 90 % — меньше 45 минут).
-const CACHE_TTL_MAX = 3600;
-
-// Дамп кэша — по поколению настроек, от которых зависит, у каких серверов спрошен ответ: серверы путей,
-// Режим и Действия Категорий. Кэш хранит ответы с TTL сервера (до часа): после смены этих настроек
-// mosdns начинает с пустым кэшем, а не отдаёт ответы прежних серверов. Остальные настройки
-// (ttl_max, размер кэша) и обновление списков кэш сохраняют. Поколение — FNV-1a 32 бита.
-export function cache_dump(cfg, plan) {
-	let s = sprintf('%J', [ cfg.dns.tunnel, cfg.dns.direct, plan.mode_default, map(plan.geosite, g => g.tag + '=' + g.action) ]);
-	let h = 0x811c9dc5;
-	for (let i = 0; i < length(s); i++)
-		h = ((h ^ ord(s, i)) * 0x01000193) & 0xffffffff;
-	return sprintf('%s/mosdns-cache-%08x.dump', C.DATA_DIR, h);
-};
-
-// «url@dial_ip» → { addr, dial_addr }.
-function upstream(u, mark) {
-	let m = match(u, /^(.*)@([0-9.]+)$/);
-	let o = m ? { addr: m[1], dial_addr: m[2] } : { addr: u };
-	o.idle_timeout = UPSTREAM_IDLE;
-	if (mark)
-		o.so_mark = mark;
-	return o;
-}
-
-// Серверы DNS одного пути (tag — up_tunnel или up_direct): запрос идёт сразу ко всем, ответ — первый годный.
-// forward с concurrent выбирает сервер для каждого потока случайно и с повторами: при двух серверах
-// половина запросов уходила бы дважды к одному, и зависший сервер держал бы их до тайм-аута (5 с).
-// Поэтому у каждого сервера свой forward, а вместе их собирает fallback: always_standby — запрос сразу
-// к обоим, threshold 1 мс — ответ запасного не ждёт основной. Ответ, кроме NOERROR и NXDOMAIN
-// (SERVFAIL, REFUSED…), отбрасывается, как это делает forward: тогда ждём остальных.
-function upstream_group(plugins, tag, list, mark) {
-	if (length(list) == 1) {
-		push(plugins, { tag, type: 'forward', args: { upstreams: [ upstream(list[0], mark) ] } });
-		return;
-	}
-	let ok = [];
-	for (let i, u in list) {
-		let t = sprintf('%s_%d', tag, i);
-		push(plugins, { tag: t, type: 'forward', args: { upstreams: [ upstream(u, mark) ] } });
-		push(plugins, { tag: t + '_ok', type: 'sequence', args: [
-			{ exec: '$' + t },
-			{ matches: [ '!rcode 0 3' ], exec: 'drop_resp' },
-		] });
-		push(ok, t + '_ok');
-	}
-	// Пары с конца: mosdns ссылается только на уже объявленные теги.
-	let rest = ok[length(ok) - 1];
-	for (let i = length(ok) - 2; i >= 0; i--) {
-		let t = i ? sprintf('%s_%d_any', tag, i) : tag;
-		push(plugins, { tag: t, type: 'fallback', args: { primary: ok[i], secondary: rest, threshold: 1, always_standby: true } });
-		rest = t;
-	}
-}
-
-// JSON — подмножество YAML, mosdns читает его как обычный конфиг.
-// gsdir — каталог списков доменов (по умолчанию распакованные в DATA_DIR).
-export function mosdns(cfg, plan, router_hosts, gsdir) {
-	let plugins = [];
-	let main = [
-		{ matches: [ 'qtype 28' ], exec: 'reject 0' },   // AAAA → пусто: Маршрутизация только IPv4 (ADR 0005)
-	];
-
-	if (length(router_hosts)) {
-		push(plugins, { tag: 'c_router', type: 'domain_set', args: { exps: map(router_hosts, h => 'full:' + h) } });
-		push(main, { matches: [ 'qname $c_router' ], exec: 'goto flow_router' });
-	}
-
-	let i = 0;
-	for (let g in plan.geosite) {
-		let tag = sprintf('c_%d', i++);
-		push(plugins, { tag, type: 'domain_set', args: { files: [ D.geosite_file(g.tag, gsdir) ] } });
-		let ex = (g.action == 'block') ? 'reject 3' : ((g.action == 'tunnel') ? 'goto flow_tunnel' : 'goto flow_direct');
-		push(main, { matches: [ 'qname $' + tag ], exec: ex });
-	}
-	push(main, { exec: 'goto flow_default' });
-
-	upstream_group(plugins, 'up_tunnel', cfg.dns.tunnel, C.MARK_TUNNEL);
-	upstream_group(plugins, 'up_direct', cfg.dns.direct, null);
-	// Ленивый кэш: истёкшая запись отдаётся сразу (TTL 5 с) и проходит дальше по пути, в том числе
-	// через nftset, а свежий ответ запрашивается в фоне у тех же серверов. 0 — выключен.
-	// Дамп в /var (tmpfs): кэш переживает перезапуск mosdns, но не перезагрузку, и флеш не изнашивается.
-	// Пишется при остановке и раз в 10 минут. Имя дампа — по поколению настроек DNS (cache_dump).
-	let cache = { size: cfg.dns.cache_size, dump_file: cache_dump(cfg, plan) };
-	if (cfg.dns.lazy_cache_ttl > 0)
-		cache.lazy_cache_ttl = cfg.dns.lazy_cache_ttl;
-	push(plugins, { tag: 'cache', type: 'cache', args: cache });
-
-	let ttl = sprintf('ttl 0-%d', cfg.dns.ttl_max);
-	// nftset в mosdns 5 — только встроенное действие: «семейство,таблица,набор,тип,маска».
-	let nftset = (set) => sprintf('nftset inet,%s,%s,ipv4_addr,32', C.NFT_TABLE, set);
-	// Путь ответа: fetch_* — кэш и серверы, затем, для Категорий, TTL и nftset. Кэш сохраняет ответ,
-	// когда fetch_* завершилась, — с TTL сервера, но не дольше CACHE_TTL_MAX; устройства получают не
-	// больше ttl_max и часто перепроверяют адрес, а запись в кэше не устаревает раньше срока и не
-	// обновляется в фоне каждые ttl_max. Ответ из кэша тоже проходит через nftset — до ответа
-	// устройству: после пересборки наборов IP возвращаются сами. Фоновое обновление ленивого кэша
-	// идёт только в fetch_*: новые IP попадут в набор со следующим ответом устройству, тоже до него.
-	let up_default = (plan.mode_default == 'tunnel') ? '$up_tunnel' : '$up_direct';
-	for (let f in [ [ 'tunnel', '$up_tunnel', 'gs_tunnel4' ], [ 'direct', '$up_direct', 'gs_direct4' ],
-	                [ 'router', '$up_direct' ], [ 'default', up_default ] ]) {
-		push(plugins, { tag: 'fetch_' + f[0], type: 'sequence', args: [
-			{ exec: '$cache' },
-			{ matches: [ '!has_resp' ], exec: f[1] },
-			{ exec: sprintf('ttl 0-%d', CACHE_TTL_MAX) },
-		] });
-		let flow = [ { exec: '$fetch_' + f[0] } ];
-		if (f[2])
-			push(flow, { exec: ttl }, { exec: nftset(f[2]) });
-		push(plugins, { tag: 'flow_' + f[0], type: 'sequence', args: flow });
-	}
-
-	push(plugins, { tag: 'main', type: 'sequence', args: main });
-
-	let listen = sprintf('%s:%d', C.MOSDNS_ADDR, cfg.dns.port);
-	push(plugins, { tag: 'udp_in', type: 'udp_server', args: { entry: 'main', listen } });
-	push(plugins, { tag: 'tcp_in', type: 'tcp_server', args: { entry: 'main', listen } });
-
-	// API — ради счётчиков кэша (/metrics) на «Обзоре». Только MOSDNS_ADDR: там же mosdns отдаёт
-	// и /debug/pprof, снаружи Роутера их не видно. Нет адреса — порт занят, без API.
-	let conf = { log: { level: 'warn' }, plugins };
-	if (cfg.dns.api)
-		conf.api = { http: cfg.dns.api };
-	return conf;
 };

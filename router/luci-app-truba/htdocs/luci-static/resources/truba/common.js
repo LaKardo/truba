@@ -268,15 +268,22 @@ function tunnelIface() {
 // ---- DNS ----
 
 // Адрес DNS-сервера в том виде, что понимает mosdns 5 (та же проверка — upstream_ok в conf.uc):
-// с опечаткой в схеме mosdns не запустился бы, а с ним пропал бы DNS всей сети. Список схем —
-// у службы (truba.schema).
-const UPSTREAM_RE = /^(([a-z0-9+]+):\/\/)?(\[[0-9a-fA-F:.]+\]|[^\]\[\s\/@:]+)(:\d+)?(\/[^\s@]*)?(@[0-9.]+)?$/;
+// с опечаткой в схеме mosdns не запустился бы, а с ним пропал бы DNS всей сети. Выражение и список
+// схем — у службы (truba.schema, ADR 0015). Выражение там в POSIX: «[:space:]» в JS — «\s», а «[^]…]»
+// в JS — любой символ, поэтому «]» в начале класса экранируется.
+function upstreamRe() {
+	const src = schema().upstream_re;
+	if (!src)
+		return null;
+	upstreamRe.cache ??= {};
+	return upstreamRe.cache[src] ??= new RegExp(src.replace(/\[:space:\]/g, '\\s').replace(/\[\^\]/g, '[^\\]'));
+}
 
 // Текст ошибки адреса или null; пустое — не ошибка (его не добавляют).
 function upstreamError(v) {
 	if (!v)
 		return null;
-	const m = UPSTREAM_RE.exec(v);
+	const m = upstreamRe()?.exec(v);
 	const ok = m && (m[2] == null ? m[5] == null : schema().upstream_schemes.includes(m[2]));
 	return ok ? null : _('Expected https://…, tls://…, quic://…, h3://…, tcp://… or udp://… (optionally «@IP»)');
 }

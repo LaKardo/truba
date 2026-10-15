@@ -6,6 +6,7 @@ import * as U from 'truba.util';
 import * as D from 'truba.dat';
 import * as F from 'truba.conf';
 import * as P from 'truba.plan';
+import * as DNS from 'truba.dns';
 
 // Совпадение записи geosite с доменом по правилам v2ray.
 function entry_match(entry, d) {
@@ -191,6 +192,32 @@ export function ip_verdicts(ips, mac, cfg) {
 	return verdicts(cfg, plan, filter(cats, (c) => c.set != 'geoip' || (c.tag in ruled)), ips, mac);
 };
 
+// Домен по Категориям geosite — так же, как его разберёт main в конфиге mosdns (truba.dns):
+// сначала свои хосты Роутера, затем Категории плана по Приоритету. cats — Категории geosite,
+// entries(tag) — их записи (читаются по одной Категории: у category-ads их десятки тысяч),
+// actions — Действия Категорий плана. Итог — { hits, decisive, router_host }: все Категории
+// домена и та, что решила (первая в plan.geosite).
+export function match_domain(d, cats, entries, plan, actions, router_hosts) {
+	let hits = [];
+	for (let c in cats) {
+		for (let e in entries(c.tag)) {
+			if (entry_match(e, d)) {
+				push(hits, { tag: c.tag, entry: e, count: c.count, action: actions[c.tag] ?? 'mode' });
+				break;
+			}
+		}
+	}
+	let decisive = null;
+	for (let g in plan.geosite) {
+		let h = filter(hits, x => x.tag == g.tag)[0];
+		if (h) {
+			decisive = h;
+			break;
+		}
+	}
+	return { hits, decisive, router_host: DNS.is_router_host(d, router_hosts) };
+};
+
 export function check(target, mac) {
 	let cfg = F.load();
 	target = lc(trim(target ?? ''));
@@ -216,29 +243,14 @@ export function check(target, mac) {
 	res.kind = 'domain';
 	let d = replace(target, /\.$/, '');
 
-	// Все Категории geosite, где домен совпадает, и сработавшая (первая по Приоритету с явным Действием).
-	let hits = [];
-	for (let c in cats) {
-		if (c.set != 'geosite')
-			continue;
-		for (let e in D.geosite_entries(c.tag)) {
-			if (entry_match(e, d)) {
-				push(hits, { tag: c.tag, entry: e, count: c.count, action: actions[c.tag] ?? 'mode' });
-				break;
-			}
-		}
-	}
-	res.geosite = hits;
-
-	let decisive = null;
-	for (let g in plan.geosite) {
-		let h = filter(hits, x => x.tag == g.tag)[0];
-		if (h) {
-			decisive = h;
-			break;
-		}
-	}
-	res.decisive = decisive;
+	let hosts = cfg.routing ? F.router_hosts(cfg, F.tunnel_info(cfg.iface)) : [];
+	let m = match_domain(d, filter(cats, c => c.set == 'geosite'), D.geosite_entries, plan, actions, hosts);
+	res.geosite = m.hits;
+	// Свой хост Роутера mosdns резолвит напрямую раньше Категорий и в наборы gs_* не кладёт:
+	// Блок Категории его не касается, а маршрут решают только адреса.
+	res.router_host = m.router_host;
+	res.decisive = m.router_host ? null : m.decisive;
+	let decisive = res.decisive;
 
 	if (decisive?.action == 'block') {
 		res.action = 'block';

@@ -24,7 +24,7 @@ function StateCard({ st }) {
 
 // ---- Серверы ----
 
-// Серверы одного пути: запрос идёт ко всем сразу, ответ — первый годный (render.uc, upstream_group).
+// Серверы одного пути: запрос идёт ко всем сразу, ответ — первый годный (dns.uc, upstream_group).
 function ServersCard({ cls, title, name, hint }) {
 	const { html } = app.lib;
 	return html`<${kit.Card} cls=${cls} title=${title} aside=${_('queried all at once')}>

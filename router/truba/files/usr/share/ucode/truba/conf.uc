@@ -10,18 +10,24 @@ const MAC_RE = /^([0-9a-f]{2}:){5}[0-9a-f]{2}$/;
 
 // Схемы адресов, которые понимает mosdns 5; без схемы — udp. Адрес с опечаткой в схеме
 // останавливает mosdns целиком, а с ним DNS всей сети, поэтому в его конфиг он не попадает.
-// Интерфейс получает список вместе со схемой настроек (truba schema).
+// Интерфейс получает список и само выражение вместе со схемой настроек (truba schema, ADR 0015).
 export const UPSTREAM_SCHEMES = [ 'udp', 'tcp', 'tcp+pipeline', 'tls', 'tls+pipeline', 'https', 'h3', 'quic', 'doq' ];
 
-// «[схема://]хост[:порт][/путь][@IP]»; путь — только со схемой. Та же проверка — в dns.js.
+// «[схема://]хост[:порт][/путь][@IP]»; путь — только со схемой. Группы: 2 — схема, 5 — путь, 6 — «@IP».
 // Регулярные выражения ucode — POSIX: внутри [...] нет \s, только [:space:].
-const UPSTREAM_RE = regexp('^(([a-z0-9+]+)://)?(\\[[0-9a-fA-F:.]+\\]|[^][[:space:]/@:]+)(:[0-9]+)?(/[^[:space:]@]*)?(@[0-9.]+)?$');
+export const UPSTREAM_RE = '^(([a-z0-9+]+)://)?(\\[[0-9a-fA-F:.]+\\]|[^][[:space:]/@:]+)(:[0-9]+)?(/[^[:space:]@]*)?(@[0-9.]+)?$';
+const UPSTREAM_RX = regexp(UPSTREAM_RE);
+
+// Адрес DNS-сервера по частям: { addr, dial_addr } (addr — без «@IP») или null, если mosdns его не поймёт.
+export function parse_upstream(u) {
+	let m = (type(u) == 'string') ? match(u, UPSTREAM_RX) : null;
+	if (!m || ((m[2] == null) ? (m[5] != null) : !(m[2] in UPSTREAM_SCHEMES)))
+		return null;
+	return m[6] ? { addr: substr(u, 0, length(u) - length(m[6])), dial_addr: substr(m[6], 1) } : { addr: u };
+};
 
 export function upstream_ok(u) {
-	let m = (type(u) == 'string') ? match(u, UPSTREAM_RE) : null;
-	if (!m)
-		return false;
-	return (m[2] == null) ? (m[5] == null) : (m[2] in UPSTREAM_SCHEMES);
+	return parse_upstream(u) != null;
 };
 
 // Схема настроек (ADR 0015): тип каждой опции UCI, значение по умолчанию и пределы — только здесь.
@@ -139,6 +145,7 @@ export function schema() {
 	return {
 		sections: SCHEMA,
 		upstream_schemes: UPSTREAM_SCHEMES,
+		upstream_re: UPSTREAM_RE,
 		consts: { fw_zone: C.FW_ZONE, probe_window: C.PROBE_WINDOW, history: C.HISTORY, mosdns_addr: C.MOSDNS_ADDR,
 		          devices: C.DEV_HISTORY },
 	};

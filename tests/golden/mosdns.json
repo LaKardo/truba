@@ -35,24 +35,8 @@
 			"type": "domain_set",
 			"args": {
 				"files": [
-					"/var/lib/truba/geosite/adirect.txt"
-				]
-			}
-		},
-		{
-			"tag": "c_3",
-			"type": "domain_set",
-			"args": {
-				"files": [
-					"/var/lib/truba/geosite/zdirect.txt"
-				]
-			}
-		},
-		{
-			"tag": "c_4",
-			"type": "domain_set",
-			"args": {
-				"files": [
+					"/var/lib/truba/geosite/adirect.txt",
+					"/var/lib/truba/geosite/zdirect.txt",
 					"/var/lib/truba/geosite/wide.txt"
 				]
 			}
@@ -296,18 +280,6 @@
 				{
 					"matches": [
 						"qname $c_2"
-					],
-					"exec": "goto flow_direct"
-				},
-				{
-					"matches": [
-						"qname $c_3"
-					],
-					"exec": "goto flow_direct"
-				},
-				{
-					"matches": [
-						"qname $c_4"
 					],
 					"exec": "goto flow_direct"
 				},

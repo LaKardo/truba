@@ -11,6 +11,7 @@ import * as D from 'truba.dat';
 import * as F from 'truba.conf';
 import * as P from 'truba.plan';
 import * as R from 'truba.render';
+import * as DNS from 'truba.dns';
 import * as N from 'truba.net';
 import * as S from 'truba.state';
 
@@ -35,22 +36,6 @@ function socket_mark_ok() {
 	return U.run("nft -c 'add table inet truba_probe; " +
 	             "add chain inet truba_probe o { type filter hook output priority 0; }; " +
 	             "add rule inet truba_probe o socket mark 0'").code == 0;
-}
-
-// Порт API mosdns занят другой программой? Ошибка API останавливает mosdns целиком —
-// весь DNS сети, поэтому тогда mosdns запускается без API (нет только счётчиков кэша).
-// Конфликтуют слушатели этого порта на 127.0.0.1 и на всех адресах.
-function api_port_taken(api) {
-	let port = split(api, ':')[1];
-	for (let l in split(U.run('netstat -lntp').out, '\n')) {
-		let f = split(trim(l), /\s+/);
-		if (f[5] != 'LISTEN' || match(f[6] ?? '', /\/mosdns$/))
-			continue;
-		let i = rindex(f[3], ':');
-		if (substr(f[3], i + 1) == port && (substr(f[3], 0, i) in [ C.MOSDNS_ADDR, '0.0.0.0', '::', '' ]))
-			return true;
-	}
-	return false;
 }
 
 // Есть ли в ядре таблица Трубы. Короткая цепочка вместо «nft list table»: та вывела бы
@@ -127,7 +112,7 @@ function save_good(cfg, plan, ctx, hosts, res) {
 		if (meta.gkey != res.gkey || !have)
 			for (let g in plan.geosite)
 				changed = U.write_if_changed(D.geosite_file(g.tag, C.GOOD_GEOSITE), readfile(D.geosite_file(g.tag))) || changed;
-		let m = R.mosdns({ ...cfg, dns: { ...cfg.dns, api: null } }, plan, hosts, C.GOOD_GEOSITE);
+		let m = DNS.mosdns({ ...cfg, dns: { ...cfg.dns, api: null } }, plan, hosts, C.GOOD_GEOSITE);
 		changed = U.write_if_changed(C.GOOD_MOSDNS, sprintf('%J', m)) || changed;
 	}
 	else if (stat(C.GOOD_MOSDNS)) {
@@ -195,7 +180,7 @@ function apply_config(res, prev) {
 	res.socket_mark = ctx.socket_mark;
 	res.counters_since = (length(ctx.counters) && prev.counters_since) ? prev.counters_since : time();
 	res.mosdns = false;
-	let text, mconf, plan, hosts;
+	let text, plan, hosts;
 
 	if (cfg.routing) {
 		let dat = unpack_lists(res.warnings);
@@ -222,14 +207,6 @@ function apply_config(res, prev) {
 
 		text = R.nft_full(cfg, plan, ctx);
 
-		if (api_port_taken(cfg.dns.api)) {
-			U.warn_log(sprintf('порт %s занят другой программой: mosdns без API, счётчиков кэша на «Обзоре» не будет', cfg.dns.api));
-			cfg.dns.api = null;
-		}
-		res.dns_api = cfg.dns.api;
-		hosts = F.router_hosts(cfg, tinfo);
-		mconf = sprintf('%J', R.mosdns(cfg, plan, hosts));
-
 		res.gkey = gkey;
 		res.geoip_sizes = ctx.set_sizes;
 		res.missing = plan.missing;
@@ -250,23 +227,11 @@ function apply_config(res, prev) {
 	// Конфиг mosdns — только после загрузки таблицы: если nft её не принял, действующий
 	// конфиг mosdns должен по-прежнему соответствовать действующей (прежней) таблице.
 	if (cfg.routing) {
-		U.write_atomic(C.MOSDNS_CONF, mconf);
-		// Дампы прежних поколений кэша (R.cache_dump) mosdns больше не прочитает.
-		let dump = R.cache_dump(cfg, plan);
-		for (let f in lsdir(C.DATA_DIR) ?? [])
-			if (match(f, /^mosdns-cache-[0-9a-f]+.dump$/) && C.DATA_DIR + '/' + f != dump)
-				unlink(C.DATA_DIR + '/' + f);
-		// Метка поколения меняется вместе с данными (списки, Режим, Действия Категорий):
-		// procd сравнивает содержимое файла и перезапускает mosdns; mosdns.json он отслеживает сам.
-		if (readfile(C.STAMP_FILE) != res.gkey)
-			writefile(C.STAMP_FILE, res.gkey);
-		N.dnsmasq_enable(cfg.dns.port);
-		// Перехват направляет DNS устройств зон на адреса их устройств — их должен слушать dnsmasq.
-		if (cfg.dns_hijack)
-			N.dns_heal(ctx.lan_if);
+		hosts = F.router_hosts(cfg, tinfo);
+		res.dns_api = DNS.apply(cfg, plan, hosts, res.gkey, ctx.lan_if);
 	}
 	else
-		N.dnsmasq_restore();
+		DNS.dnsmasq_restore();
 	res.mosdns = cfg.routing;
 
 	N.ensure_rules(st.device);
@@ -307,13 +272,13 @@ function keep_running(res, prev) {
 			        geosite_order: good.geosite_order, counters_since: time(), mosdns: good.mosdns };
 			if (good.mosdns) {
 				writefile(C.STAMP_FILE, good.gkey ?? '');
-				N.dnsmasq_enable(good.port);
+				DNS.dnsmasq_enable(good.port);
 			}
 			else
-				N.dnsmasq_restore();
+				DNS.dnsmasq_restore();
 		}
 		else {
-			N.dnsmasq_restore();
+			DNS.dnsmasq_restore();
 			out = { ...out, fallback: 'none', routing: false, mosdns: false };
 		}
 	}
@@ -381,7 +346,7 @@ export function teardown() {
 	let lk = U.lock(C.LOCK_APPLY);
 	system([ 'nft', 'delete', 'table', 'inet', C.NFT_TABLE ]);
 	N.remove_rules();
-	N.dnsmasq_restore();
+	DNS.dnsmasq_restore();
 	N.cron_set(false);
 	N.upnp_set(false);
 	unlink(C.APPLIED_FILE);

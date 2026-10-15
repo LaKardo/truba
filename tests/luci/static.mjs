@@ -150,9 +150,10 @@ if (existsSync(devView) && /\b3600\b|, 60\)/.test(readFileSync(devView, 'utf8'))
 }
 
 // Интерфейс вызывает truba.devices и truba.connections (ADR 0018) и читает status.watchdog — их нет в службе до
-// 1.2.0-r1: с более старой truba вкладки «Обзор» и «Устройства» не строятся. Нижняя граница зависимости — не ниже
+// 1.2.0-r1: с более старой truba вкладки «Обзор» и «Устройства» не строятся. Выражение адреса DNS (schema.upstream_re)
+// служба отдаёт с 1.2.0-r5: без него каждый сервер на «DNS» был бы ошибкой. Нижняя граница зависимости — не ниже
 // неё и не выше версии truba из этого же репозитория; версии пакетов выпускаются вместе.
-const API_SINCE = '1.2.0-r1';
+const API_SINCE = '1.2.0-r5';
 const ver = (v) => v.split(/[.-]r?/).map(Number);
 const cmpVer = (a, b) => { const x = ver(a), y = ver(b); for (let i = 0; i < 4; i++) if (x[i] !== y[i]) return x[i] - y[i]; return 0; };
 const luciMk = readFileSync(join(root, 'Makefile'), 'utf8');
@@ -401,13 +402,20 @@ const devSecs = [
 	{ '.name': 'z1', '.type': 'zone', '.conf': 'firewall', name: 'lan', network: [ 'lan' ] },
 	{ '.name': 'lan', '.type': 'interface', '.conf': 'network', proto: 'static', ipaddr: '192.168.1.1', netmask: '255.255.255.0' },
 ];
+// Выражение адреса DNS — как его отдаёт truba.schema: строка UPSTREAM_RE из conf.uc (литерал ucode в одинарных кавычках).
+function confUpstreamRe() {
+	const src = readFileSync(fileURLToPath(new URL('../../router/truba/files/usr/share/ucode/truba/conf.uc', import.meta.url)), 'utf8');
+	const m = /export const UPSTREAM_RE = '((?:[^'\\]|\\.)*)';/.exec(src);
+	return m ? m[1].replace(/\\(.)/g, '$1') : '';
+}
 const devSchema = { sections: {
 	device: { enabled: { type: 'bool', def: true }, policy: { type: 'enum', values: [ 'tunnel', 'direct', 'rules' ], def: 'tunnel' } },
 	main: { iface: { type: 'pattern', re: '^[A-Za-z0-9_]{1,15}$', def: 'awg0' } },
 	lists: { geoip_url: { type: 'string', def: 'https://x' } },
 	dns: { set_timeout: { type: 'int', def: 86400, lo: 0, hi: 604800, min: 600 } },
 	watchdog: { probe: { type: 'ipv4', def: '' } }
-}, upstream_schemes: [ 'udp', 'tcp', 'tcp+pipeline', 'tls', 'tls+pipeline', 'https', 'h3', 'quic', 'doq' ], consts: { fw_zone: 'truba' } };
+}, upstream_schemes: [ 'udp', 'tcp', 'tcp+pipeline', 'tls', 'tls+pipeline', 'https', 'h3', 'quic', 'doq' ],
+	upstream_re: confUpstreamRe(), consts: { fw_zone: 'truba' } };
 // String.prototype.format задаёт luci.js; в Node — замена для текстов ошибок полей и времени строк журнала (%02d).
 String.prototype.format ??= function(...a) {
 	let i = 0;

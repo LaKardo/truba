@@ -15,6 +15,7 @@ import * as P from 'truba.plan';
 import * as R from 'truba.render';
 import * as F from 'truba.conf';
 import * as N from 'truba.net';
+import * as DNS from 'truba.dns';
 import * as K from 'truba.check';
 import * as S from 'truba.stats';
 import * as DV from 'truba.devstats';
@@ -171,14 +172,24 @@ let stats_bad = filter(stats_rules, (l) => {
 check('stats: в каждом правиле учёта счётчик, затем update своего набора, ключ — адрес устройства',
 	length(stats_rules) == 6 && !length(stats_bad), join(' | ', stats_bad));
 
-golden('mosdns.json', sprintf('%.J\n', R.mosdns(mk(), plan, [ 'ntp.example' ])));
-let noapi = R.mosdns(mk({ api: null, lazy_cache_ttl: 0 }), sel, []);
+golden('mosdns.json', sprintf('%.J\n', DNS.mosdns(mk(), plan, [ 'ntp.example' ])));
+// Соседние Категории с одним Действием — один domain_set в том же порядке; несоседние — раздельно.
+let mfull = DNS.mosdns(mk(), plan, []);
+let msets = map(filter(mfull.plugins, p => p.type == 'domain_set'), p => map(p.args.files, f => replace(f, /^.*\/|\.txt$/g, '')));
+let mmain = map(filter(mfull.plugins, p => p.tag == 'main')[0].args, x => x.exec);
+check('mosdns: соседние Категории с одним Действием — один domain_set, порядок Приоритета сохранён',
+	same(msets, [ [ 'ads' ], [ 'tunnel' ], [ 'adirect', 'zdirect', 'wide' ] ]) &&
+	same(mmain, [ 'reject 0', 'reject 3', 'goto flow_tunnel', 'goto flow_direct', 'goto flow_default' ]), sprintf('%J %J', msets, mmain));
+let split_plan = { ...plan, geosite: [ { tag: 'a', action: 'direct' }, { tag: 'b', action: 'tunnel' }, { tag: 'c', action: 'direct' } ] };
+check('mosdns: несоседние Категории с одним Действием не объединяются',
+	length(filter(DNS.mosdns(mk(), split_plan, []).plugins, p => p.type == 'domain_set')) == 3);
+let noapi = DNS.mosdns(mk({ api: null, lazy_cache_ttl: 0 }), sel, []);
 check('mosdns: без адреса API — без API, без своих хостов — без c_router',
 	noapi.api == null && !length(filter(noapi.plugins, p => p.tag == 'c_router')));
 check('mosdns: lazy_cache_ttl 0 — ленивый кэш выключен',
 	!length(filter(noapi.plugins, p => p.tag == 'cache' && p.args?.lazy_cache_ttl)));
 // Три сервера: все сразу через вложенные fallback; каждый тег объявлен раньше, чем на него ссылаются.
-let three = R.mosdns(mk({ tunnel: [ 'udp://192.0.2.1', 'udp://192.0.2.2', 'udp://192.0.2.3' ] }), sel, []);
+let three = DNS.mosdns(mk({ tunnel: [ 'udp://192.0.2.1', 'udp://192.0.2.2', 'udp://192.0.2.3' ] }), sel, []);
 let seen = {}, refs_ok = true, servers = [];
 for (let p in three.plugins) {
 	for (let r in [ p.args?.primary, p.args?.secondary ])
@@ -193,7 +204,7 @@ let top = filter(three.plugins, p => p.tag == 'up_tunnel')[0];
 check('mosdns: три сервера — каждый в своём forward, все под up_tunnel, ссылки только назад',
 	refs_ok && top?.type == 'fallback' && top.args.always_standby && length(filter(servers, a => index(a, 'udp://192.0.2.') == 0)) == 3);
 // Поколение кэша: меняется вместе с серверами, Режимом и Действиями, но не с ttl_max.
-let gen = (dns, p) => R.cache_dump(mk(dns), p ?? plan);
+let gen = (dns, p) => DNS.cache_dump(mk(dns), p ?? plan);
 check('кэш: дамп по поколению — новый при смене серверов, Режима и Действия, прежний при смене ttl_max',
 	match(gen(), /^\/var\/lib\/truba\/mosdns-cache-[0-9a-f]{8}\.dump$/) && gen({ ttl_max: 60 }) == gen() &&
 	gen({ direct: [ 'udp://192.0.2.9' ] }) != gen() && gen(null, sel) != gen() &&
@@ -213,6 +224,15 @@ check('адрес DNS: схемы mosdns и «@IP»', F.upstream_ok('https://1.1
 	F.upstream_ok('tls+pipeline://dns.example@1.2.3.4') &&
 	F.upstream_ok('1.1.1.1') && F.upstream_ok('udp://[2001:db8::1]:53'));
 check('адрес DNS: опечатка в схеме и путь без схемы — нет', !F.upstream_ok('htps://1.1.1.1/dns-query') && !F.upstream_ok('1.1.1.1/dns-query'));
+check('адрес DNS: по частям — «@IP» отдельно, без него addr — весь адрес',
+	same(F.parse_upstream('tls://dns.example@1.2.3.4'), { addr: 'tls://dns.example', dial_addr: '1.2.3.4' }) &&
+	same(F.parse_upstream('https://1.1.1.1/dns-query'), { addr: 'https://1.1.1.1/dns-query' }) &&
+	F.parse_upstream('htps://x') == null && F.parse_upstream(null) == null);
+check('адрес DNS: схема и выражение — в truba.schema для интерфейса',
+	F.schema().upstream_re == F.UPSTREAM_RE && same(F.schema().upstream_schemes, F.UPSTREAM_SCHEMES));
+let dial = filter(DNS.mosdns(mk(), plan, []).plugins, p => p.tag == 'up_direct')[0]?.args.upstreams[0];
+check('mosdns: «@IP» сервера — в dial_addr', dial?.addr == 'tls+pipeline://common.dot.dns.yandex.net' && dial?.dial_addr == '77.88.8.8',
+	sprintf('%J', dial));
 
 config(`
 config main 'main'
@@ -442,7 +462,7 @@ check('IPv6: имя занято чужой секцией — она не тр�
 		                                { family: 'inet', local: '192.168.4.1', prefixlen: 24, secondary: true } ] },
 		{ ifname: 'wan', addr_info: [ { family: 'inet', local: '198.51.100.1', prefixlen: 30 } ] },
 	];
-	const U = (devs, udp) => N.dns_unbound?.(devs, udp ?? UDP, ADDRS);
+	const U = (devs, udp) => DNS.dns_unbound?.(devs, udp ?? UDP, ADDRS);
 	check('dnsmasq и зоны: адрес устройства зоны без сокета на :53 — в списке, со своим устройством',
 		same(U([ 'br-lan', 'ms0' ]), [ { dev: 'ms0', addr: '100.64.0.1' } ]), sprintf('%J', U([ 'br-lan', 'ms0' ])));
 	check('dnsmasq и зоны: только первый адрес устройства (его выбирает перехват), устройства вне зон не проверяются',
@@ -450,7 +470,7 @@ check('IPv6: имя занято чужой секцией — она не тр�
 	check('dnsmasq и зоны: сокет на 0.0.0.0:53 слушает все адреса',
 		same(U([ 'ms0', 'guest' ], UDP + 'udp        0      0 0.0.0.0:53              0.0.0.0:*\n'), []));
 	check('dnsmasq и зоны: устройства без адреса IPv4 и пустой ввод — без ошибки',
-		same(U([ 'nope' ]), []) && same(N.dns_unbound?.([ 'ms0' ], null, null), []));
+		same(U([ 'nope' ]), []) && same(DNS.dns_unbound?.([ 'ms0' ], null, null), []));
 }
 
 // ---- «Проверить домен/IP»: Приоритет для IP ----
@@ -505,6 +525,12 @@ check('домен: узкая Категория раньше широкой', d
 check('домен: Категория «По режиму» не решает', dom('mode.example.io') == 'tunnel/mode/-', dom('mode.example.io'));
 let x = K.check('b.a.example.com');
 check('домен: видны все совпавшие Категории', same(sort(map(x.geosite, h => h.tag)), [ 'znarrow', 'zwide' ]), sprintf('%J', x.geosite));
+// Свой хост Роутера (NTP, зеркала, endpoint): mosdns проверяет его раньше Категорий — Блок не действует.
+let mdom = (d, hosts) => K.match_domain?.(d, [ { tag: 'zkw', count: 1 } ], () => [ 'keyword:kwtest' ],
+	{ geosite: [ { tag: 'zkw', action: 'block' } ] }, { zkw: 'block' }, hosts);
+check('домен: свой хост Роутера — router_host, Категория совпала, но не решает в mosdns',
+	mdom('ntp.kwtest.io', [ 'NTP.kwtest.io' ])?.router_host === true && mdom('ntp.kwtest.io', [])?.router_host === false &&
+	mdom('ntp.kwtest.io', [])?.decisive?.tag == 'zkw', sprintf('%J', mdom('ntp.kwtest.io', [ 'ntp.kwtest.io' ])));
 x = K.check('5.6.7.8');
 check('IP: Категория geoip из распакованного файла', x.action == 'direct' && x.reason == 'geoip' && same(x.ips[0].geoip, [ 'ru' ]), sprintf('%J', x.ips));
 // «Куда ходит сейчас» (connections): только Категории geoip с Действием — у private его нет.

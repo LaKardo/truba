@@ -55,7 +55,7 @@ export const HEALTH_FILE = RUN_DIR + '/health.json';
 export const APPLIED_FILE = RUN_DIR + '/applied.json';
 export const NAT_FILE    = RUN_DIR + '/nat.json';
 export const TT_FILE     = RUN_DIR + '/tunnel-test.json';
-// Перезапуск dnsmasq ради адресов зон (net.dns_heal): после какого процесса и для каких адресов.
+// Перезапуск dnsmasq ради адресов зон (dns.dns_heal): после какого процесса и для каких адресов.
 export const DNS_HEAL_FILE = RUN_DIR + '/dns-heal.json';
 // История скорости для графика «Обзора» (truba.stats): точки по 5 с за час и поминутные за сутки.
 export const RATES_FILE     = RUN_DIR + '/rates.json';
