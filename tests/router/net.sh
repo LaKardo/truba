@@ -259,14 +259,29 @@ check "применение перезапустило dnsmasq: адрес ms0 �
 # Без применения то же находит процесс truba stats: раз в минуту.
 dnsmasq_no_ms0; dnsmasq_ms0_back
 check "truba stats находит адрес зоны без сокета и перезапускает dnsmasq" wait_for 75 listens53 100.64.0.1
-# dnsmasq намеренно не слушает ms0: перезапуск не помогает — он один, а не на каждое применение и каждую минуту.
-dnsmasq_no_ms0
-PID0="$(pidof dnsmasq)"
+# dnsmasq намеренно не слушает ms0: перезапуск не помогает — он один на процесс dnsmasq и набор адресов,
+# а не на каждое применение и каждую минуту. Перезапустить может и применение, и минутная проверка
+# truba stats — когда она сработает, от теста не зависит. Поэтому считаются записи журнала после метки
+# (кто бы ни перезапустил, запись одна), а не PID до и после определённого применения.
+# Начало — когда проверка truba stats из прошлого шага закончилась: адрес она видит раньше, чем выходит
+# из ожидания после перезапуска, и иначе записала бы «перезапуск был» на dnsmasq, перезапущенный
+# здесь, — применение тогда его не перезапускает. Проверка держит блокировку применения (truba.const LOCK_APPLY).
+F0=$FAILS
+check "проверка DNS зон в truba stats не идёт" bounded 30 flock /var/lock/truba.lock true
+MS0_MARK="truba-test-$$-ms0"
+logger -t truba-test "$MS0_MARK"
+since_mark() { logread | sed -n "/truba-test: $MS0_MARK\$/,\$p"; }
+log_count() { since_mark | grep -cF "$1"; }
+HEAL_RESTART='dnsmasq не слушает 100.64.0.1 (ms0) — DNS устройств зоны не работает, перезапуск dnsmasq'
+HEAL_FAILED='dnsmasq и после перезапуска не слушает 100.64.0.1 (ms0)'
+check "dnsmasq настроен без ms0: адрес ms0 не слушается" dnsmasq_no_ms0
+# Применение ждёт блокировку, пока идёт проверка truba stats: после него перезапуск уже был.
 reload "dnsmasq настроен без ms0"
 PID1="$(pidof dnsmasq)"
 reload "dnsmasq настроен без ms0, ещё раз"
 check "dnsmasq настроен без ms0: перезапуск один, в журнале — что DNS зоны не работает" eval \
-	'[ "$PID1" != "$PID0" ] && [ "$(pidof dnsmasq)" = "$PID1" ] && logread | grep -q "и после перезапуска не слушает 100.64.0.1 (ms0)"'
+	'[ "$(log_count "$HEAL_RESTART")" = 1 ] && [ "$(log_count "$HEAL_FAILED")" = 1 ] && [ -n "$PID1" ] && [ "$(pidof dnsmasq)" = "$PID1" ] && ! listens53 100.64.0.1'
+[ "$FAILS" = "$F0" ] || { echo "  dnsmasq: $PID1 → $(pidof dnsmasq)"; since_mark | grep -E 'truba|dnsmasq' | tail -20 | cut -c1-200 | sed 's/^/  /'; }
 dnsmasq_ms0_back; /etc/init.d/dnsmasq restart >/dev/null 2>&1
 check "dnsmasq снова слушает ms0" wait_for 10 listens53 100.64.0.1
 ip addr add 10.99.0.1/24 dev ms0
