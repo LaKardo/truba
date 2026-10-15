@@ -802,8 +802,8 @@ msgstr "Роутер"
 msgid "%d active"
 msgstr "%d активно"
 
-msgid "IP block: %s"
-msgstr "блок по IP: %s"
+msgid "block: %s"
+msgstr "блок: %s"
 
 msgid "Everything works"
 msgstr "Всё работает"

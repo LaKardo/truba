@@ -384,10 +384,16 @@ export function mosdns(cfg, plan, router_hosts, gsdir) {
 	for (let g in plan.geosite) {
 		let tag = sprintf('c_%d', i++);
 		push(plugins, { tag, type: 'domain_set', args: { files: [ D.geosite_file(g.tag, gsdir) ] } });
-		let ex = (g.action == 'block') ? 'reject 3' : ((g.action == 'tunnel') ? 'goto flow_tunnel' : 'goto flow_direct');
+		let ex = (g.action == 'block') ? 'goto dns_block' : ((g.action == 'tunnel') ? 'goto flow_tunnel' : 'goto flow_direct');
 		push(main, { matches: [ 'qname $' + tag ], exec: ex });
 	}
 	push(main, { exec: 'goto flow_default' });
+
+	// Счётчик DNS-блокировок для метрик (mosdns_blocked_total).
+	push(plugins, { tag: 'dns_block', type: 'sequence', args: [
+		{ exec: 'metrics_collector blocked' },
+		{ exec: 'reject 3' },
+	] });
 
 	upstream_group(plugins, 'up_tunnel', cfg.dns.tunnel, C.MARK_TUNNEL);
 	upstream_group(plugins, 'up_direct', cfg.dns.direct, null);

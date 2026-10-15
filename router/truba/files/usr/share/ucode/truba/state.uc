@@ -92,10 +92,13 @@ function list_info(dir, file, sums) {
 	return res;
 }
 
-function counters(raw) {
+function counters(raw, dc) {
 	let out = {};
 	for (let n in raw)
 		out[replace(n, /^c_/, '')] = raw[n];
+	// DNS-блокировки из метрик mosdns: счётчик blocked с запуска службы.
+	if (dc?.blocked != null)
+		out.dns_block = { packets: dc.blocked, bytes: 0 };
 	return out;
 }
 
@@ -186,13 +189,17 @@ function http_get(addr, path, timeout, max_size) {
 }
 
 // Счётчики кэша mosdns из его API: query — запросов, hit — ответов из кэша (вместе с
-// истёкшими), lazy_hit — истёкших, size — записей сейчас. Отсчёт — с запуска mosdns.
+// истёкшими), lazy_hit — истёкших, size — записей сейчас, blocked — заблокированных доменов.
+// Отсчёт — с запуска mosdns.
 function dns_cache(api, cfg) {
 	let res = {};
 	for (let l in split(http_get(api, '/metrics', 1000) ?? '', '\n')) {
-		let m = match(l, /^mosdns_cache_(query_total|hit_total|lazy_hit_total|size_current)(\{[^}]*\})? ([0-9.e+]+)$/);
-		if (m)
-			res[replace(m[1], /_(total|current)$/, '')] = int(+m[3]);
+		let m = match(l, /^mosdns_(cache_(query_total|hit_total|lazy_hit_total|size_current)|blocked_total)(\{[^}]*\})? ([0-9.e+]+)$/);
+		if (m) {
+			let key = replace(m[1], /^cache_/, '');
+			key = replace(key, /_(total|current)$/, '');
+			res[key] = int(+m[4]);
+		}
 	}
 	if (res.query == null)
 		return null;
@@ -229,6 +236,7 @@ export function status() {
 	let applied = U.read_json(C.APPLIED_FILE, null);
 	let raw = counters_raw();
 	let svc = ub?.call('service', 'list', { name: 'truba' });
+	let dc = (cfg.routing && applied?.dns_api) ? dns_cache(applied.dns_api, cfg) : null;
 	let res = {
 		routing: cfg.routing,
 		mode: cfg.mode,
@@ -254,14 +262,15 @@ export function status() {
 		health: health_state(),
 		table: U.run('ip -4 route show table ' + C.RT_TABLE).out,
 		// counters — сырые счётчики (connections: tunnel/direct/inbound — новые соединения,
-		// block — отброшенные пакеты), traffic — байты трафика устройств; отсчёт с applied.counters_since.
-		counters: counters(raw),
+		// block — отброшенные по IP, dns_block — заблокированные домены), traffic — байты трафика
+		// устройств; отсчёт с applied.counters_since (nftables) или запуска mosdns (dns_block).
+		counters: counters(raw, dc),
 		traffic: traffic(raw),
 		neighbours: neighbours(),
 		upnp: upnp_info(cfg, ub),
 		mosdns: running(ub, 'truba', 'mosdns', svc),
 		// Адрес API — тот, с которым mosdns запущена (его может не быть, если порт занят).
-		dns_cache: (cfg.routing && applied?.dns_api) ? dns_cache(applied.dns_api, cfg) : null,
+		dns_cache: dc,
 		// Итог последней «Проверки NAT» — кнопкой или watchdog после подъёма Туннеля.
 		nat: U.read_json(C.NAT_FILE, null),
 		lists: {

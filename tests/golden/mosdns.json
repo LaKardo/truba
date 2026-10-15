@@ -58,6 +58,18 @@
 			}
 		},
 		{
+			"tag": "dns_block",
+			"type": "sequence",
+			"args": [
+				{
+					"exec": "metrics_collector blocked"
+				},
+				{
+					"exec": "reject 3"
+				}
+			]
+		},
+		{
 			"tag": "up_tunnel_0",
 			"type": "forward",
 			"args": {
@@ -285,7 +297,7 @@
 					"matches": [
 						"qname $c_0"
 					],
-					"exec": "reject 3"
+					"exec": "goto dns_block"
 				},
 				{
 					"matches": [
