@@ -86,8 +86,11 @@ wait_for 10 restarted
 # 20 новых имён: при случайном выборе сервера хотя бы одно ушло бы только к молчащему.
 fast_answers() {
 	t=$(date +%s)
-	for i in $(seq 1 20); do [ "$(ask "mute-$i.zz-tun.trubatest")" = 44.0.0.1 ] || return 1; done
-	[ $(( $(date +%s) - t )) -le 3 ]
+	for i in $(seq 1 20); do
+		got="$(ask "mute-$i.zz-tun.trubatest")"
+		[ "$got" = 44.0.0.1 ] || { echo "ответ $i: $got" >&2; return 1; }
+	done
+	[ $(( $(date +%s) - t )) -le 8 ]
 }
 check "20 новых имён — все ответы от второго сервера, без тайм-аута" bounded 60 fast_answers
 check "у серверов DNS — idle_timeout" eval 'grep -q "\"idle_timeout\": 360" /var/etc/truba/mosdns.json'

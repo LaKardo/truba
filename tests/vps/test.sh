@@ -280,6 +280,59 @@ else
 	fail "nft -f"
 fi
 
+# Внешняя оболочка без conntrack, соседний порт по-прежнему отслеживается для DNAT.
+ip addr add 203.0.113.10/32 dev lo
+ip addr add 203.0.113.20/32 dev lo
+ip link add truba-raw0 type veth peer name truba-raw1
+ip link set truba-raw0 up; ip link set truba-raw1 up
+WAN_IF=truba-raw0
+write_nft && nft -f "$NFT_FILE"
+nft -f - <<-'EOF'
+	table inet raw_test {
+		counter outer_in { }
+		counter outer_out { }
+		counter inner_nat { }
+		chain pre {
+			type filter hook prerouting priority -150; policy accept;
+			iifname "truba-raw0" udp dport 51820 ct state untracked counter name outer_in
+			iifname "lo" udp dport 51821 ct state new counter name inner_nat
+		}
+		chain out {
+			type filter hook output priority -150; policy accept;
+			oifname "lo" udp sport 51820 ct state untracked counter name outer_out
+		}
+	}
+EOF
+perl -MSocket -e '
+	open(my $f, "<", "/sys/class/net/truba-raw1/ifindex") or die "$!"; my $i = <$f>; close($f);
+	sub htons { unpack("S", pack("n", $_[0])) }
+	socket(my $s, 17, SOCK_RAW, htons(0x0800)) or die "$!";
+	my $ip = pack("CCnnnCCna4a4", 0x45, 0, 29, 1, 0, 64, 17, 0, inet_aton("203.0.113.20"), inet_aton("203.0.113.10"));
+	my $sum = 0; $sum += $_ for unpack("n*", $ip); $sum = ($sum & 65535) + ($sum >> 16); $sum = ($sum & 65535) + ($sum >> 16);
+	substr($ip, 10, 2) = pack("n", (~$sum) & 65535);
+	my $frame = pack("H*", "ffffffffffff0200000000010800") . $ip . pack("nnnn", 40000, 51820, 9, 0) . "x";
+	send($s, $frame, 0, pack("S! S! i! S! C C a8", 17, htons(0x0800), $i, 1, 0, 6, "\xff" x 6)) or die "$!";
+'
+for _ in $(seq 20); do
+	nft list counter inet raw_test outer_in | grep -q 'packets 1 ' && break
+	sleep 0.1
+done
+WAN_IF=lo
+write_nft && nft -f "$NFT_FILE"
+for p in 51820 51821; do
+	perl -MSocket -e 'socket(my $s, PF_INET, SOCK_DGRAM, 0) or die; send($s, "x", 0, sockaddr_in($ARGV[0], inet_aton("203.0.113.10"))) or die' "$p"
+done
+perl -MSocket -e 'socket(my $s, PF_INET, SOCK_DGRAM, 0) or die; bind($s, sockaddr_in(51820, inet_aton("203.0.113.10"))) or die; send($s, "x", 0, sockaddr_in(9, inet_aton("203.0.113.20"))) or die'
+raw_count() { nft list counter inet raw_test "$1" | awk '/packets/ {print $2}'; }
+[ "$(raw_count outer_in) $(raw_count outer_out) $(raw_count inner_nat)" = "1 1 1" ] \
+	&& ok "notrack: оболочка в обе стороны, соседний порт сохраняет conntrack" || fail "notrack: $(raw_count outer_in) $(raw_count outer_out) $(raw_count inner_nat)"
+nft delete table inet raw_test
+nft delete table ip truba_nat; nft delete table inet truba_filter
+ip addr del 203.0.113.10/32 dev lo
+ip addr del 203.0.113.20/32 dev lo
+ip link del truba-raw0
+WAN_IF=eth0
+
 # sysctl: без загрузки nf_conntrack при старте systemd-sysctl пропускает ключи conntrack.
 SD="$T/sysctl"; mkdir -p "$SD/etc" "$SD/lib"
 SYSCTL_DIRS="$SD/etc $SD/lib"; SYSCTL_FILE="$SD/etc/90-truba.conf"; MODULES_FILE="$STATE_DIR/modules-load-truba.conf"
@@ -287,6 +340,10 @@ SYS_NET="$T/sys"; mkdir -p "$SYS_NET/eth0/queues/tx-0" "$SYS_NET/eth0/queues/rx-
 modprobe() { :; }; sysctl() { :; }; tc() { echo "$*" >> "$STATE_DIR/tc.txt"; }
 out=$(write_sysctl 2>&1)
 grep -q 'nf_conntrack_max = 262144' "$SYSCTL_FILE" && ok "sysctl: nf_conntrack_max" || fail "sysctl nf_conntrack_max"
+for setting in 'rmem_max = 16777216' 'wmem_max = 16777216' 'netdev_max_backlog = 16384' 'optmem_max = 65536' \
+	'nf_conntrack_udp_timeout = 60' 'nf_conntrack_udp_timeout_stream = 180'; do
+	grep -qF "$setting" "$SYSCTL_FILE" && ok "sysctl: $setting" || fail "sysctl: $setting"
+done
 grep -q 'net.ipv4.conf.all.send_redirects = 0' "$SYSCTL_FILE" && grep -q 'net.ipv6.conf.default.accept_redirects = 0' "$SYSCTL_FILE" \
 	&& ok "sysctl: ICMP redirects отключены" || fail "sysctl: redirects"
 grep -q 'nf_conntrack_buckets = 262144' "$SYSCTL_FILE" && ok "sysctl: корзин conntrack столько же, сколько записей" || fail "sysctl nf_conntrack_buckets"
@@ -515,6 +572,10 @@ if apt-get install -y -qq unbound bind9-dnsutils ca-certificates >/dev/null 2>&1
 	if out=$(unbound-checkconf 2>&1); then ok "unbound: конфиг вместе с файлами пакета проходит проверку"; else fail "unbound-checkconf: $out"; fi
 	[ "$(unbound-checkconf -o num-threads)" = 1 ] && [ "$(unbound-checkconf -o minimal-responses)" = yes ] \
 		&& ok "unbound: один поток и минимальные ответы" || fail "unbound: поток и ответы"
+	for pair in outgoing-num-tcp:64 incoming-num-tcp:32 msg-cache-slabs:1 rrset-cache-slabs:1 infra-cache-slabs:1 key-cache-slabs:1 \
+		serve-expired:yes serve-expired-ttl:86400 serve-expired-client-timeout:1800; do
+		[ "$(unbound-checkconf -o "${pair%:*}")" = "${pair#*:}" ] && ok "unbound: $pair" || fail "unbound: $pair"
+	done
 	[ "$(stat -c %a "$UNBOUND_CONF")" = 644 ] && ok "unbound: конфиг читаем службой" || fail "unbound: права конфига"
 	grep -qx '    forward-tls-upstream: yes' "$UNBOUND_CONF" \
 		&& [ "$(grep -E '^    forward-addr:' "$UNBOUND_CONF" | xargs)" = "forward-addr: 1.1.1.1@853#cloudflare-dns.com forward-addr: 8.8.8.8@853#dns.google" ] \

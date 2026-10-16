@@ -103,12 +103,20 @@ section "журнал: watchdog и интерфейс Туннеля"
 # netifd об интерфейсе Туннеля — тоже в truba.log. Ping в никуда (Труба его не пересылает) — «не отвечает»,
 # а при одной неудаче watchdog сразу перезапускает интерфейс.
 uci set truba.watchdog.probe='192.0.2.200'; uci set truba.watchdog.fails='1'; uci commit truba
+OLD_PORT="$(wg show awg0 listen-port)"
 reload "ping без ответа"
 tlog() { ubus call truba log '{"lines":2000}' | jsonfilter -e '@.log'; }
 wd_down() { [ "$(health '@.state')" = down ] && tlog | grep -q 'truba-watchdog: Туннель не отвечает'; }
 check "Туннель не отвечает — строка с тегом truba-watchdog" wait_for 40 wd_down
 netifd_lines() { tlog | grep -q "netifd: Interface 'awg0'"; }
 check "строки netifd об интерфейсе Туннеля — в журнале Трубы" wait_for 30 netifd_lines
+port_changed() { [ "$(wg show awg0 listen-port)" != "$OLD_PORT" ]; }
+check "восстановление меняет незакреплённый порт Туннеля" wait_for 15 port_changed
+FIXED_PORT="$(wg show awg0 listen-port)"
+uci set network.awg0.listen_port="$FIXED_PORT"; uci commit network
+LAST="$(health '@.last_check')"
+check "следующий неудачный цикл сохраняет явно заданный порт" eval 'wait_for 20 next_cycle && [ "$(wg show awg0 listen-port)" = "$FIXED_PORT" ]'
+uci delete network.awg0.listen_port; uci commit network
 uci delete truba.watchdog.probe; uci delete truba.watchdog.fails; uci commit truba
 reload "ping по умолчанию"
 wd_up() { [ "$(health '@.state')" = healthy ] && tlog | grep -q 'truba-watchdog: Туннель восстановлен'; }

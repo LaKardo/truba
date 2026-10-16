@@ -3,6 +3,7 @@
 
 import * as uloop from 'uloop';
 import { readfile } from 'fs';
+import { cursor } from 'uci';
 import * as C from 'truba.const';
 import * as U from 'truba.util';
 import * as F from 'truba.conf';
@@ -198,6 +199,9 @@ export function run() {
 			let ping_ok = true;
 			if (probe) {
 				rec.rtt = ping_rtt(tinfo.device, probe);
+				// Одна контрольная проба после потери; цикл всё равно даёт только один результат.
+				if (rec.rtt == null)
+					rec.rtt = ping_rtt(tinfo.device, probe);
 				ping_ok = rec.rtt != null;
 				probed(rec.rtt);
 			}
@@ -226,6 +230,11 @@ export function run() {
 					set_state('down', why, rec, tinfo);
 					if (fails % w.fails == 0) {
 						U.log('warn', 'перезапуск интерфейса ' + cfg.iface + ': ' + why, C.WATCHDOG_TAG);
+						// 0 просит ядро выбрать новый порт. Явный listen_port владельца не менять.
+						// Только сокет Туннеля: общую таблицу NAT устройств не сбрасывать.
+						if (!int(cursor().get('network', cfg.iface, 'listen_port') ?? 0) &&
+						    system([ 'awg', 'set', tinfo.device, 'listen-port', '0' ]) != 0)
+							U.log('warn', 'не удалось сменить порт Туннеля ' + cfg.iface, C.WATCHDOG_TAG);
 						system([ 'ifup', cfg.iface ]);
 					}
 				}

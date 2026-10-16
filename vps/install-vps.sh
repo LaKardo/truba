@@ -535,14 +535,23 @@ write_nft() {
 		table inet truba_filter
 		delete table inet truba_filter
 		table inet truba_filter {
+			# Только внешняя оболочка Туннеля. Внутреннему IPv4 нужен conntrack для NAT.
+			chain raw_pre {
+				type filter hook prerouting priority raw; policy accept;
+				iifname \$WAN ip daddr \$PUB udp dport $AWG_PORT notrack
+			}
+			chain raw_out {
+				type filter hook output priority raw; policy accept;
+				oifname \$WAN ip saddr \$PUB udp sport $AWG_PORT notrack
+			}
 			chain input {
 				type filter hook input priority filter; policy drop;
 				iif lo accept
+				iifname \$WAN ip daddr \$PUB udp dport $AWG_PORT accept
 				ct state established,related accept
 				ct state invalid drop
 				meta l4proto ipv6-icmp accept
 				iifname \$WAN tcp dport $ssh_ports accept
-				iifname \$WAN udp dport $AWG_PORT accept
 				iifname \$WAN udp sport 67 udp dport 68 accept
 				iifname \$WAN udp sport 547 udp dport 546 accept comment "DHCPv6-клиент самого VPS"
 				iifname \$AWG ip saddr \$RTR accept
@@ -667,9 +676,16 @@ write_sysctl() {
 		net.ipv6.conf.all.accept_redirects = 0
 		net.ipv6.conf.default.accept_redirects = 0
 		net.core.default_qdisc = fq_codel
+		# Верхние пределы, а не выделенная память и не размер буфера AWG.
+		net.core.rmem_max = 16777216
+		net.core.wmem_max = 16777216
+		net.core.netdev_max_backlog = 16384
+		net.core.optmem_max = 65536
 		net.ipv4.tcp_congestion_control = bbr
 		net.netfilter.nf_conntrack_max = 262144
 		net.netfilter.nf_conntrack_buckets = 262144
+		net.netfilter.nf_conntrack_udp_timeout = 60
+		net.netfilter.nf_conntrack_udp_timeout_stream = 180
 		net.ipv6.conf.all.forwarding = 0
 	EOF
 	# Без модуля при загрузке systemd-sysctl пропускает ключи nf_conntrack, и остаются ядерные
@@ -731,6 +747,16 @@ write_unbound_conf() {
 		server:
 		    num-threads: 1
 		    minimal-responses: yes
+		    outgoing-num-tcp: 64
+		    incoming-num-tcp: 32
+		    msg-cache-slabs: 1
+		    rrset-cache-slabs: 1
+		    infra-cache-slabs: 1
+		    key-cache-slabs: 1
+		    # Просроченный ответ — только после ожидания 1800 мс; mosdns имеет свой резерв.
+		    serve-expired: yes
+		    serve-expired-ttl: 86400
+		    serve-expired-client-timeout: 1800
 		    interface: $VPS_TUN
 		    # Адрес появляется вместе с $AWG_IF, а unbound стартует раньше.
 		    ip-freebind: yes
