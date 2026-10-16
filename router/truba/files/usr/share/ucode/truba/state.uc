@@ -214,7 +214,6 @@ export function status() {
 	let ub = connect();
 	let cfg = F.load();
 	let tinfo = F.tunnel_info(cfg.iface, ub);
-	let st = N.iface_up(cfg.iface, ub);
 	let applied = U.read_json(C.APPLIED_FILE, null);
 	let raw = counters_raw();
 	let svc = ub?.call('service', 'list', { name: 'truba' });
@@ -230,12 +229,12 @@ export function status() {
 			iface: cfg.iface,
 			configured: tinfo.exists,
 			disabled: tinfo.disabled,
-			up: st.up,
-			device: st.device,
+			up: tinfo.up,
+			device: tinfo.device,
 			address: tinfo.address,
 			peer: tinfo.peer,
 			endpoint: tinfo.endpoint,
-			awg: st.up ? awg_peer(st.device) : null,
+			awg: tinfo.up ? awg_peer(tinfo.device) : null,
 		},
 		// IP Трубы знает apply; без него — только endpoint-адрес: имя здесь не резолвится,
 		// иначе каждый опрос ждал бы DNS (а когда служба остановлена, DNS мог и не работать).

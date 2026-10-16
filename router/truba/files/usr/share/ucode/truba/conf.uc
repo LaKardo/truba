@@ -265,13 +265,14 @@ export function env_lines() {
 	return s;
 };
 
-// Сведения о Туннеле из конфигурации network: адрес, адрес Трубы внутри, endpoint.
+// Сведения о Туннеле из конфигурации network: адрес, адрес Трубы внутри, endpoint, а из одного вызова
+// ubus — поднят ли интерфейс и его l3-устройство (up, device).
 export function tunnel_info(iface, ub) {
 	let c = cursor();
 	c.load('network');
 	let ifc = c.get_all('network', iface);
-	let res = { exists: (ifc != null), disabled: false, address: null, prefix: null, peer: null,
-	            subnet: null, endpoint: null, endpoint_port: null };
+	let res = { exists: (ifc != null), disabled: false, up: false, device: iface, address: null, prefix: null,
+	            peer: null, subnet: null, endpoint: null, endpoint_port: null };
 	if (!ifc)
 		return res;
 
@@ -280,6 +281,8 @@ export function tunnel_info(iface, ub) {
 
 	// Предпочтительно — фактический адрес поднятого интерфейса.
 	let st = U.ubus_call(ub, 'network.interface.' + iface, 'status');
+	res.up = !!st?.up;
+	res.device = st?.l3_device ?? st?.device ?? iface;
 	let a4 = st?.['ipv4-address']?.[0];
 	if (a4?.address)
 		addr = a4.address + '/' + (a4.mask ?? 32);

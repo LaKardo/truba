@@ -44,14 +44,13 @@ export function remove_rules() {
 //   down + Аварийная блок.  → blackhole default
 //   down без неё            → без default: трафик проваливается в main (Напрямую)
 // Подсеть Туннеля держится в таблице всегда, пока интерфейс поднят: по ней ходит проверка Туннеля.
-function set_table(state, iface, tinfo, killswitch) {
-	let st = iface_up(iface);
-	let dev = st.device;
+function set_table(state, tinfo, killswitch) {
+	let dev = tinfo.device;
 
-	if (st.up && tinfo.subnet)
+	if (tinfo.up && tinfo.subnet)
 		system([ 'ip', '-4', 'route', 'replace', tinfo.subnet, 'dev', dev, 'table', T ]);
 
-	if (st.up && state == 'healthy') {
+	if (tinfo.up && state == 'healthy') {
 		system([ 'ip', '-4', 'route', 'replace', 'default', 'dev', dev, 'table', T ]);
 		return 'healthy';
 	}
@@ -67,24 +66,32 @@ function set_table(state, iface, tinfo, killswitch) {
 export function routes(cfg, tinfo) {
 	cfg ??= F.load();
 	tinfo ??= F.tunnel_info(cfg.iface);
-	let st = iface_up(cfg.iface);
 	let h = U.read_json(C.HEALTH_FILE, null);
 	let state;
-	if (tinfo.disabled || !st.up)
+	if (tinfo.disabled || !tinfo.up)
 		state = 'down';
 	else if (cfg.watchdog.enabled && h?.state == 'down')
 		state = 'down';
 	else
 		state = 'healthy';
 	// Аварийная блокировка имеет смысл только при включённой Маршрутизации.
-	return set_table(state, cfg.iface, tinfo, cfg.routing && cfg.killswitch);
+	return set_table(state, tinfo, cfg.routing && cfg.killswitch);
 };
 
 export function set_rp_filter(dev) {
 	system([ 'sysctl', '-qw', 'net.ipv4.conf.' + replace(dev, '.', '/') + '.rp_filter=0' ]);
 };
 
-
+// Всё, что зависит от интерфейса Туннеля: правила ip (oif — по его устройству), rp_filter 0 на поднятом
+// устройстве (обратный маршрут к источнику входящих — не через Туннель) и таблица 77. Итог — как у routes.
+export function sync(cfg, tinfo) {
+	cfg ??= F.load();
+	tinfo ??= F.tunnel_info(cfg.iface);
+	ensure_rules(tinfo.device);
+	if (tinfo.up)
+		set_rp_filter(tinfo.device);
+	return routes(cfg, tinfo);
+};
 
 // ---- Межсетевой экран зон Маршрутизации: перенаправления в зону Туннеля, IPv6-интернет ----
 

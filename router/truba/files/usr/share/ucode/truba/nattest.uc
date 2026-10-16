@@ -10,7 +10,6 @@ import { rand } from 'math';
 import * as C from 'truba.const';
 import * as U from 'truba.util';
 import * as F from 'truba.conf';
-import * as N from 'truba.net';
 
 const DEFAULT_SERVERS =[ 'stun.l.google.com:19302', 'stun.cloudflare.com:3478', 'stun1.l.google.com:19302' ];
 const TRIES = 3, WAIT = 1500;
@@ -112,7 +111,7 @@ export function run(auto) {
 		res.error = 'not_configured';
 		return save();
 	}
-	if (tinfo.disabled || !N.iface_up(cfg.iface).up) {
+	if (tinfo.disabled || !tinfo.up) {
 		res.error = 'tunnel_down';
 		return save();
 	}

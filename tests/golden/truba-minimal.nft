@@ -60,8 +60,7 @@ table inet truba {
 		meta nfproto != ipv4 return
 		iifname "awg0" ct state new counter name c_inbound
 		iifname "awg0" meta mark set meta mark and 0xf0ffffff or 0x04000000 return
-		iifname @lan_if ct mark and 0x0f000000 == 0x04000000 meta mark set meta mark and 0xf0ffffff or 0x01000000 return
-		iifname @lan_if ct mark and 0x0f000000 == 0x01000000 meta mark set meta mark and 0xf0ffffff or 0x01000000 return
+		iifname @lan_if ct mark and 0x0f000000 { 0x04000000, 0x01000000 } meta mark set meta mark and 0xf0ffffff or 0x01000000 return
 	}
 
 	chain persist {

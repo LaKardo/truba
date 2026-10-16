@@ -167,7 +167,6 @@ function apply_config(res, prev) {
 	let cfg = F.load();
 	let ub = connect();
 	let tinfo = F.tunnel_info(cfg.iface, ub);
-	let st = N.iface_up(cfg.iface, ub);
 	let lan_if = F.zone_devices(cfg.zones, ub);
 	ub?.disconnect();
 	let vps = vps_ip(tinfo, prev);
@@ -246,10 +245,7 @@ function apply_config(res, prev) {
 		DNS.dnsmasq_restore();
 	res.mosdns = cfg.routing;
 
-	N.ensure_rules(st.device);
-	if (st.up)
-		N.set_rp_filter(st.device);
-	res.table = N.routes(cfg, tinfo);
+	res.table = N.sync(cfg, tinfo);
 	N.cron_set(cfg.routing && cfg.lists.auto_update);
 	N.upnp_set(cfg.upnp, cfg.iface, vps);
 	// И при выключенной Маршрутизации: перенаправления и правила IPv6 следуют за выбранными зонами.
@@ -297,13 +293,7 @@ function keep_running(res, prev) {
 
 	// Правила ip и таблица Туннеля не зависят от того, что не применилось.
 	try {
-		let cfg = F.load();
-		let tinfo = F.tunnel_info(cfg.iface);
-		let st = N.iface_up(cfg.iface);
-		N.ensure_rules(st.device);
-		if (st.up)
-			N.set_rp_filter(st.device);
-		out.table = N.routes(cfg, tinfo);
+		out.table = N.sync();
 	}
 	catch (e) {
 		U.err('таблица Туннеля не пересчитана: ' + U.errmsg(e));
@@ -397,8 +387,9 @@ export function refresh_bypass() {
 };
 
 // Событие интерфейса (hotplug iface: ACTION, INTERFACE, DEVICE). Туннель: при подъёме — rp_filter 0 на его
-// устройстве (обратный маршрут к источнику входящих — не через Туннель), затем таблица Туннеля.
-// Любой интерфейс: наборы локальных подсетей — адреса могли смениться. Служба остановлена — ничего.
+// устройстве (обратный маршрут к источнику входящих — не через Туннель), затем таблица Туннеля; правила ip
+// переставляет полное применение по тому же событию (ADR 0009). Любой интерфейс: наборы локальных
+// подсетей — адреса могли смениться. Служба остановлена — ничего.
 export function hotplug(ev) {
 	if (!(ev.action in [ 'ifup', 'ifdown', 'ifupdate' ]) || !stat(C.APPLIED_FILE))
 		return;

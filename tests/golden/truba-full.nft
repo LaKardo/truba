@@ -121,8 +121,7 @@ table inet truba {
 	}
 
 	chain restore {
-		ct mark and 0x0f000000 == 0x04000000 meta mark set meta mark and 0xf0ffffff or 0x01000000 return
-		ct mark and 0x0f000000 == 0x01000000 meta mark set meta mark and 0xf0ffffff or 0x01000000 return
+		ct mark and 0x0f000000 { 0x04000000, 0x01000000 } meta mark set meta mark and 0xf0ffffff or 0x01000000 return
 		ct mark and 0x0f000000 == 0x02000000 meta mark set meta mark and 0xf0ffffff or 0x02000000 return
 	}
 

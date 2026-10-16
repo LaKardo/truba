@@ -5,13 +5,14 @@
 // Интерфейс Туннеля AmneziaWG: разбор router.conf, перенос его в настройки network и проверки
 // опций интерфейса. Это опции network, а не Трубы: в truba.schema их нет, пределы и проверки — свои.
 
-// Ключи .conf (без регистра) → опции UCI протокола amneziawg.
+// Параметры AWG на вкладке — опции awg_<имя>: числа (H — число или диапазон) и пакеты-приманки в формате CPS.
+const NUM_PARAMS = [ 'jc', 'jmin', 'jmax', 's1', 's2', 's3', 's4', 'h1', 'h2', 'h3', 'h4' ];
+const CPS_PARAMS = [ 'i1', 'i2', 'i3', 'i4', 'i5' ];
+
+// Ключи .conf (без регистра) → опции UCI протокола amneziawg; параметры вкладки — awg_<ключ>.
 const IFACE_KEYS = {
 	privatekey: 'private_key', mtu: 'mtu', listenport: 'listen_port',
-	jc: 'awg_jc', jmin: 'awg_jmin', jmax: 'awg_jmax',
-	s1: 'awg_s1', s2: 'awg_s2', s3: 'awg_s3', s4: 'awg_s4',
-	h1: 'awg_h1', h2: 'awg_h2', h3: 'awg_h3', h4: 'awg_h4',
-	i1: 'awg_i1', i2: 'awg_i2', i3: 'awg_i3', i4: 'awg_i4', i5: 'awg_i5',
+	...Object.fromEntries([ ...NUM_PARAMS, ...CPS_PARAMS ].map((k) => [ k, 'awg_' + k ])),
 	headerprotectionkey: 'awg_header_protection_key',
 	contentpaddingaddition: 'awg_content_padding_addition',
 	rekeyaftertime: 'awg_rekey_after_time', rekeytimeout: 'awg_rekey_timeout',
@@ -20,10 +21,6 @@ const IFACE_KEYS = {
 };
 const IFACE_BOOL = { randomtrailers: 'awg_random_trailers', disablecookies: 'awg_disable_cookies' };
 const PEER_KEYS = { publickey: 'public_key', presharedkey: 'preshared_key', persistentkeepalive: 'persistent_keepalive' };
-
-// Параметры AWG на вкладке — опции awg_<имя>: числа (H — число или диапазон) и пакеты-приманки в формате CPS.
-const NUM_PARAMS = [ 'jc', 'jmin', 'jmax', 's1', 's2', 's3', 's4', 'h1', 'h2', 'h3', 'h4' ];
-const CPS_PARAMS = [ 'i1', 'i2', 'i3', 'i4', 'i5' ];
 
 function parseConf(text) {
 	const res = { iface: {}, peers: [] };
@@ -61,10 +58,8 @@ function applyConf(iface, conf, zone) {
 		uci.add('network', 'interface', iface);
 	uci.set('network', iface, 'proto', 'amneziawg');
 
-	for (let k in IFACE_KEYS)
-		uci.unset('network', iface, IFACE_KEYS[k]);
-	for (let k in IFACE_BOOL)
-		uci.unset('network', iface, IFACE_BOOL[k]);
+	for (let o of [ ...Object.values(IFACE_KEYS), ...Object.values(IFACE_BOOL), 'addresses' ])
+		uci.unset('network', iface, o);
 
 	for (let k in conf.iface) {
 		if (IFACE_KEYS[k])

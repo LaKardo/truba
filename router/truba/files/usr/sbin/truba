@@ -20,7 +20,7 @@ function usage() {
 	warn('Использование: truba <команда>\n' +
 		'  apply              применить настройки из /etc/config/truba\n' +
 		'  teardown           снять все правила Трубы\n' +
-		'  routes             пересчитать таблицу Туннеля по его состоянию\n' +
+		'  routes             пересчитать правила ip и таблицу Туннеля по его состоянию\n' +
 		'  refresh-bypass     обновить наборы локальных подсетей\n' +
 		'  hotplug            событие интерфейса из окружения (ACTION, INTERFACE, DEVICE)\n' +
 		'  env                пути и действующие настройки для shell: eval "$(truba env)"\n' +
@@ -55,7 +55,7 @@ case 'teardown':
 	break;
 
 case 'routes':
-	print(load('net').routes(), '\n');
+	print(load('net').sync(), '\n');
 	break;
 
 case 'refresh-bypass':

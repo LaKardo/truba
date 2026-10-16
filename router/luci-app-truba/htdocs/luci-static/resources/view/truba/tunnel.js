@@ -37,12 +37,11 @@ function StateCard({ st, iface }) {
 
 	// Окно пустое — проверок ещё не было (или не с чем: нет адреса для ping): не «нет ответа».
 	// Длина окна во времени (окно — в truba.const) зависит от интервала проверки.
-	const probes = Array.isArray(h.probes) ? h.probes : [];
+	const probes = common.probes(h);
 	const interval = h.interval || common.get('watchdog', 'interval');
 	const win = Math.max(1, Math.round((probes.length || common.schema().consts.probe_window) * interval / 60));
 	const measured = wdOn && t.up && probes.length > 0;
-	const lost = probes.filter((x) => x == null).length;
-	const pct = probes.length ? Math.round(lost * 100 / probes.length) : 0;
+	const pct = common.lossPct(probes) ?? 0;
 	const b = h.big;
 	const table = (st.table || '').trim();
 
@@ -55,7 +54,7 @@ function StateCard({ st, iface }) {
 				value=${!measured ? '—' : (h.rtt != null) ? _('%d ms').format(Math.round(h.rtt)) : _('no reply')} />
 			<${kit.Stat} label=${_('Handshake')} value=${common.fmtAge(age)} level=${common.handshakeLevel(age, wd.state, max, grace)} />
 			<${kit.Stat} label=${_('Loss over %d min').format(win)} value=${measured ? '%d%%'.format(pct) : '—'}
-				level=${(!measured || !lost) ? '' : (pct < 20) ? 'warn' : 'err'} />
+				level=${(!measured || !pct) ? '' : (pct < 20) ? 'warn' : 'err'} />
 			<${kit.Stat} label=${_('Full-size packets')} level=${(measured && b) ? (b.ok ? 'ok' : 'err') : ''}
 				value=${!measured ? '—' : !b ? _('not checked yet') : b.ok ? _('get through') : _('lost')} />
 		</div>

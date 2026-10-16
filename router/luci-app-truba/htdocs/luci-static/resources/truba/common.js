@@ -692,6 +692,16 @@ function handshakeLevel(age, verdict, max, grace) {
 	return age > max + grace ? 'err' : 'warn';
 }
 
+// Окно проверок watchdog из status.health: задержки, мс; null — потеря. Пусто — проверок ещё не было.
+function probes(h) {
+	return Array.isArray(h?.probes) ? h.probes : [];
+}
+
+// Потери за окно проверок, %; null — проверок нет.
+function lossPct(p) {
+	return p.length ? Math.round(p.filter((x) => x == null).length * 100 / p.length) : null;
+}
+
 // Состояние Туннеля по status: [уровень, текст] — для плитки «Обзора» и вкладки «Туннель».
 function tunnelState(st) {
 	const t = st.tunnel || {}, h = st.health || {};
@@ -786,5 +796,5 @@ return baseclass.extend({
 	forwardRows, fwEnabled, portError, forwardErrors, zoneOfIp, forwardValues, natPick,
 	ACTION_LABELS, REASON_LABELS, VIA_LABELS, WARNINGS, NAT_ERRORS, CHECK_ERRORS, UPNP_MISSING, NBSP, TABS,
 	fmtBytes, fmtRate, fmtAge, fmtTime, fmtDate, fmtNum, missingText,
-	setResult, setError, tunnelIface, tunnelState, tabUrl, invalidTab
+	setResult, setError, tunnelIface, tunnelState, probes, lossPct, tabUrl, invalidTab
 });

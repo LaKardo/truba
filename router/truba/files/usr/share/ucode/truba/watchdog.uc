@@ -71,13 +71,13 @@ function run_tunnel_test() {
 	let tinfo = F.tunnel_info(cfg.iface);
 	if (!tinfo.exists)
 		return { error: 'not_configured' };
-	let st = N.iface_up(cfg.iface);
-	if (tinfo.disabled || !st.up)
+	if (tinfo.disabled || !tinfo.up)
 		return { error: 'tunnel_down' };
 	let target = length(cfg.watchdog.probe) ? cfg.watchdog.probe : tinfo.peer;
 	if (!target)
 		return { error: 'no_target' };
-	let mtu = iface_mtu(st.device);
+	let dev = tinfo.device;
+	let mtu = iface_mtu(dev);
 	let sizes = [ TT_SMALL ];
 	if (mtu > TT_MID)
 		push(sizes, TT_MID);
@@ -88,7 +88,7 @@ function run_tunnel_test() {
 		return { error: 'tmp' };
 	let cmd = '';
 	for (let s in sizes)
-		cmd += sprintf('ping -c 5 -W %d -s %d -I %s %s > %s/%d 2>&1 & ', PING_WAIT, s - ICMP_HDR, U.shq(st.device), U.shq(target), dir, s);
+		cmd += sprintf('ping -c 5 -W %d -s %d -I %s %s > %s/%d 2>&1 & ', PING_WAIT, s - ICMP_HDR, U.shq(dev), U.shq(target), dir, s);
 	U.run(cmd + 'wait');
 	let results = map(sizes, (s) => {
 		let r = ping_stats(readfile(dir + '/' + s) ?? '');
@@ -148,18 +148,26 @@ export function run() {
 			shift(probes);
 	};
 
-	// rec — запись текущей проверки: в файл идёт целиком, чтобы «Обзор» и в этот момент
+	// Запись текущей проверки (rec) с состоянием цикла: в файл идёт целиком, чтобы «Обзор» и в этот момент
 	// видел задержку и окно проверок.
-	let set_state = (next, info, rec) => {
+	let save = (rec) => {
+		rec.state = state;
+		rec.since = since;
+		rec.fails = fails;
+		rec.probes = probes;
+		rec.big = big;
+		U.mkdirp(C.RUN_DIR);
+		U.write_json(C.HEALTH_FILE, rec);
+	};
+
+	let set_state = (next, info, rec, tinfo) => {
 		if (next == state)
 			return;
 		state = next;
 		since = time();
 		// routes() читает состояние из файла — записать до пересчёта таблицы.
-		U.mkdirp(C.RUN_DIR);
-		U.write_json(C.HEALTH_FILE, { ...rec, state, since, fails, probes });
-		let c = F.load();
-		let table = N.routes(c, F.tunnel_info(c.iface));
+		save(rec);
+		let table = N.routes(cfg, tinfo);
 		U.log(next == 'healthy' ? 'notice' : 'warning',
 			sprintf('Туннель %s (%s); таблица Туннеля: %s',
 				next == 'healthy' ? 'восстановлен' : 'не отвечает', info, table), C.WATCHDOG_TAG);
@@ -170,37 +178,36 @@ export function run() {
 		cfg = F.load();
 		let w = cfg.watchdog;
 		let tinfo = F.tunnel_info(cfg.iface);
-		let st = N.iface_up(cfg.iface);
 		// interval и handshake_max — для «Туннеля»: окно проверок во времени и порог возраста рукопожатия.
-		let rec = { state, since, fails, last_check: time(), interval: w.interval, handshake_max: w.handshake_max,
-		            handshake_age: null, ping: null, rtt: null, big };
+		let rec = { last_check: time(), interval: w.interval, handshake_max: w.handshake_max,
+		            handshake_age: null, ping: null, rtt: null };
 
 		if (tinfo.disabled) {
 			fails = 0;
 			probes = [];
-			set_state('down', 'интерфейс выключен', rec);
+			set_state('down', 'интерфейс выключен', rec, tinfo);
 		}
-		else if (!st.up) {
+		else if (!tinfo.up) {
 			fails++;
 			probed(null);
 			if (fails >= w.fails)
-				set_state('down', 'интерфейс не поднят', rec);
+				set_state('down', 'интерфейс не поднят', rec, tinfo);
 		}
 		else {
 			let probe = length(w.probe) ? w.probe : tinfo.peer;
 			let ping_ok = true;
 			if (probe) {
-				rec.rtt = ping_rtt(st.device, probe);
+				rec.rtt = ping_rtt(tinfo.device, probe);
 				ping_ok = rec.rtt != null;
 				probed(rec.rtt);
 			}
-			let age = handshake_age(st.device);
+			let age = handshake_age(tinfo.device);
 			rec.ping = ping_ok;
 			rec.handshake_age = age;
 
 			if (ping_ok && age != null && age <= w.handshake_max) {
 				fails = 0;
-				set_state('healthy', sprintf('handshake %d с назад', age), rec);
+				set_state('healthy', sprintf('handshake %d с назад', age), rec, tinfo);
 				// В фоне: проверка ждёт ответов до 4,5 с, а цикл не должен.
 				if (nat_due(since)) {
 					nat_started = time();
@@ -209,14 +216,14 @@ export function run() {
 				// Итога нет или он старше подъёма Туннеля — проверить сейчас, иначе раз в BIG_EVERY.
 				if (probe && (big == null || big.time < since || ++big_n >= BIG_EVERY)) {
 					big_n = 0;
-					big = big_probe(st.device, probe);
+					big = big_probe(tinfo.device, probe);
 				}
 			}
 			else {
 				fails++;
 				let why = !ping_ok ? 'нет ответа на ping ' + probe : sprintf('handshake %s', age == null ? 'не было' : age + ' с назад');
 				if (fails >= w.fails) {
-					set_state('down', why, rec);
+					set_state('down', why, rec, tinfo);
 					if (fails % w.fails == 0) {
 						U.log('warn', 'перезапуск интерфейса ' + cfg.iface + ': ' + why, C.WATCHDOG_TAG);
 						system([ 'ifup', cfg.iface ]);
@@ -225,13 +232,7 @@ export function run() {
 			}
 		}
 
-		rec.state = state;
-		rec.since = since;
-		rec.fails = fails;
-		rec.probes = probes;
-		rec.big = big;
-		U.mkdirp(C.RUN_DIR);
-		U.write_json(C.HEALTH_FILE, rec);
+		save(rec);
 		timer.set(w.interval * 1000);
 	};
 

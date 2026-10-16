@@ -2,6 +2,7 @@
 'require view';
 'require uci';
 'require truba.common as common';
+'require truba.awg as awg';
 'require truba.ui.app as app';
 'require truba.ui.kit as kit';
 'require truba.ui.chart as chart';
@@ -157,32 +158,27 @@ function tunnelShare(c) {
 	return (nt + nd) ? Math.round(nt * 100 / (nt + nd)) : null;
 }
 
-// Потери за окно проверок watchdog, %; null — проверок нет.
-function lossPct(probes) {
-	return probes.length ? Math.round(probes.filter((x) => x == null).length * 100 / probes.length) : null;
-}
-
 // ---- Карточки ----
 
 // Строка состояния: итог, задержка и рукопожатие, IP Трубы и главные переключатели. Переключатели меняют
 // конфигурацию в браузере; применяет её панель изменений или «Сохранить и применить» LuCI.
 function Hero({ st, iface, warns }) {
 	const { html } = app.lib;
-	const t = st.tunnel || {}, h = st.health || {}, awg = t.awg || {};
+	const t = st.tunnel || {}, h = st.health || {}, peer = t.awg || {};
 	const wdOn = !!st.watchdog;   // как у службы, а не в UCI браузера
 	let [ level, title ] = common.tunnelState(st);
 	if (level == 'ok') {
 		title = warns ? _('Works · warnings: %d').format(warns) : _('Everything works');
 		level = warns ? 'warn' : 'ok';
 	}
-	const probes = Array.isArray(h.probes) ? h.probes : [];
-	const loss = lossPct(probes);
+	const probes = common.probes(h);
+	const loss = common.lossPct(probes);
 	const sub = !t.up ? NBSP : [
 		(wdOn && h.rtt != null) ? _('%d ms').format(Math.round(h.rtt)) : null,
-		_('handshake %s').format(common.fmtAge(awg.handshake ? awg.handshake_age : null)),
+		_('handshake %s').format(common.fmtAge(peer.handshake ? peer.handshake_age : null)),
 		!wdOn ? _('the watchdog is off') : (loss != null) ? _('loss %d%%').format(loss) : null
 	].filter((x) => x).join(' · ');
-	const ifaceExists = !!uci.get('network', iface);
+	const ifaceExists = awg.configured(iface);
 	return html`<div class="hero">
 		<div class="st"><${kit.Dot} level=${level} /><div><h3>${title}</h3><p class="mu">${sub}</p></div></div>
 		<div class="ip mu">${_('Truba IP')}<b class="num">${st.vps_ip || '—'}</b></div>
@@ -215,8 +211,8 @@ function TunnelCard({ st, iface }) {
 	const t = st.tunnel || {}, h = st.health || {};
 	const wdOn = !!st.watchdog;
 	const [ level, text ] = common.tunnelState(st);
-	const probes = Array.isArray(h.probes) ? h.probes : [];
-	const loss = lossPct(probes);
+	const probes = common.probes(h);
+	const loss = common.lossPct(probes);
 	const mtu = uci.get('network', iface, 'mtu');
 	return html`<${kit.Card} title=${_('Tunnel')} aside=${html`<${kit.Badge} level=${level}>${text}</${kit.Badge}>`}>
 		<div class="big">${(t.up && wdOn && h.rtt != null) ? _('%d ms').format(Math.round(h.rtt)) : '—'}</div>

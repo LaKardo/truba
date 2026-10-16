@@ -36,6 +36,11 @@ function ct_is(mark) {
 	return 'ct mark and ' + hex(C.MARK_MASK) + ' == ' + hex(mark);
 }
 
+// Соединение с одним из решений (ответы на входящие и «Туннель» идут одним путём).
+function ct_in(marks) {
+	return 'ct mark and ' + hex(C.MARK_MASK) + ' { ' + join(', ', map(marks, hex)) + ' }';
+}
+
 // Решение для соединения держится в meta mark каждого пакета и в самом конце
 // postrouting записывается в ct mark. Так оно переживает чужие цепочки, которые
 // перезаписывают ct mark целиком раньше (например, «ct mark set ip dscp | 0x80»).
@@ -256,8 +261,7 @@ export function nft_full(cfg, plan, ctx) {
 
 	// Ответы на входящие из Туннеля идут в Туннель так же, как соединения «Туннель».
 	s += '\tchain restore {\n';
-	s += '\t\t' + ct_is(C.MARK_INBOUND) + ' ' + set_meta(C.MARK_TUNNEL) + ' return\n';
-	s += '\t\t' + ct_is(C.MARK_TUNNEL) + ' ' + set_meta(C.MARK_TUNNEL) + ' return\n';
+	s += '\t\t' + ct_in([ C.MARK_INBOUND, C.MARK_TUNNEL ]) + ' ' + set_meta(C.MARK_TUNNEL) + ' return\n';
 	s += '\t\t' + ct_is(C.MARK_DIRECT) + ' ' + set_meta(C.MARK_DIRECT) + ' return\n';
 	s += '\t}\n\n';
 
@@ -291,8 +295,7 @@ export function nft_minimal(cfg, ctx) {
 	s += '\t\tmeta nfproto != ipv4 return\n';
 	s += inbound_rules(iface);
 	// persist пишет ответы как «Туннель», поэтому подходят обе метки.
-	s += '\t\tiifname @lan_if ' + ct_is(C.MARK_INBOUND) + ' ' + set_meta(C.MARK_TUNNEL) + ' return\n';
-	s += '\t\tiifname @lan_if ' + ct_is(C.MARK_TUNNEL) + ' ' + set_meta(C.MARK_TUNNEL) + ' return\n';
+	s += '\t\tiifname @lan_if ' + ct_in([ C.MARK_INBOUND, C.MARK_TUNNEL ]) + ' ' + set_meta(C.MARK_TUNNEL) + ' return\n';
 	s += '\t}\n';
 	s += persist_chain();
 	s += stats_chain(iface);
