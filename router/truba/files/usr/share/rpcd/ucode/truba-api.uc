@@ -9,7 +9,6 @@ import * as C from 'truba.const';
 import * as U from 'truba.util';
 import * as S from 'truba.state';
 import * as F from 'truba.conf';
-import * as CO from 'truba.core';
 import * as DV from 'truba.devices';
 
 // rpcd работает с umask 077: без своей маски файлы, которые пишут запущенные им команды (Наборы
@@ -63,7 +62,8 @@ const methods = {
 
 	categories: {
 		call: function() {
-			return CO.categories();
+			// Холодный кэш распаковывает CLI со своей маской, а не процесс rpcd.
+			return truba('categories');
 		}
 	},
 

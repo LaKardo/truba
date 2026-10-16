@@ -483,7 +483,8 @@ if (cdev) {
 	const UE = (u) => cdev.upstreamError?.(u);
 	check([ 'https://1.1.1.1/dns-query', 'tls://dns.example@1.2.3.4', 'tls+pipeline://dns.example@1.2.3.4', '1.1.1.1',
 		'udp://[2001:db8::1]:53', '' ].every((u) => UE(u) === null), 'common.upstreamError: верные адреса — как upstream_ok');
-	check([ 'htps://1.1.1.1/dns-query', '1.1.1.1/dns-query', 'udp://a b', 'https://x/y@' ].every((u) => /Expected https:/.test(UE(u) || '')),
+	check([ 'htps://1.1.1.1/dns-query', '1.1.1.1/dns-query', 'udp://a b', 'https://x/y@',
+		'udp://1.1.1.1:70000', 'tls://host:0', 'udp://[:::1]:53', 'tls://host@999.1.1.1' ].every((u) => /Expected https:/.test(UE(u) || '')),
 		'common.upstreamError: опечатка в схеме, путь без схемы, пробел — ошибка');
 	// Плитки состояния mosdns: без данных — «—», а не NaN% или 0%.
 	const DS = (st) => cdev.dnsStats?.(st) || { tiles: [] }, vals = (s) => s.tiles.map((t) => t[1]).join(' ');

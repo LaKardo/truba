@@ -87,6 +87,24 @@ reload "нечитаемые списки"
 check "без ошибки, предупреждение для «Обзора»" eval 'no_error && grep -q lists_rolled_back "$APPLIED"'
 check "текущим стал предыдущий, mosdns работает" eval '[ "$(wc -c < /etc/truba/lists/geosite.dat)" -gt 1500000 ] && wait_for 10 mosdns_up'
 
+section "изменение только geoip меняет таблицу"
+uci set truba.audit_geoip=rule
+uci set truba.audit_geoip.mode=all
+uci set truba.audit_geoip.set=geoip
+uci set truba.audit_geoip.tag=zzrpcd
+uci set truba.audit_geoip.action=block
+uci commit truba
+ucode -L '/repo/tests/lib/*.uc' /repo/tests/lib/mkdat.uc geoip /etc/truba/lists/geoip.dat zzrpcd 198.18.1.0/24
+(cd /etc/truba/lists && sha256sum geoip.dat > geoip.dat.sha256sum)
+reload "новое Действие geoip"
+check "Категория geoip загружена в Блок" eval 'nft get element inet truba gi_block4 "{ 198.18.1.1 }" >/dev/null 2>&1'
+ucode -L '/repo/tests/lib/*.uc' /repo/tests/lib/mkdat.uc geoip /etc/truba/lists/geoip.dat zzrpcd 198.18.2.0/24
+(cd /etc/truba/lists && sha256sum geoip.dat > geoip.dat.sha256sum)
+reload "изменился только geoip.dat"
+check "новая подсеть geoip загружена без изменения geosite" eval 'nft get element inet truba gi_block4 "{ 198.18.2.1 }" >/dev/null 2>&1'
+uci delete truba.audit_geoip
+uci commit truba
+
 section "свежая установка без списков"
 # apply сам скачивает их в фоне; фоновый update-lists не должен наследовать блокировки apply
 # и rc.common — иначе его собственный reload ждал бы их вечно.

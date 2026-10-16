@@ -498,7 +498,7 @@ table inet truba {
 - `cachesize=0`;
 - фильтр AAAA выполняет mosdns, и только для интернет-доменов: имена из домашней сети (DHCP-хосты, `.lan`), включая их AAAA, dnsmasq отвечает сам, не пересылая в mosdns.
 
-**mosdns** — конфиг `/var/etc/truba/mosdns.yaml` генерируется из UCI. Эскиз под Режим «Всё в туннель» (YAML для читаемости; настоящий конфиг — JSON, см. ниже):
+**mosdns** — конфиг `/var/etc/truba/mosdns.json` генерируется из UCI. Эскиз под Режим «Всё в туннель» (YAML для читаемости; настоящий конфиг — JSON, см. ниже):
 
 ```yaml
 log: { level: warn }
@@ -780,7 +780,7 @@ service_triggers() {
 | Режим / Действия Категорий | Перегенерация domain_set и наборов `gi_*`, сброс `gs_*`, перезапуск mosdns |
 | Политики устройств | Атомарная замена наборов `dev_*` (без перезапуска mosdns) |
 | Аварийная блокировка | Пересчёт table 77 |
-| Серверы DNS / TTL | Перегенерация mosdns.yaml и перезапуск |
+| Серверы DNS / TTL | Перегенерация mosdns.json и перезапуск |
 | Автообновление вкл/выкл | Блок cron добавляется или убирается |
 | Контроль туннеля вкл/выкл | procd-инстанс `watchdog` запускается или удаляется |
 | UPnP | `upnpd.config.*` и перезапуск miniupnpd |
@@ -806,7 +806,7 @@ service_triggers() {
 | `/etc/truba/good/` | последняя удачная копия правил: `truba.nft` без счётчиков и IP из DNS, `mosdns.json` без API, списки доменов, на которые он ссылается, `meta.json`; пишется, только когда что-то изменилось (ADR 0006) | да (keep.d) |
 | `/etc/apk/keys/truba.pem`, `/etc/apk/repositories.d/truba.list` | ключ и адрес фида | да (keep.d) |
 | `/var/lib/truba/` | распакованные списки, `categories.json`, хеши | нет (tmpfs, восстанавливается) |
-| `/var/etc/truba/` | `mosdns.yaml`, `truba.nft` | нет (генерируется) |
+| `/var/etc/truba/` | `mosdns.json`, `truba.nft` | нет (генерируется) |
 | `/var/run/truba/` | `applied.json`, `health.json` (контроль Туннеля), `nat.json` (итог «Проверки NAT»), `devices.json` (трафик по устройствам, §4.10), `tunnel-test.json` (итог «Проверки Туннеля»), `rates.json` и `rates-min.json` (история скорости, §4.10), `dns-heal.json` (итог проверки DNS зон), `lists.json` (состояние обновления списков) | нет (оперативная память) |
 
 ---

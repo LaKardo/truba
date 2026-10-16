@@ -23,6 +23,13 @@ export function parse_upstream(u) {
 	let m = (type(u) == 'string') ? match(u, UPSTREAM_RX) : null;
 	if (!m || ((m[2] == null) ? (m[5] != null) : !(m[2] in UPSTREAM_SCHEMES)))
 		return null;
+	let port = m[4] ? int(substr(m[4], 1)) : null;
+	if (m[4] && (type(port) != 'int' || port < 1 || port > 65535))
+		return null;
+	if (m[6] && !U.is_ipv4(substr(m[6], 1)))
+		return null;
+	if (substr(m[3], 0, 1) == '[' && length(iptoarr(substr(m[3], 1, length(m[3]) - 2)) ?? []) != 16)
+		return null;
 	return m[6] ? { addr: substr(u, 0, length(u) - length(m[6])), dial_addr: substr(m[6], 1) } : { addr: u };
 };
 
@@ -48,10 +55,10 @@ export const SCHEMA = {
 		stun:       { type: 'list', def: [] },
 	},
 	dns: {
-		// DNS-сервер на Трубе (install-vps.sh, ADR 0013) и запасной DoH: каждый запрос идёт к обоим. Без сервера
+		// DNS-сервер на Трубе (install-vps.sh, ADR 0013) и запасной DoH: резерв после 100 мс. Без сервера
 		// на Трубе (VPS ставился другим способом) порт сразу отвечает «закрыт», и отвечает DoH.
 		tunnel_upstream: { type: 'upstreams', def: [ 'udp://10.77.77.1', 'https://1.1.1.1/dns-query' ] },
-		// Два сервера: mosdns спрашивает оба разом и берёт первый ответ, поэтому обрыв одного
+		// Два сервера: второй опрашивается при ошибке первого или задержке больше 100 мс; обрыв одного
 		// соединения не оставляет запросы без ответа (на живом роутере DoH 77.88.8.8 изредка рвался).
 		// pipelining: запросы, пришедшие разом, идут по одному соединению, а не открывают по TLS на каждый.
 		direct_upstream: { type: 'upstreams', def: [ 'tls+pipeline://common.dot.dns.yandex.net@77.88.8.8',

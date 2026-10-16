@@ -286,7 +286,16 @@ function upstreamError(v) {
 	if (!v)
 		return null;
 	const m = upstreamRe()?.exec(v);
-	const ok = m && (m[2] == null ? m[5] == null : schema().upstream_schemes.includes(m[2]));
+	let ok = m && (m[2] == null ? m[5] == null : schema().upstream_schemes.includes(m[2]));
+	if (ok && m[4]) {
+		const port = Number(m[4].slice(1));
+		ok = Number.isInteger(port) && port >= 1 && port <= 65535;
+	}
+	if (ok && m[6])
+		ok = IPV4.test(m[6].slice(1));
+	if (ok && m[3].startsWith('[')) {
+		try { new URL('http://' + m[3]); } catch (e) { ok = false; }
+	}
 	return ok ? null : _('Expected https://…, tls://…, quic://…, h3://…, tcp://… or udp://… (optionally «@IP»)');
 }
 

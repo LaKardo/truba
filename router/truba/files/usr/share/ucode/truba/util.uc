@@ -213,9 +213,12 @@ export function lock(name, nowait) {
 // Держит ли блокировку другой процесс. В отличие от файла-флага, она снимается сама,
 // даже если процесс убит: «идёт обновление» не залипает навсегда.
 export function lock_busy(name) {
-	let fd = lock(name, true);
+	// Чтение состояния из rpcd не создаёт файл с маской самого rpcd.
+	let path = '/var/lock/' + name + '.lock';
+	let fd = open(path, 're');
 	if (!fd)
-		return true;
+		return stat(path) != null;
+	let busy = !fd.lock('xn');
 	fd.close();
-	return false;
+	return busy;
 };

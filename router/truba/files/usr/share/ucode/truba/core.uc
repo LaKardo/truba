@@ -133,10 +133,12 @@ function save_good(cfg, plan, ctx, hosts, res) {
 		}
 	}
 
-	if (changed || meta.time == null || meta.nft_key != res.nft_key)
+	if (changed || meta.time == null || meta.nft_key != res.nft_key ||
+	    meta.dns_hijack != res.dns_hijack || sprintf('%J', meta.zones) != sprintf('%J', res.zones))
 		U.write_json(C.GOOD_META, { time: time(), routing: res.routing, mode: res.mode, port: cfg.dns.port,
 		                            vps: res.vps, endpoint: res.endpoint, gkey: res.gkey, nft_key: res.nft_key, geoip_sizes: res.geoip_sizes,
-		                            missing: res.missing, geosite_order: res.geosite_order });
+		                            missing: res.missing, geosite_order: res.geosite_order,
+		                            dns_hijack: res.dns_hijack, zones: res.zones });
 }
 
 // Загрузить последнюю удачную копию: метаданные копии или null (копии нет, nft её не принял).
@@ -158,13 +160,12 @@ function load_good() {
 // влияющих на состав правил, наборов gi_*/dev_* и адресов в bypass4/local4.
 // При неизменном отпечатке таблица не перезагружается целиком (обновляются только
 // bypass4/local4), что сохраняет наборы dv_* и экономит парсинг 35k+ подсетей geoip.
-function nft_table_key(cfg, plan, ctx, gkey, vps, tinfo) {
+function nft_table_key(cfg, plan, ctx, gkey, vps, dat_hash) {
 	let parts = [
 		cfg.routing,
 		cfg.mode,
 		cfg.iface,
 		vps,
-		tinfo.endpoint,
 		join(',', sort(ctx.lan_if)),
 		ctx.socket_mark,
 		cfg.dns_hijack,
@@ -174,6 +175,8 @@ function nft_table_key(cfg, plan, ctx, gkey, vps, tinfo) {
 	];
 	if (cfg.routing) {
 		push(parts, gkey);
+		push(parts, dat_hash);
+		push(parts, plan.geoip);
 		// При смене gkey наборы gs_* сбрасываются в apply_config (ctx.gs_* = []),
 		// и таблица должна перезагрузиться, чтобы обнулить их в ядре.
 	}
@@ -206,14 +209,14 @@ function refill(name, elems) {
 // Обновить только наборы локальных подсетей — bypass4 и local4 (смена адресов интерфейсов).
 // Новая подсеть, пока её нет в local4, получает подмену источника DNS — это безвредно: dnsmasq ей и так ответил бы.
 // b4, l4 — готовые списки подсетей (необязательно: по умолчанию — прочитать из конфига).
-export function refresh_bypass(b4, l4) {
-	let prev = U.read_json(C.APPLIED_FILE, {});
-	if (!prev.routing || !set_loaded('bypass4'))
-		return;
+export function refresh_bypass(b4, l4, known) {
+	let prev = known ?? U.read_json(C.APPLIED_FILE, {});
+	if (!prev.routing || (known == null && !set_loaded('bypass4')))
+		return false;
 	let s = '';
 	if (b4 != null) {
 		s = refill('bypass4', b4);
-		if (l4 != null && set_loaded('local4'))
+		if (l4 != null && (known != null ? known.dns_hijack : set_loaded('local4')))
 			s += refill('local4', l4);
 	}
 	else {
@@ -224,9 +227,11 @@ export function refresh_bypass(b4, l4) {
 			s += refill('local4', F.local_subnets());
 	}
 	let tmp = C.RUN_DIR + '/bypass.nft';
-	writefile(tmp, s);
-	system('nft -f ' + U.shq(tmp) + ' >/dev/null 2>&1');
+	if (!U.write_atomic(tmp, s))
+		return false;
+	let ok = system('nft -f ' + U.shq(tmp) + ' >/dev/null 2>&1') == 0;
 	unlink(tmp);
+	return ok;
 };
 
 // Применить настройки; итог — в res. Ошибка nft — res.error, остальное — исключением.
@@ -277,22 +282,19 @@ function apply_config(res, prev) {
 
 		ctx.gs_tunnel4 = [];
 		ctx.gs_direct4 = [];
-		if (prev.routing && prev.gkey == gkey) {
-			ctx.gs_tunnel4 = S.set_elements('gs_tunnel4');
-			ctx.gs_direct4 = S.set_elements('gs_direct4');
-		}
 		ctx.dev_tunnel = map(filter(cfg.devices, d => d.policy == 'tunnel'), d => d.mac);
 		ctx.dev_direct = map(filter(cfg.devices, d => d.policy == 'direct'), d => d.mac);
 		if (cfg.dns_hijack)
 			ctx.local4 = F.local_subnets();
 
 		// Отпечаток структуры таблицы: если не изменился, не перезагружать таблицу целиком.
-		let nft_key = nft_table_key(cfg, plan, ctx, gkey, vps, tinfo);
+		let nft_key = nft_table_key(cfg, plan, ctx, gkey, vps, dat.hash);
 		let skip_reload = (prev.routing && prev.nft_key == nft_key && table_loaded() && prev.gkey == gkey);
 
 		if (skip_reload) {
 			// Таблица не изменилась: обновить только bypass4 и local4.
-			refresh_bypass(ctx.bypass4, ctx.local4 ?? []);
+			if (!refresh_bypass(ctx.bypass4, ctx.local4 ?? [], res))
+				die('nft: не обновлены локальные подсети');
 			res.gkey = gkey;
 			res.nft_key = nft_key;
 			res.nft_gen = prev.nft_gen ?? prev.time;
@@ -301,6 +303,10 @@ function apply_config(res, prev) {
 			text = null;
 		}
 		else {
+			if (prev.routing && prev.gkey == gkey) {
+				ctx.gs_tunnel4 = S.set_elements('gs_tunnel4');
+				ctx.gs_direct4 = S.set_elements('gs_direct4');
+			}
 			text = R.nft_full(cfg, plan, ctx);
 			res.gkey = gkey;
 			res.nft_key = nft_key;
@@ -367,7 +373,8 @@ function keep_running(res, prev) {
 		if (good) {
 			out = { ...out, fallback: 'last_good', good_time: good.time, routing: good.routing, mode: good.mode,
 			        vps: good.vps, endpoint: good.endpoint, gkey: good.gkey, geoip_sizes: good.geoip_sizes, missing: good.missing ?? [],
-			        geosite_order: good.geosite_order, counters_since: time(), mosdns: good.mosdns };
+			        geosite_order: good.geosite_order, counters_since: time(), mosdns: good.mosdns,
+			        dns_hijack: good.dns_hijack, zones: good.zones, nft_key: good.nft_key, nft_gen: res.time };
 			if (good.mosdns) {
 				writefile(C.STAMP_FILE, good.gkey ?? '');
 				DNS.dnsmasq_enable(good.port);

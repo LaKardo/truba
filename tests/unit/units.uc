@@ -231,6 +231,10 @@ check('адрес DNS: схемы mosdns и «@IP»', F.upstream_ok('https://1.1
 	F.upstream_ok('tls+pipeline://dns.example@1.2.3.4') &&
 	F.upstream_ok('1.1.1.1') && F.upstream_ok('udp://[2001:db8::1]:53'));
 check('адрес DNS: опечатка в схеме и путь без схемы — нет', !F.upstream_ok('htps://1.1.1.1/dns-query') && !F.upstream_ok('1.1.1.1/dns-query'));
+check('адрес DNS: порт, IPv6 и адрес после @ проверяются',
+	!F.upstream_ok('udp://1.1.1.1:70000') && !F.upstream_ok('tls://host:0') &&
+	!F.upstream_ok('udp://[:::1]:53') && !F.upstream_ok('tls://host@999.1.1.1') &&
+	F.upstream_ok('tls://host:65535'));
 check('адрес DNS: по частям — «@IP» отдельно, без него addr — весь адрес',
 	same(F.parse_upstream('tls://dns.example@1.2.3.4'), { addr: 'tls://dns.example', dial_addr: '1.2.3.4' }) &&
 	same(F.parse_upstream('https://1.1.1.1/dns-query'), { addr: 'https://1.1.1.1/dns-query' }) &&

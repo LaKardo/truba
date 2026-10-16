@@ -27,7 +27,7 @@ function StateCard({ st }) {
 // Серверы одного пути: запрос идёт ко всем сразу, ответ — первый годный (dns.uc, upstream_group).
 function ServersCard({ cls, title, name, hint }) {
 	const { html } = app.lib;
-	return html`<${kit.Card} cls=${cls} title=${title} aside=${_('queried all at once')}>
+	return html`<${kit.Card} cls=${cls} title=${title} aside=${_('fallback after 100 ms or an error')}>
 		<${kit.UpstreamList} sec="dns" name=${name} label=${title} />
 		<p class="mu">${hint}</p>
 	</${kit.Card}>`;
