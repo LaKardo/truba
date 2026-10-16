@@ -12,7 +12,7 @@ fail() { echo "FAIL  $*"; FAILS=$((FAILS + 1)); }
 SCRIPT=${1:-/repo/vps/install-vps.sh}
 
 export DEBIAN_FRONTEND=noninteractive LANG=C.UTF-8 LC_ALL=C.UTF-8
-apt-get update -qq >/dev/null && apt-get install -y -qq shellcheck nftables iproute2 >/dev/null
+apt-get update -qq >/dev/null && apt-get install -y -qq shellcheck nftables iproute2 openssh-client >/dev/null
 
 if shellcheck -s bash "$SCRIPT"; then ok "shellcheck"; else fail "shellcheck"; fi
 if bash -n "$SCRIPT"; then ok "bash -n"; else fail "bash -n"; fi
@@ -24,6 +24,48 @@ set +e
 STATE_DIR=$(mktemp -d)
 NFT_FILE="$STATE_DIR/pipe.nft"
 T=$(mktemp -d)   # файлы самих проверок
+
+# Ключи с опциями тоже разрешают вход; одного похожего префикса недостаточно.
+ssh-keygen -q -t ed25519 -N '' -f "$T/login"
+printf '  no-agent-forwarding %s\n' "$(cat "$T/login.pub")" > "$T/authorized_keys"
+have_key_login "$T/authorized_keys" && ok "SSH: ключ с опциями и пробелами" || fail "SSH: ключ с опциями"
+echo 'ssh-ed25519 not-a-key' > "$T/authorized_keys"
+! have_key_login "$T/authorized_keys" && ok "SSH: повреждённый ключ не принимается" || fail "SSH: повреждённый ключ"
+valid_ipv4 203.0.113.10 && ! valid_ipv4 256.1.2.3 && ! valid_ipv4 '1.2.3.4 text' && ! valid_ipv4 $'1.2.3.4\n5.6.7.8' \
+	&& ok "IPv4: проверка октетов и лишнего текста" || fail "IPv4: проверка"
+curl() { case "${*: -1}" in *ipify*) echo '<html>error</html>' ;; *) echo ' 203.0.113.10 ' ;; esac; }
+[ "$(external_ipv4)" = 203.0.113.10 ] && ok "IPv4: неверный ответ — следующий сервис" || fail "IPv4: резервный сервис"
+unset -f curl
+ss() { echo 'LISTEN'; }
+out=$( (check_port_available t 55555) 2>&1 )
+grep -q 'уже занят' <<< "$out" && ok "порты: занятый TCP отклонён" || fail "порты: занятый TCP"
+check_port_available u 51820 51820 && ok "порты: свой UDP при повторном запуске" || fail "порты: свой UDP"
+unset -f ss
+
+# Служебные конфиги пишутся отдельно от пользовательских и без лишних перезапусков.
+UNATTENDED_CONF="$T/52truba"; JOURNAL_CONF="$T/journal.conf"
+setup_unattended
+grep -q 'Remove-Unused-Kernel-Packages "true"' "$UNATTENDED_CONF" && grep -q 'Automatic-Reboot "false"' "$UNATTENDED_CONF" \
+	&& ok "обновления: очистка ядер без автоперезагрузки" || fail "обновления: настройки"
+systemctl() { echo "$*" >> "$T/journal-restarts"; }
+setup_journal; setup_journal
+[ "$(wc -l < "$T/journal-restarts")" -eq 1 ] && grep -qx 'SystemMaxUse=100M' "$JOURNAL_CONF" \
+	&& ok "журнал: ограничен, повторно без перезапуска" || fail "журнал: настройки"
+unset -f systemctl
+
+# Проверяем реальные строки конфигурации SSH и fail2ban без перезапуска служб хоста.
+SSHD_DROPIN="$T/sshd.conf"; F2B_JAIL="$T/fail2ban.local"
+saved_ssh_restart=$(declare -f ssh_restart)
+sshd() { return 0; }; ssh_restart() { :; }; systemctl() { :; }
+ssh_apply 52222
+grep -qx 'MaxAuthTries 3' "$SSHD_DROPIN" && grep -qx 'LoginGraceTime 20' "$SSHD_DROPIN" && grep -qx 'X11Forwarding no' "$SSHD_DROPIN" \
+	&& ok "SSH: лимиты авторизации и запрет X11" || fail "SSH: защитные параметры"
+SSH_PORT=52222; setup_fail2ban
+grep -qx 'bantime.increment = true' "$F2B_JAIL" && grep -qx 'maxretry = 3' "$F2B_JAIL" \
+	&& ok "fail2ban: усиленные лимиты" || fail "fail2ban: лимиты"
+unset -f sshd ssh_restart systemctl
+# Возвращаем функцию скрипта после подмены.
+eval "$saved_ssh_restart"
 
 # Запись файлов: права явные и у нового файла, и у прежнего; глобальный umask не меняется.
 umask 022
@@ -198,6 +240,7 @@ grep -q 'snat to $PUB' "$NFT_FILE" && ok "SNAT от IP VPS" || fail "SNAT"
 grep -q 'udp dport 68 return' "$NFT_FILE" && ok "DHCP-клиент VPS не уходит на Роутер" || fail "DHCP"
 grep -q 'udp sport 547 udp dport 546 accept' "$NFT_FILE" && ok "ответы DHCPv6 доходят до VPS" || fail "DHCPv6"
 grep -q 'udp sport 51820 ip dscp != cs0 ip dscp set cs0' "$NFT_FILE" && ok "DSCP пакетов Туннеля обнуляется" || fail "DSCP Туннеля"
+grep -q 'tcp flags syn / syn,rst' "$NFT_FILE" && ok "MSS: SYN и SYN-ACK без RST" || fail "MSS: флаги"
 
 # udp_tos SPORT TOS — UDP-пакет на 127.0.0.1:9 с порта SPORT и байтом TOS (IP_TOS, hex).
 # TOS — числом: строку setsockopt передал бы как байты.
@@ -244,6 +287,8 @@ SYS_NET="$T/sys"; mkdir -p "$SYS_NET/eth0/queues/tx-0" "$SYS_NET/eth0/queues/rx-
 modprobe() { :; }; sysctl() { :; }; tc() { echo "$*" >> "$STATE_DIR/tc.txt"; }
 out=$(write_sysctl 2>&1)
 grep -q 'nf_conntrack_max = 262144' "$SYSCTL_FILE" && ok "sysctl: nf_conntrack_max" || fail "sysctl nf_conntrack_max"
+grep -q 'net.ipv4.conf.all.send_redirects = 0' "$SYSCTL_FILE" && grep -q 'net.ipv6.conf.default.accept_redirects = 0' "$SYSCTL_FILE" \
+	&& ok "sysctl: ICMP redirects отключены" || fail "sysctl: redirects"
 grep -q 'nf_conntrack_buckets = 262144' "$SYSCTL_FILE" && ok "sysctl: корзин conntrack столько же, сколько записей" || fail "sysctl nf_conntrack_buckets"
 grep -qx 'nf_conntrack' "$MODULES_FILE" && ok "nf_conntrack загружается при старте" || fail "modules-load nf_conntrack"
 # fq держит на поток 100 пакетов, а Туннель для неё — один поток: на пиках скачивание вставало.
@@ -468,6 +513,8 @@ if apt-get install -y -qq unbound bind9-dnsutils ca-certificates >/dev/null 2>&1
 	# Ключ корневой зоны пакет кладёт при запуске службы (ExecStartPre) — так же и здесь.
 	/usr/libexec/unbound-helper root_trust_anchor_update >/dev/null 2>&1
 	if out=$(unbound-checkconf 2>&1); then ok "unbound: конфиг вместе с файлами пакета проходит проверку"; else fail "unbound-checkconf: $out"; fi
+	[ "$(unbound-checkconf -o num-threads)" = 1 ] && [ "$(unbound-checkconf -o minimal-responses)" = yes ] \
+		&& ok "unbound: один поток и минимальные ответы" || fail "unbound: поток и ответы"
 	[ "$(stat -c %a "$UNBOUND_CONF")" = 644 ] && ok "unbound: конфиг читаем службой" || fail "unbound: права конфига"
 	grep -qx '    forward-tls-upstream: yes' "$UNBOUND_CONF" \
 		&& [ "$(grep -E '^    forward-addr:' "$UNBOUND_CONF" | xargs)" = "forward-addr: 1.1.1.1@853#cloudflare-dns.com forward-addr: 8.8.8.8@853#dns.google" ] \

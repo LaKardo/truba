@@ -30,6 +30,8 @@ SYSCTL_FILE=/etc/sysctl.d/90-truba.conf
 SYSCTL_DIRS="/etc/sysctl.d /run/sysctl.d /usr/local/lib/sysctl.d /usr/lib/sysctl.d"
 MODULES_FILE=/etc/modules-load.d/truba.conf
 UNBOUND_CONF=/etc/unbound/unbound.conf.d/truba.conf
+UNATTENDED_CONF=/etc/apt/apt.conf.d/52truba
+JOURNAL_CONF=/etc/systemd/journald.conf.d/90-truba.conf
 
 VPS_TUN=10.77.77.1
 RTR_TUN=10.77.77.2
@@ -181,7 +183,38 @@ pkg_installed() { [ "$(dpkg-query -W -f='${db:Status-Abbrev}' "$1" 2>/dev/null)"
 # ---------- проверки ----------
 
 have_key_login() {
-	[ -s /root/.ssh/authorized_keys ] && grep -qE '^(ssh-|ecdsa-|sk-)' /root/.ssh/authorized_keys
+	# ssh-keygen понимает опции authorized_keys и проверяет сам ключ, а не только его префикс.
+	local file=${1:-/root/.ssh/authorized_keys}
+	[ -s "$file" ] && ssh-keygen -l -f "$file" >/dev/null 2>&1
+}
+
+valid_ipv4() {
+	local a b c d x
+	[[ $1 =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]] || return 1
+	IFS=. read -r a b c d <<< "$1"
+	for x in "$a" "$b" "$c" "$d"; do
+		[ "$((10#$x))" -le 255 ] || return 1
+	done
+}
+
+external_ipv4() {
+	local url addr
+	for url in https://api.ipify.org https://ifconfig.me/ip https://icanhazip.com; do
+		addr=$(curl -4 -fsS --connect-timeout 5 --max-time 10 "$url" 2>/dev/null) || continue
+		# Убираем только обрамляющие пробелы, не склеивая некорректный ответ.
+		addr=$(printf '%s' "$addr" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+		if valid_ipv4 "$addr"; then printf '%s\n' "$addr"; return 0; fi
+	done
+	return 1
+}
+
+# TCP и UDP — разные пространства портов; свой работающий порт разрешён при повторной установке.
+check_port_available() {
+	local proto=$1 port=$2 previous=${3:-}
+	[ "$port" != "$previous" ] || return 0
+	if ss -Hln"$proto" "( sport = :$port )" | grep -q .; then
+		die "порт $proto/$port уже занят другой службой"
+	fi
 }
 
 wan_ips() { ip -4 -o addr show dev "$WAN_IF" scope global | awk '{ sub(/\/.*/, "", $4); print $4 }'; }
@@ -197,7 +230,7 @@ preflight() {
 		die "VPS — контейнер ($(systemd-detect-virt --container)): модуль ядра AmneziaWG в нём не загрузить. Нужна полноценная виртуальная машина (KVM и т.п.)"
 	fi
 
-	have_key_login || die "в /root/.ssh/authorized_keys нет ключа: после переноса SSH вход по паролю будет закрыт. Добавьте ключ и запустите снова"
+	have_key_login /root/.ssh/authorized_keys || die "в /root/.ssh/authorized_keys нет ключа: после переноса SSH вход по паролю будет закрыт. Добавьте ключ и запустите снова"
 
 	WAN_IF=$(ip -4 route show default | awk '{for(i=1;i<NF;i++) if($i=="dev"){print $(i+1); exit}}')
 	[ -n "$WAN_IF" ] || die "не найден интерфейс маршрута по умолчанию"
@@ -207,7 +240,7 @@ preflight() {
 		apt_get install -y -qq curl >/dev/null
 	fi
 	local ext_ip local_ips
-	ext_ip=$(curl -4 -fsS --max-time 10 https://api.ipify.org || curl -4 -fsS --max-time 10 https://ifconfig.me || true)
+	ext_ip=$(external_ipv4) || die "не удалось узнать корректный внешний IPv4"
 	[ -n "$ext_ip" ] || die "не удалось узнать внешний IP"
 	local_ips=$(wan_ips | xargs)
 	if [[ " $local_ips " != *" $ext_ip "* ]]; then
@@ -523,7 +556,7 @@ write_nft() {
 			}
 			chain mss {
 				type filter hook forward priority mangle; policy accept;
-				tcp flags syn tcp option maxseg size set rt mtu
+				tcp flags syn / syn,rst tcp option maxseg size set rt mtu
 			}
 			# DSCP пакетов Туннеля — 0: модуль ставит рукопожатию AF41, как WireGuard, а мусорным
 			# пакетам — случайный, и по этому их узнают. ECN не трогается.
@@ -626,6 +659,13 @@ write_sysctl() {
 	put_file 644 "$SYSCTL_FILE" <<-EOF
 		# Труба
 		net.ipv4.ip_forward = 1
+		net.ipv4.tcp_syncookies = 1
+		net.ipv4.conf.all.accept_redirects = 0
+		net.ipv4.conf.default.accept_redirects = 0
+		net.ipv4.conf.all.send_redirects = 0
+		net.ipv4.conf.default.send_redirects = 0
+		net.ipv6.conf.all.accept_redirects = 0
+		net.ipv6.conf.default.accept_redirects = 0
 		net.core.default_qdisc = fq_codel
 		net.ipv4.tcp_congestion_control = bbr
 		net.netfilter.nf_conntrack_max = 262144
@@ -689,6 +729,8 @@ write_unbound_conf() {
 	put_file 644 "$UNBOUND_CONF" <<-EOF
 		# Труба: DNS для Роутера. Сгенерировано install-vps.sh
 		server:
+		    num-threads: 1
+		    minimal-responses: yes
 		    interface: $VPS_TUN
 		    # Адрес появляется вместе с $AWG_IF, а unbound стартует раньше.
 		    ip-freebind: yes
@@ -775,6 +817,9 @@ ssh_apply() {
 		echo "PasswordAuthentication no"
 		echo "KbdInteractiveAuthentication no"
 		echo "PermitRootLogin prohibit-password"
+		echo "MaxAuthTries 3"
+		echo "LoginGraceTime 20"
+		echo "X11Forwarding no"
 	)
 	sshd -t || die "конфиг sshd не прошёл проверку"
 	[ "$FILE_CHANGED" = 0 ] || ssh_restart
@@ -833,6 +878,10 @@ setup_fail2ban() {
 		port = $SSH_PORT
 		backend = systemd
 		banaction = nftables-multiport
+		maxretry = 3
+		findtime = 10m
+		bantime = 24h
+		bantime.increment = true
 	EOF
 	systemctl enable fail2ban >/dev/null 2>&1
 	if [ "$FILE_CHANGED" = 1 ] || ! systemctl is-active -q fail2ban; then
@@ -841,10 +890,23 @@ setup_fail2ban() {
 }
 
 setup_unattended() {
-	put_file 644 /etc/apt/apt.conf.d/20auto-upgrades <<-EOF
+	# Отдельный файл: не перезаписываем настройки владельца в 20auto-upgrades.
+	put_file 644 "$UNATTENDED_CONF" <<-EOF
 		APT::Periodic::Update-Package-Lists "1";
 		APT::Periodic::Unattended-Upgrade "1";
+		Unattended-Upgrade::Remove-Unused-Kernel-Packages "true";
+		Unattended-Upgrade::Remove-New-Unused-Dependencies "true";
+		Unattended-Upgrade::Automatic-Reboot "false";
 	EOF
+}
+
+setup_journal() {
+	put_file 644 "$JOURNAL_CONF" <<-EOF
+		[Journal]
+		SystemMaxUse=100M
+		RuntimeMaxUse=50M
+	EOF
+	[ "$FILE_CHANGED" = 0 ] || systemctl restart systemd-journald
 }
 
 # ---------- команды ----------
@@ -871,10 +933,16 @@ cmd_install() {
 	preflight          # WAN_IF и PUB_IP — всегда свежие, остальное из состояния
 
 	# Порты — до пакетов: ошибка видна сразу, а не после нескольких минут установки.
+	local previous_awg=${AWG_PORT:-} previous_ssh=${SSH_PORT:-}
 	choose_ssh_port
 	AWG_PORT=${OPT_AWG_PORT:-${AWG_PORT:-}}
 	[ -n "$AWG_PORT" ] || AWG_PORT=$(pick_port "$SSH_PORT")
 	[ "$SSH_PORT" != "$AWG_PORT" ] || die "порты SSH и Туннеля совпадают"
+	# Уже слушающий порт sshd допустим и при первой установке с --ssh-port.
+	if [[ " $(sshd_ports) " != *" $SSH_PORT "* ]]; then
+		check_port_available t "$SSH_PORT" "$previous_ssh"
+	fi
+	check_port_available u "$AWG_PORT" "$previous_awg"
 
 	install_packages
 	detect_awg_proto
@@ -925,6 +993,7 @@ cmd_install() {
 	setup_unbound
 	setup_fail2ban
 	setup_unattended
+	setup_journal
 
 	local ver
 	ver=$(awg_version)
@@ -938,6 +1007,7 @@ cmd_install() {
 	echo "  Конфиг Роутера:  $ROUTER_CONF"
 	echo
 	echo "  Скопировать на компьютер:  scp -P $SSH_PORT root@$PUB_IP:$ROUTER_CONF ."
+	echo "  Или вывести текст для импорта: bash install-vps.sh show-config"
 	echo "  Затем: LuCI → Службы → Труба → Туннель → Импорт .conf"
 	echo
 	echo "  AmneziaWG на Трубе: $ver — модуль Роутера собирается из router/awg/SOURCES, протокол должен совпадать"
@@ -1031,6 +1101,9 @@ cmd_uninstall() {
 	nft delete table ip truba_nat 2>/dev/null || true
 	nft delete table inet truba_filter 2>/dev/null || true
 	rm -f "$PIPE_UNIT" /etc/systemd/system/truba-awg.service "$F2B_JAIL" "$SYSCTL_FILE" "$MODULES_FILE" "$UNBOUND_CONF"
+	rm -f "$UNATTENDED_CONF" "$JOURNAL_CONF"
+	systemctl restart systemd-journald
+	systemctl daemon-reload
 	systemctl restart fail2ban >/dev/null 2>&1 || true
 	rm -f "$SSHD_DROPIN"
 	ssh_restart
