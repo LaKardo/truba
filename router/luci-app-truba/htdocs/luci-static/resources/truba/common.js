@@ -40,6 +40,7 @@ const REASON_LABELS = {
 	router_host: _('router\'s own host (NTP, list mirrors, Truba endpoint) — resolved directly'),
 	geoip: _('geoip category'),
 	mode: _('no category matched — the mode default applies'),
+	routing_off: _('routing is off — all traffic goes directly'),
 	changed: _('decided before the settings changed')
 };
 
@@ -359,7 +360,7 @@ function upnpState(up, on) {
 
 // Отображения UPnP / NAT-PMP: устройство — по имени из devices, без него — IP.
 function upnpRows(leases, devices) {
-	const names = new Map((devices || []).filter((d) => d.ip && d.name).map((d) => [ d.ip, d.name ]));
+	const names = namesByIp(devices);
 	return (leases || []).map((l) => ({
 		descr: l.descr || '—', who: names.get(l.ip) || l.ip, proto: l.proto, ext: l.ext_port, port: l.port,
 		expires: l.expires ? fmtTime(l.expires) : _('no expiry')
@@ -412,7 +413,7 @@ function fwProto(p) {
 
 // Строки карточки: кто — имя устройства с этим IP, иначе IP; внутренний порт — без своего тот же, что внешний.
 function forwardRows(devices) {
-	const names = new Map((devices || []).filter((d) => d.ip && d.name).map((d) => [ d.ip, d.name ]));
+	const names = namesByIp(devices);
 	return forwardSections().map((s) => ({
 		sid: s['.name'], name: s.name || '', proto: fwProto(s.proto), ext: s.src_dport || '', ip: s.dest_ip || '',
 		who: names.get(s.dest_ip) || s.dest_ip || '', port: s.dest_port || s.src_dport || '', on: fwOn(s.enabled)
@@ -543,14 +544,26 @@ function ruleAction(mode, set, tag) {
 	return ruleActions(mode).get(set + ':' + String(tag).toLowerCase()) || 'mode';
 }
 
-// Строки Категорий: поиск по «набор:тег» без учёта регистра и чип по Действию (actOf —
-// Действие Категории); сразу — не больше CAT_LIMIT: около 1 700 строк по четыре кнопки телефон рисовал
-// бы долго, всё — по «Показать все». total — сколько подошло.
+// Действия Режима по сохранённым настройкам, без несохранённых правок, — для точки «изменено»: секции rule
+// удаляются и заводятся заново, поэтому несохранённое у секции не говорит, другое ли Действие. После
+// сохранения uci.save() перечитывает настройки — точки снимаются.
+function savedRuleActions(mode) {
+	const m = new Map(), v = uci.state?.values?.truba || {};
+	for (let s of Object.values(v).filter((x) => x['.type'] == 'rule').sort((a, b) => a['.index'] - b['.index']))
+		if (ruleOf(s, mode) && RULE_ACTIONS.includes(s.action))
+			m.set(ruleKey(s), s.action);
+	return m;
+}
+
+// Строки Категорий: поиск по «набор:тег» и по Категориям, куда она вложена (subset_of), без учёта регистра,
+// и чип по Действию (actOf — Действие Категории); сразу — не больше CAT_LIMIT: около 1 700 строк по четыре
+// кнопки телефон рисовал бы долго, всё — по «Показать все». total — сколько подошло.
 const CAT_LIMIT = 100;
 
 function catRows(list, actOf, q, f, full) {
 	const qq = String(q || '').trim().toLowerCase();
-	const hit = list.filter((c) => (!qq || (c.set + ':' + c.tag).toLowerCase().includes(qq)) &&
+	const hay = (c) => [ c.set + ':' + c.tag, ...(c.subset_of || []) ].join(' ').toLowerCase();
+	const hit = list.filter((c) => (!qq || hay(c).includes(qq)) &&
 		(f == 'all' || (f == 'explicit' ? actOf(c) != 'mode' : actOf(c) == f)));
 	return { rows: full ? hit : hit.slice(0, CAT_LIMIT), total: hit.length };
 }
@@ -618,6 +631,22 @@ function deviceSections(mac) {
 
 function deviceSection(mac) {
 	return deviceSections(mac)[0] || null;
+}
+
+// Имя устройства: из его секции в настройках браузера (с несохранённым переименованием), иначе от службы,
+// иначе адрес. Одно на всех вкладках: строки «Устройств», «Обзор», отображения UPnP и пробросы.
+function deviceName(d) {
+	const sid = deviceSection(d?.mac);
+	return (sid && uci.get('truba', sid, 'name')) || d?.name || d?.ip || d?.mac || '';
+}
+
+// Имена устройств по IP — для строк, где устройство известно только по адресу (UPnP, пробросы).
+function namesByIp(devices) {
+	const m = new Map();
+	for (let d of devices || [])
+		if (d.ip && deviceName(d) != d.ip)
+			m.set(d.ip, deviceName(d));
+	return m;
 }
 
 // Политика устройства так, как её поймёт служба (truba.conf, device_sections), — по настройкам
@@ -751,8 +780,8 @@ function tabUrl(tab) {
 return baseclass.extend({
 	callStatus, callLists, callCategories, callSets, callCheck, callUpdateLists, callRollbackLists, callRates, callLog,
 	loadSchema, schema, get, fieldError, handshakeLevel, callDevices, callConnections,
-	devRate, devShare, devActive, deviceSections, deviceSection, devicePolicy, normMac, connLabel,
-	ruleKey, ruleOf, ruleSections, ruleActions, ruleAction, catRows, catsDue, listsDue, listsKick, listsSummary, checkErrorText,
+	devRate, devShare, devActive, deviceSections, deviceSection, deviceName, devicePolicy, normMac, connLabel,
+	ruleKey, ruleOf, ruleSections, ruleActions, ruleAction, savedRuleActions, catRows, catsDue, listsDue, listsKick, listsSummary, checkErrorText,
 	runNatTest, runTunnelTest, parseLog, logShown, upstreamError, dnsStats, natSummary, upnpState, upnpRows,
 	forwardRows, fwEnabled, portError, forwardErrors, zoneOfIp, forwardValues, natPick,
 	ACTION_LABELS, REASON_LABELS, VIA_LABELS, WARNINGS, NAT_ERRORS, CHECK_ERRORS, UPNP_MISSING, NBSP, TABS,

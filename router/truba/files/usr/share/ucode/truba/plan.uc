@@ -72,7 +72,9 @@ export function compute(cfg, cats) {
 	};
 };
 
-// Отпечаток всего, что влияет на содержимое доменных наборов gs_*.
+// Отпечаток всего, что влияет на содержимое доменных наборов gs_*. cats_hash — «geoip:geosite»
+// (dat.ensure); берётся только часть geosite: обновление geoip.dat не сбрасывает gs_* и не перезапускает mosdns.
 export function geosite_key(plan, cats_hash) {
-	return sprintf('%s|%s|%J', cats_hash ?? '-', plan.mode, map(plan.geosite, g => g.tag + '=' + g.action));
+	let parts = split(cats_hash ?? '-', ':');
+	return sprintf('%s|%s|%J', parts[length(parts) - 1], plan.mode, map(plan.geosite, g => g.tag + '=' + g.action));
 };

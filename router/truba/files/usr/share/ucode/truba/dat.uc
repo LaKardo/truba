@@ -177,7 +177,8 @@ function fname(tag) {
 	return replace(tag, /[^a-z0-9._!@-]/g, '_');
 }
 
-// Вложенность Категорий geosite: A ⊂ B, если каждая запись A есть в B.
+// Вложенность Категорий geosite: A ⊂ B, если каждая запись A есть в B и B больше.
+// Категории с одинаковым содержимым не помечаются вложенными друг в друга.
 function compute_subsets(cats) {
 	let lookup = {};
 	let setof = (c) => {
@@ -195,7 +196,7 @@ function compute_subsets(cats) {
 		if (a.count == 0)
 			continue;
 		for (let b in cats) {
-			if (a === b || b.count < a.count)
+			if (a === b || b.count <= a.count)
 				continue;
 			let sb = setof(b);
 			if (!sb[a.entries[0]])

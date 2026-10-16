@@ -61,6 +61,9 @@ msgstr "Категория geoip"
 msgid "no category matched — the mode default applies"
 msgstr "ни одна Категория не подошла — действует Режим"
 
+msgid "routing is off — all traffic goes directly"
+msgstr "Маршрутизация выключена — весь трафик идёт напрямую"
+
 msgid "Rule sets are not downloaded yet — only the mode default applies. Download is in progress."
 msgstr "Наборы правил ещё не скачаны — действует только Режим. Идёт загрузка."
 
@@ -1008,6 +1011,15 @@ msgstr "%s · с Действием %s"
 msgid "Find a category"
 msgstr "Найти Категорию"
 
+msgid "Category name, e.g. youtube or geoip:ru"
+msgstr "Имя Категории, например youtube или geoip:ru"
+
+msgid "Show in categories"
+msgstr "Показать в Категориях"
+
+msgid "The check uses the saved settings: unapplied changes are not taken into account."
+msgstr "Проверка — по сохранённым настройкам: неприменённые изменения не учитываются."
+
 msgid "With an action"
 msgstr "С Действием"
 
@@ -1189,8 +1201,8 @@ msgstr "Добавить сервер"
 msgid "queried all at once"
 msgstr "опрашиваются все сразу"
 
-msgid "Used for categories with action Tunnel and, in mode «All via tunnel», for everything else. Requests go through the tunnel, each one to all servers at once. udp://10.77.77.1 is the DNS server on the Truba itself (install-vps.sh). Formats: https://…, tls://…, tls+pipeline://… (several requests in one connection), udp://…; «address@IP» sets the IP to connect to."
-msgstr "Для Категорий с Действием «Туннель», а в Режиме «Всё в туннель» — для всего остального. Запросы идут через Туннель, каждый — сразу ко всем серверам. udp://10.77.77.1 — DNS-сервер на самой Трубе (install-vps.sh). Форматы: https://…, tls://…, tls+pipeline://… (несколько запросов в одном соединении), udp://…; «адрес@IP» задаёт IP для подключения."
+msgid "Used for categories with action Tunnel and, in mode «All via tunnel», for everything else. Requests go through the tunnel, each one to all servers at once. udp://10.77.77.1 is the DNS server on the Truba itself (install-vps.sh). Formats: https://…, tls://…, tls+pipeline://… (several requests in one connection), quic://…, udp://…, tcp://…; without a scheme — udp; «address@IP» sets the IP to connect to."
+msgstr "Для Категорий с Действием «Туннель», а в Режиме «Всё в туннель» — для всего остального. Запросы идут через Туннель, каждый — сразу ко всем серверам. udp://10.77.77.1 — DNS-сервер на самой Трубе (install-vps.sh). Форматы: https://…, tls://…, tls+pipeline://… (несколько запросов в одном соединении), quic://…, udp://…, tcp://…; без схемы — udp; «адрес@IP» задаёт IP для подключения."
 
 msgid "Used for categories with action Direct, for the router's own hosts (NTP, list mirrors) and, in mode «Selective», for everything else."
 msgstr "Для Категорий с Действием «Напрямую», для служебных хостов самого Роутера (NTP, зеркала списков), а в Режиме «Выборочный» — для всего остального."

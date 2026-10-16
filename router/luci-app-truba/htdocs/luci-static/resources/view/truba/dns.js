@@ -66,15 +66,12 @@ function Page({ store, view }) {
 	const { status, offline } = app.use(store);
 	app.use(app.changes);   // карточки читают UCI браузера — перерисовка после app.set
 	return html`
-		<div class="head">
-			<h2>${_('DNS')}</h2>
-			<span class="mu">${_('Router DNS goes through mosdns: it recognises geosite categories, picks the upstream and puts resolved IPs into the routing sets.')}</span>
-			${offline ? html`<${kit.Badge} level="err"><${kit.Icon} name="wifi-off" />${_('No connection to the router')}</${kit.Badge}>` : ''}
-		</div>
+		<${kit.PageHead} title=${_('DNS')} offline=${offline}
+			text=${_('Router DNS goes through mosdns: it recognises geosite categories, picks the upstream and puts resolved IPs into the routing sets.')} />
 		<div class="grid g2">
 			<${StateCard} st=${status || {}} />
 			<${ServersCard} cls="ups-tunnel" title=${_('Servers for «Tunnel»')} name="tunnel_upstream"
-				hint=${_('Used for categories with action Tunnel and, in mode «All via tunnel», for everything else. Requests go through the tunnel, each one to all servers at once. udp://10.77.77.1 is the DNS server on the Truba itself (install-vps.sh). Formats: https://…, tls://…, tls+pipeline://… (several requests in one connection), udp://…; «address@IP» sets the IP to connect to.')} />
+				hint=${_('Used for categories with action Tunnel and, in mode «All via tunnel», for everything else. Requests go through the tunnel, each one to all servers at once. udp://10.77.77.1 is the DNS server on the Truba itself (install-vps.sh). Formats: https://…, tls://…, tls+pipeline://… (several requests in one connection), quic://…, udp://…, tcp://…; without a scheme — udp; «address@IP» sets the IP to connect to.')} />
 			<${ServersCard} cls="ups-direct" title=${_('Servers for «Direct»')} name="direct_upstream"
 				hint=${_('Used for categories with action Direct, for the router\'s own hosts (NTP, list mirrors) and, in mode «Selective», for everything else.')} />
 			<${SettingsCard} />
@@ -84,6 +81,8 @@ function Page({ store, view }) {
 }
 
 return view.extend({
+	...app.actions,
+
 	load: function() {
 		return Promise.all([ app.load(), common.loadSchema() ]).then(() => Promise.all([ common.callStatus().catch(() => null), uci.load('truba') ]));
 	},
@@ -92,26 +91,5 @@ return view.extend({
 		const store = app.store({ status: data[0], offline: data[0] == null });
 		app.poll(store, () => common.callStatus().then((s) => ({ status: s })), POLL);
 		return app.mount(this, Page, { store });
-	},
-
-	// «Применить» панели изменений и «Сохранить и применить» LuCI: пока есть неверные поля, ничего не
-	// сохраняется — иначе применилось бы остальное, а введённое значение молча пропало бы.
-	handleSaveApply: function(ev, mode) {
-		if (app.changes.get().bad) {
-			app.toast(_('Fix the highlighted fields'));
-			return Promise.resolve();
-		}
-		return this.super('handleSaveApply', [ ev, mode ]);
-	},
-
-	// Настройки меняются прямо в браузере: сохранить — отправить эти изменения, сбросить — перечитать страницу.
-	// Набранный, но не добавленный адрес сервера сохраняется вместе с ними (app.flush).
-	handleSave: function() {
-		app.flush();
-		return uci.save().then(() => app.changes.set({ n: app.changeCount() }));
-	},
-
-	handleReset: function() {
-		window.location.reload();
 	}
 });

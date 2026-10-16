@@ -42,15 +42,20 @@ const COLS = { tunnel: { down: 1, up: 2, conn: 7 }, direct: { down: 3, up: 4, co
 const SPANS = [ 600, 3600, 86400 ];
 const spanLabel = (s) => ({ 600: _('10 min'), 3600: _('1 h'), 86400: _('24 h') })[s];
 const SPAN_KEY = 'truba.span';
-let span = 600;
-try {
-	const s = +localStorage.getItem(SPAN_KEY);
-	if (SPANS.includes(s))
-		span = s;
-}
-catch (e) { }
 
-const ring = () => (span > hist.fine.span) ? hist.min : hist.fine;
+function savedSpan() {
+	try {
+		const s = +localStorage.getItem(SPAN_KEY);
+		if (SPANS.includes(s))
+			return s;
+	}
+	catch (e) { }
+	return 600;
+}
+
+// Выбранный срок и приход поминутных средних — хранилище страницы (view, его заводит render): смена
+// перерисовывает карточку «Скорость», как ответы опроса. Срок нужен и опросу — он читает его оттуда же.
+const ring = (span) => (span > hist.fine.span) ? hist.min : hist.fine;
 const lastT = (h) => h.points.length ? h.points[h.points.length - 1][0] : 0;
 
 // Забрать точки новее уже известных и убрать вышедшие за срок. Ошибка — не беда:
@@ -72,7 +77,7 @@ function fetchRates(h) {
 }
 
 // Поминутная точка появляется раз в минуту — чаще её не спрашивать: Роутер читал бы файл зря.
-function fetchHistory() {
+function fetchHistory(span) {
 	const minDue = span > hist.fine.span && Date.now() - (hist.min.fetched || 0) >= hist.min.step * 1000;
 	return Promise.all([ fetchRates(hist.fine), minDue ? fetchRates(hist.min) : null ]);
 }
@@ -234,19 +239,18 @@ const SERIES = () => [
 ];
 
 // Скорость за 10 минут, час или сутки и объёмы по Действиям с начала счёта.
-function SpeedCard({ st }) {
-	const { html, useState } = app.lib;
-	const [ , redraw ] = useState(0);
+function SpeedCard({ st, view }) {
+	const { html } = app.lib;
+	const { span } = app.use(view);
 	const onSpan = (s) => {
-		span = s;
 		try { localStorage.setItem(SPAN_KEY, String(s)); } catch (e) { }
-		redraw((x) => x + 1);
+		view.set({ span: s });
 		// Поминутные средние — при первом выборе суток.
 		if (s > hist.fine.span && !hist.min.loaded)
-			fetchRates(hist.min).then(() => redraw((x) => x + 1));
+			fetchRates(hist.min).then(() => view.set({ minAt: Date.now() }));
 	};
 	const now = hist.now ?? Date.now() / 1000;
-	const h = ring();
+	const h = ring(span);
 	const pts = chart.gaps(h.points.filter((p) => p[0] > now - span), h.step);
 	const series = SERIES();
 	const data = [ pts.map((p) => p[0]), ...series.map((s) => pts.map((p) => p[s.i] ?? null)) ];
@@ -275,7 +279,7 @@ function DevicesCard({ devices }) {
 		${top.length ? top.map((d) => {
 			const [ tun, dir ] = common.devShare(d, devices.now), r = common.devRate(d);
 			return html`<div class="devrow">
-				<span class="n">${d.name || d.ip}</span>
+				<span class="n">${common.deviceName(d)}</span>
 				<${kit.ShareBar} tunnel=${tun} direct=${dir} />
 				<span class="r">${r ? '↓ ' + common.fmtRate(r[0]) : '—'}</span>
 			</div>`;
@@ -343,54 +347,45 @@ function WarningsCard({ list }) {
 	</${kit.Card}>`;
 }
 
-function Page({ store, view, iface }) {
+function Page({ store, view, iface, chartView }) {
 	const { html } = app.lib;
 	const { status, devices, offline } = app.use(store);
 	app.use(app.changes);   // переключатели читают UCI — перерисовка после app.set
 	const st = status || {};
 	const list = warnings(st);
 	return html`
-		<div class="head">
-			<h2>${_('Truba')}</h2>
-			<span class="mu">${_('Home network through your own VPS: the VPS gives the router its public IP, the router decides what goes through the tunnel.')}</span>
-			${offline ? html`<${kit.Badge} level="err"><${kit.Icon} name="wifi-off" />${_('No connection to the router')}</${kit.Badge}>` : ''}
-		</div>
+		<${kit.PageHead} title=${_('Truba')} offline=${offline}
+			text=${_('Home network through your own VPS: the VPS gives the router its public IP, the router decides what goes through the tunnel.')} />
 		<${Hero} st=${st} iface=${iface} warns=${list.length} />
 		<div class="grid">
 			<${FlowCard} st=${st} devices=${devices} />
 			<${TunnelCard} st=${st} iface=${iface} />
-			<${SpeedCard} st=${st} />
+			<${SpeedCard} st=${st} view=${chartView} />
 			<${DevicesCard} devices=${devices} />
 			<${InfoCard} st=${st} />
 			${list.length ? html`<${WarningsCard} list=${list} />` : ''}
 		</div>
-		<${kit.ChangesBar} view=${view} />`;
+		<${kit.ChangesBar} view=${view} />
+		<${kit.Toast} />`;
 }
 
 return view.extend({
+	...app.actions,
+
 	load: function() {
 		// Сроки истории — из схемы службы: без них fetchHistory не знает, сколько точек просить.
 		return Promise.all([ app.load(), common.loadSchema() ]).then(([ , s ]) => {
 			setHistory(s.consts.history);
-			return Promise.all([ common.callStatus().catch(() => null), uci.load('network'), uci.load('truba'), uci.load('firewall'), fetchHistory(),
-				fetchDevices() ]);
+			return Promise.all([ common.callStatus().catch(() => null), uci.load('network'), uci.load('truba'), uci.load('firewall'),
+				fetchHistory(savedSpan()), fetchDevices() ]);
 		});
 	},
 
 	render: function(data) {
 		const store = app.store({ status: data[0], devices: data[5], offline: data[0] == null });
-		app.poll(store, () => Promise.all([ common.callStatus(), fetchHistory(), fetchDevices() ])
+		const chartView = app.store({ span: savedSpan(), minAt: 0 });
+		app.poll(store, () => Promise.all([ common.callStatus(), fetchHistory(chartView.get().span), fetchDevices() ])
 			.then(([ st, , dv ]) => ({ status: st, devices: dv })), POLL);
-		return app.mount(this, Page, { store, iface: common.tunnelIface() });
-	},
-
-	// Переключатели меняют конфигурацию прямо в браузере: сохранить — отправить эти изменения,
-	// сбросить — перечитать страницу.
-	handleSave: function() {
-		return uci.save().then(() => app.changes.set({ n: app.changeCount() }));
-	},
-
-	handleReset: function() {
-		window.location.reload();
+		return app.mount(this, Page, { store, chartView, iface: common.tunnelIface() });
 	}
 });

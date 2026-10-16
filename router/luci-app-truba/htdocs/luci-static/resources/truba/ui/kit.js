@@ -47,8 +47,7 @@ function Icon({ name }) {
 function Switch({ label, checked, disabled, opt, aria, dot, onChange }) {
 	const { html } = app.lib;
 	const [ c, s, o ] = (opt || '').split('.');
-	const st = uci.state || {};
-	const changed = dot !== false && !!o && (st.changes?.[c]?.[s]?.[o] !== undefined || (st.deletes?.[c]?.[s] || {})[o] !== undefined);
+	const changed = dot !== false && app.changed(c, s, o);
 	return html`<label class="sw">
 		<input type="checkbox" data-opt=${opt} aria-label=${aria} checked=${!!checked} disabled=${!!disabled}
 			onChange=${(ev) => onChange(ev.target.checked)} />
@@ -150,6 +149,18 @@ function ActionPicker({ value, onChange, label }) {
 	</span>`;
 }
 
+// Оформление поля: подпись (с точкой «изменено»), элемент, ошибка под ним и подсказка. control(a) рисует сам
+// элемент с атрибутами a: id, связь с ошибкой. Им пользуются Field и окна с несколькими полями (проброс порта).
+function FieldBox({ id, label, changed, err, hint, control, boxRef }) {
+	const { html } = app.lib;
+	return html`<div class=${'field' + (err ? ' bad' : '')} ref=${boxRef}>
+		<label for=${id}>${label}${changed ? html` <${Dot} level="warn" label=${_('changed, not applied yet')} />` : ''}</label>
+		${control({ id, 'aria-describedby': err ? id + '-e' : undefined })}
+		${err ? html`<div class="err-text" id=${id + '-e'} role="alert">${err}</div>` : ''}
+		${hint ? html`<div class="mu">${hint}</div>` : ''}
+	</div>`;
+}
+
 // Поле опции по схеме: подсказка — умолчание службы, ошибка — под полем. Верное значение
 // пишется в UCI браузера (пустое — опция удаляется, служба берёт умолчание), неверное — нет: оно только
 // помечает поле неверным, и «Применить» недоступна. name — опция (не key: его Preact забирает себе),
@@ -199,18 +210,13 @@ function Field({ config, sec, name, sid, label, hint, msg, disabled, check, plac
 	};
 	// Подсказка опции Трубы (без config) — умолчание схемы службы.
 	const def = (placeholder != null) ? placeholder : !config ? common.schema().sections?.[sec]?.[name]?.def : null;
-	// Изменено — и когда опция снята (поле очищено до умолчания): она в deletes, а не в changes.
-	const changed = uci.state?.changes?.[c]?.[s]?.[name] !== undefined || (uci.state?.deletes?.[c]?.[s] || {})[name] !== undefined;
+	const changed = app.changed(c, s, name);
 	const id = 'f-' + c + '-' + s + '-' + name;
-	return html`<div class=${'field' + (shown ? ' bad' : '')} ref=${ref}>
-		<label for=${id}>${label}${changed ? html` <${Dot} level="warn" label=${_('changed, not applied yet')} />` : ''}</label>
-		<input id=${id} data-opt=${opt} autocomplete="off" value=${v} disabled=${!!disabled}
+	return html`<${FieldBox} id=${id} label=${label} changed=${changed} err=${shown ? (msg || err) : null} hint=${hint} boxRef=${ref}
+		control=${(a) => html`<input ...${a} data-opt=${opt} autocomplete="off" value=${v} disabled=${!!disabled}
 			placeholder=${(def != null && typeof def != 'object') ? String(def) : ''}
-			aria-invalid=${err ? 'true' : undefined} aria-describedby=${shown ? id + '-e' : undefined} onInput=${onInput} onBlur=${settle}
-			onFocus=${() => { if (!err) base.current = saved(); }} />
-		${shown ? html`<div class="err-text" id=${id + '-e'} role="alert">${msg || err}</div>` : ''}
-		${hint ? html`<div class="mu">${hint}</div>` : ''}
-	</div>`;
+			aria-invalid=${err ? 'true' : undefined} onInput=${onInput} onBlur=${settle}
+			onFocus=${() => { if (!err) base.current = saved(); }} />`} />`;
 }
 
 // Сворачиваемый блок («Версии», «Настройки обновления»).
@@ -400,36 +406,41 @@ function Toast() {
 	return html`<div class="toasts" role="status">${(shown && shown == id) ? html`<div class="toast">${text}</div>` : ''}</div>`;
 }
 
-// Итог check: цель → Действие · причина; full — ещё Категории geosite домена и адреса.
-function CheckResult({ r, full }) {
+// Итог check: цель → Действие · причина; full — ещё Категории geosite домена и адреса. onCat(set, tag) —
+// Категория нажимается (на «Правилах» — к ней в списке Категорий).
+function CheckResult({ r, full, onCat }) {
 	const { html } = app.lib;
 	if (r.error || !r.action)
 		return html`<div class="check-res err-text">${common.checkErrorText(r)}</div>`;
 	const reason = (v) => (common.REASON_LABELS[v.reason] || v.reason) + (v.device ? ' (%s)'.format(v.device) : '');
+	const cat = (set, tag) => onCat ? html`<button type="button" class="link" data-cat=${set + ':' + tag}
+		title=${_('Show in categories')} onClick=${() => onCat(set, tag)}>${tag}</button>` : tag;
 	const hits = r.geosite || [], ips = r.ips || [];
 	return html`<div class="check-res">
 		<div class="res"><b>${r.target}</b> → <${ActionTag} action=${r.action} /> <span class="mu">${reason(r)}</span></div>
 		${(full && r.kind == 'domain') ? html`
 			<h4 class="sub">${_('geosite categories containing the domain')}</h4>
 			${hits.length ? html`<div class="hits">${hits.map((h) => html`<div class="hit">
-				<b>${h.tag}${(r.decisive?.tag == h.tag) ? ' ✓' : ''}</b><code>${h.entry}</code><${ActionTag} action=${h.action} />
+				<b>${cat('geosite', h.tag)}${(r.decisive?.tag == h.tag) ? ' ✓' : ''}</b><code>${h.entry}</code><${ActionTag} action=${h.action} />
 			</div>`)}</div>` : html`<${Empty} text=${_('none', 'truba')} />`}
 			${r.decisive ? html`<div class="mu">${_('Decisive category (the narrowest one with an explicit action): %s').format(r.decisive.tag)}</div>` : ''}` : ''}
 		${(full && ips.length) ? html`<${Fold} title=${_('Addresses (%d)').format(ips.length)}>
-			${ips.map((v) => html`<div class="hit"><b>${v.ip}</b><span class="mu">${(v.geoip || []).join(', ') || '—'}</span>
+			${ips.map((v) => html`<div class="hit"><b>${v.ip}</b><span class="mu">${(v.geoip || []).length
+				? (v.geoip || []).map((t, i) => html`${i ? ', ' : ''}${cat('geoip', t)}`) : '—'}</span>
 				<${ActionTag} action=${v.action} /><span class="mu">${reason(v)}</span></div>`)}
 		</${Fold}>` : ''}
 	</div>`;
 }
 
 // «Проверить домен/IP»: та же проверка службы, что видит новое соединение. mac — для одного
-// устройства (с его Политикой), без него — для всех; full — с Категориями и адресами.
-function Check({ mac, full }) {
-	const { html, useState } = app.lib;
+// устройства (с его Политикой), без него — для всех; full — с Категориями и адресами. ask — проверка извне
+// ({ target, n }: адрес из «Куда ходит сейчас»), n растёт с каждым нажатием. Служба проверяет по сохранённым
+// настройкам: при несохранённых изменениях итог — по прежним, об этом подсказка под полем.
+function Check({ mac, full, ask, onCat }) {
+	const { html, useState, useEffect } = app.lib;
 	const [ q, setQ ] = useState(''), [ res, setRes ] = useState(null), [ busy, setBusy ] = useState(false);
-	const run = (ev) => {
-		ev.preventDefault();
-		const t = q.trim();
+	const { n } = app.use(app.changes);
+	const go = (t) => {
 		if (!t || busy)
 			return;
 		setBusy(true);
@@ -437,16 +448,37 @@ function Check({ mac, full }) {
 		(mac ? common.callCheck(t, mac) : common.callCheck(t))
 			.then((r) => setRes(r), (e) => setRes({ error: 'rpc', message: e?.message })).finally(() => setBusy(false));
 	};
+	useEffect(() => {
+		if (ask?.target) {
+			setQ(ask.target);
+			go(ask.target);
+		}
+	}, [ ask?.n ]);
+	const run = (ev) => {
+		ev.preventDefault();
+		go(q.trim());
+	};
 	return html`<form class="check" onSubmit=${run}>
 		<input name="target" autocomplete="off" aria-label=${_('Domain or IP')}
 			placeholder=${full ? _('domain or IPv4, e.g. gosuslugi.ru') : _('domain or IP')} value=${q} onInput=${(ev) => setQ(ev.target.value)} />
 		<button type="submit" class="btn" disabled=${busy}>${_('Check')}</button>
 	</form>
-	${busy ? html`<${Busy} text=${_('Checking…')} />` : res ? html`<${CheckResult} r=${res} full=${full} />` : ''}`;
+	${n ? html`<div class="mu check-stale">${_('The check uses the saved settings: unapplied changes are not taken into account.')}</div>` : ''}
+	${busy ? html`<${Busy} text=${_('Checking…')} />` : res ? html`<${CheckResult} r=${res} full=${full} onCat=${onCat} />` : ''}`;
+}
+
+// Шапка вкладки: заголовок, пояснение (строка или разметка) и значок «нет связи».
+function PageHead({ title, text, offline }) {
+	const { html } = app.lib;
+	return html`<div class="head">
+		<h2>${title}</h2>
+		<span class="mu">${text}</span>
+		${offline ? html`<${Badge} level="err"><${Icon} name="wifi-off" />${_('No connection to the router')}</${Badge}>` : ''}
+	</div>`;
 }
 
 // Несохранённые изменения страницы: «Применить» — то же, что «Сохранить и применить» LuCI (с откатом),
-// «Сбросить» — перечитать страницу. Без изменений панели нет. Пока есть неверные поля, «Применить»
+// «Сбросить» — снять их (app.reset). Без изменений панели нет. Пока есть неверные поля, «Применить»
 // недоступна.
 // Высота панели — в --changes-h у корня страницы: на телефоне панель устройства, тоже прилипшая к низу
 // экрана, поднимается над ней, а не прячется под ней.
@@ -495,4 +527,4 @@ function ChangesBar({ view }) {
 }
 
 return baseclass.extend({ Card, Stat, Badge, Dot, Icon, Switch, Segmented, Chips, ActionTag, ShareBar, KV, Busy, Empty, Go, ChangesBar, step,
-	ActionPicker, Field, Fold, UpstreamList, DropZone, Dialog, Toast, Check });
+	ActionPicker, FieldBox, Field, Fold, UpstreamList, DropZone, Dialog, Toast, Check, PageHead });

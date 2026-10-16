@@ -86,6 +86,10 @@ msgid "no category matched — the mode default applies"
 msgstr ""
 
 #: htdocs/luci-static/resources/truba/common.js
+msgid "routing is off — all traffic goes directly"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/common.js
 msgid "decided before the settings changed"
 msgstr ""
 
@@ -413,6 +417,10 @@ msgstr ""
 msgid "Logs"
 msgstr ""
 
+#: htdocs/luci-static/resources/truba/ui/app.js
+msgid "Fix the highlighted fields"
+msgstr ""
+
 #: htdocs/luci-static/resources/truba/ui/flow.js
 msgid "Where traffic goes"
 msgstr ""
@@ -487,6 +495,10 @@ msgid "Cancel"
 msgstr ""
 
 #: htdocs/luci-static/resources/truba/ui/kit.js
+msgid "Show in categories"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/ui/kit.js
 msgid "geosite categories containing the domain"
 msgstr ""
 
@@ -520,15 +532,19 @@ msgid "Check"
 msgstr ""
 
 #: htdocs/luci-static/resources/truba/ui/kit.js
+msgid "The check uses the saved settings: unapplied changes are not taken into account."
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/ui/kit.js
 msgid "Checking…"
 msgstr ""
 
 #: htdocs/luci-static/resources/truba/ui/kit.js
-msgid "Unapplied changes: %d"
+msgid "No connection to the router"
 msgstr ""
 
 #: htdocs/luci-static/resources/truba/ui/kit.js
-msgid "Fix the highlighted fields"
+msgid "Unapplied changes: %d"
 msgstr ""
 
 #: htdocs/luci-static/resources/truba/ui/kit.js
@@ -643,10 +659,6 @@ msgid "No traffic in the last hour."
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/devices.js
-msgid "No connection to the router"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/devices.js
 msgid "Loading…"
 msgstr ""
 
@@ -656,6 +668,10 @@ msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/devices.js
 msgid "No connections right now."
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/devices.js
+msgid "Check for this device"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/devices.js
@@ -688,10 +704,6 @@ msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/devices.js
 msgid "The device is offline."
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/devices.js
-msgid "Check for this device"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/devices.js
@@ -775,7 +787,7 @@ msgid "Servers for «Tunnel»"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/dns.js
-msgid "Used for categories with action Tunnel and, in mode «All via tunnel», for everything else. Requests go through the tunnel, each one to all servers at once. udp://10.77.77.1 is the DNS server on the Truba itself (install-vps.sh). Formats: https://…, tls://…, tls+pipeline://… (several requests in one connection), udp://…; «address@IP» sets the IP to connect to."
+msgid "Used for categories with action Tunnel and, in mode «All via tunnel», for everything else. Requests go through the tunnel, each one to all servers at once. udp://10.77.77.1 is the DNS server on the Truba itself (install-vps.sh). Formats: https://…, tls://…, tls+pipeline://… (several requests in one connection), quic://…, udp://…, tcp://…; without a scheme — udp; «address@IP» sets the IP to connect to."
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/dns.js
@@ -1363,6 +1375,10 @@ msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/rules.js
 msgid "Find a category"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/rules.js
+msgid "Category name, e.g. youtube or geoip:ru"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/rules.js

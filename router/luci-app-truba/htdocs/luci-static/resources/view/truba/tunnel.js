@@ -251,11 +251,8 @@ function Page({ store, view, iface }) {
 	const [ gen, setGen ] = useState(0);
 	const imported = () => setGen((g) => g + 1);
 	return html`
-		<div class="head">
-			<h2>${_('Tunnel')}</h2>
-			<span class="mu">${_('AmneziaWG interface %s. Settings are stored in the standard network configuration and are also visible in Network → Interfaces.').format(iface)}</span>
-			${offline ? html`<${kit.Badge} level="err"><${kit.Icon} name="wifi-off" />${_('No connection to the router')}</${kit.Badge}>` : ''}
-		</div>
+		<${kit.PageHead} title=${_('Tunnel')} offline=${offline}
+			text=${_('AmneziaWG interface %s. Settings are stored in the standard network configuration and are also visible in Network → Interfaces.').format(iface)} />
 		<div class="grid g2">
 			<${StateCard} st=${status || {}} iface=${iface} />
 			<${ConnCard} key=${'c' + gen} iface=${iface} onImport=${imported} />
@@ -267,6 +264,8 @@ function Page({ store, view, iface }) {
 }
 
 return view.extend({
+	...app.actions,
+
 	load: function() {
 		return Promise.all([ app.load(), common.loadSchema() ]).then(() => Promise.all([
 			common.callStatus().catch(() => null), uci.load('truba'), uci.load('network'), uci.load('firewall') ]));
@@ -276,24 +275,5 @@ return view.extend({
 		const store = app.store({ status: data[0], offline: data[0] == null });
 		app.poll(store, () => common.callStatus().then((s) => ({ status: s })), POLL);
 		return app.mount(this, Page, { store, iface: common.tunnelIface() });
-	},
-
-	// «Применить» панели изменений и «Сохранить и применить» LuCI: пока есть неверные поля, ничего не
-	// сохраняется — иначе применилось бы остальное, а введённое значение молча пропало бы.
-	handleSaveApply: function(ev, mode) {
-		if (app.changes.get().bad) {
-			app.toast(_('Fix the highlighted fields'));
-			return Promise.resolve();
-		}
-		return this.super('handleSaveApply', [ ev, mode ]);
-	},
-
-	// Настройки меняются прямо в браузере: сохранить — отправить эти изменения, сбросить — перечитать страницу.
-	handleSave: function() {
-		return uci.save().then(() => app.changes.set({ n: app.changeCount() }));
-	},
-
-	handleReset: function() {
-		window.location.reload();
 	}
 });

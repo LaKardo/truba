@@ -12,12 +12,7 @@
 const POLL = 5000;   // devices, а при открытой панели ещё connections — раз в 5 с
 
 const key = (d) => d.ip || d.mac;
-
-// Имя: из секции устройства в настройках браузера (с несохранённым переименованием), иначе от службы.
-function nameOf(d) {
-	const sid = common.deviceSection(d.mac);
-	return (sid && uci.get('truba', sid, 'name')) || d.name || d.ip || d.mac;
-}
+const nameOf = common.deviceName;
 
 // Устройства службы и секции device с Политикой из настроек браузера, которых служба ещё не знает
 // (добавлены «по MAC» и не применены): такие — «не в сети», как у службы устройство с Политикой без
@@ -40,16 +35,22 @@ function speed(d) {
 	return r ? r[0] + r[1] : -1;
 }
 
-// Политика в UCI браузера. «По правилам» — это отсутствие секции: секции этого MAC удаляются, и
-// устройство без трафика уходит из списка. Иначе — первая секция MAC (она и действует у службы), а если
-// её нет — новая с MAC и именем, если оно есть: адрес именем не становится, он меняется.
+// Политика в UCI браузера. «По правилам» — секция не нужна: секции этого MAC удаляются, и устройство без
+// трафика уходит из списка; но своё имя остаётся — тогда первая секция остаётся с policy 'rules' (служба
+// берёт из неё только имя). Иначе — первая секция MAC (она и действует у службы), а если её нет — новая с MAC
+// и именем, если оно есть: адрес именем не становится, он меняется.
 function setPolicy(mac, policy, name) {
+	const secs = common.deviceSections(mac);
 	if (policy == 'rules') {
-		for (let sid of common.deviceSections(mac))
-			app.remove('truba', sid);
+		const keep = secs.find((sid) => uci.get('truba', sid, 'name'));
+		for (let sid of secs)
+			if (sid != keep)
+				app.remove('truba', sid);
+		if (keep)
+			app.set('truba', keep, 'policy', 'rules');
 		return;
 	}
-	let sid = common.deviceSection(mac);
+	let sid = secs[0] || null;
 	if (!sid) {
 		sid = app.add('truba', 'device');
 		app.set('truba', sid, 'mac', mac);
@@ -120,8 +121,8 @@ function List({ devices, now, sel, onSel }) {
 	const qq = q.trim().toLowerCase();
 	const shown = devices
 		.filter((d) => (f == 'all') || (f == 'active' ? active(d) : ruled(d)))
-		.filter((d) => !qq || [ d.name, d.ip, d.mac ].some((x) => String(x || '').toLowerCase().includes(qq)))
-		.sort((a, b) => (speed(b) - speed(a)) || String(a.name || a.ip || a.mac).localeCompare(String(b.name || b.ip || b.mac)));
+		.filter((d) => !qq || [ nameOf(d), d.name, d.ip, d.mac ].some((x) => String(x || '').toLowerCase().includes(qq)))
+		.sort((a, b) => (speed(b) - speed(a)) || nameOf(a).localeCompare(nameOf(b)));
 	// Секции с неверным MAC служба пропускает и предупреждает о них на «Обзоре» со ссылкой сюда:
 	// здесь их видно и можно убрать.
 	const bad = uci.sections('truba', 'device').filter((s) => s.mac && !common.normMac(s.mac));
@@ -169,22 +170,28 @@ function HourChart({ d, now }) {
 }
 
 // «Куда ходит сейчас»: адреса из conntrack. Скорость адреса — по разнице байт двух опросов: служба
-// отдаёт байты с начала соединений.
-function Conns({ ip }) {
+// отдаёт байты с начала соединений. Ответ, пришедший быстрее секунды после прежнего, базу не сдвигает: иначе
+// скорость считалась бы по слишком короткому промежутку или пропадала бы. Счётчик меньше прежнего — соединения
+// сменились: скорости нет до следующего опроса. Адрес нажимается — его проверка для устройства (onAddr).
+function Conns({ ip, onAddr }) {
 	const { html, useRef, useMemo } = app.lib;
 	const { data, offline } = app.usePoll(() => common.callConnections(ip), POLL, [ ip ]);
 	const prev = useRef(null);
 	const speeds = useMemo(() => {
 		const t = Date.now() / 1000, cur = {}, out = {};
+		if (!data?.addrs)
+			return out;
 		for (let a of data?.addrs || [])
 			if (a.up != null)
 				cur[a.addr] = a.up + (a.down || 0);
 		const p = prev.current;
-		if (p && t - p.t >= 1)
+		if (p && t - p.t < 1)
+			return p.out;
+		if (p)
 			for (let k in cur)
 				if (p.b[k] != null && cur[k] >= p.b[k])
 					out[k] = (cur[k] - p.b[k]) / (t - p.t);
-		prev.current = { t, b: cur };
+		prev.current = { t, b: cur, out };
 		return out;
 	}, [ data ]);
 	if (!data)
@@ -195,7 +202,8 @@ function Conns({ ip }) {
 		return html`<${kit.Empty} text=${_('No connections right now.')} />`;
 	return html`<div class="conns">
 		${data.addrs.map((a) => html`<div class="conn">
-			<span class="n"><b>${a.addr}</b><span class="mu">${common.connLabel(a)}</span></span>
+			<span class="n"><b><button type="button" class="link" data-addr=${a.addr} title=${_('Check for this device')}
+				onClick=${() => onAddr?.(a.addr)}>${a.addr}</button></b><span class="mu">${common.connLabel(a)}</span></span>
 			<${kit.ActionTag} action=${a.action} />
 			<span class="r">${(speeds[a.addr] != null) ? common.fmtRate(speeds[a.addr]) : '—'}</span>
 		</div>`)}
@@ -207,9 +215,14 @@ function Conns({ ip }) {
 // прокручивается в видимую область: на телефоне она липнет к низу экрана, но выше начала списка
 // подняться не может, и при коротком списке её низ уходил бы за край.
 function Panel({ d, now, onClose }) {
-	const { html, useRef, useEffect } = app.lib;
-	const ref = useRef(null);
+	const { html, useRef, useEffect, useState } = app.lib;
+	const ref = useRef(null), checkRef = useRef(null);
+	const [ ask, setAsk ] = useState(null);
 	useEffect(() => { ref.current?.scrollIntoView?.({ block: 'nearest' }); }, [ key(d) ]);
+	const onAddr = (addr) => {
+		setAsk((a) => ({ target: addr, n: (a?.n || 0) + 1 }));
+		checkRef.current?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' });
+	};
 	const src = SOURCE()[d.source];
 	const sid = common.deviceSection(d.mac);
 	return html`<section class="card panel" ref=${ref}>
@@ -228,9 +241,9 @@ function Panel({ d, now, onClose }) {
 		<h4 class="sub">${_('Last hour')}</h4>
 		<${HourChart} d=${d} now=${now} />
 		<h4 class="sub">${_('Where it goes now')}</h4>
-		${d.ip ? html`<${Conns} key=${d.ip} ip=${d.ip} />` : html`<${kit.Empty} text=${_('The device is offline.')} />`}
-		<h4 class="sub">${_('Check for this device')}</h4>
-		<${kit.Check} key=${key(d)} mac=${d.mac} />
+		${d.ip ? html`<${Conns} key=${d.ip} ip=${d.ip} onAddr=${onAddr} />` : html`<${kit.Empty} text=${_('The device is offline.')} />`}
+		<h4 class="sub" ref=${checkRef}>${_('Check for this device')}</h4>
+		<${kit.Check} key=${key(d)} mac=${d.mac} ask=${ask} />
 	</section>`;
 }
 
@@ -243,20 +256,20 @@ function Page({ store, view }) {
 	const now = devices?.now || Math.floor(Date.now() / 1000);
 	const cur = sel ? list.find((d) => key(d) == sel) : null;
 	return html`
-		<div class="head">
-			<h2>${_('Devices')}</h2>
-			<span class="mu">${_('Who in the home network uses how much and through what. A device policy overrides the categories, except Block.')}</span>
-			${offline ? html`<${kit.Badge} level="err"><${kit.Icon} name="wifi-off" />${_('No connection to the router')}</${kit.Badge}>` : ''}
-		</div>
+		<${kit.PageHead} title=${_('Devices')} offline=${offline}
+			text=${_('Who in the home network uses how much and through what. A device policy overrides the categories, except Block.')} />
 		<div class="split">
 			<${List} devices=${list} now=${now} sel=${sel} onSel=${setSel} />
 			${cur ? html`<${Panel} d=${cur} now=${now} onClose=${() => setSel(null)} />`
 				: html`<div class="card panel-ph"><${kit.Empty} text=${_('Select a device to see its traffic and policy.')} /></div>`}
 		</div>
-		<${kit.ChangesBar} view=${view} />`;
+		<${kit.ChangesBar} view=${view} />
+		<${kit.Toast} />`;
 }
 
 return view.extend({
+	...app.actions,
+
 	load: function() {
 		return Promise.all([ app.load(), common.loadSchema() ]).then(() =>
 			Promise.all([ common.callDevices(), uci.load('truba') ]));
@@ -266,14 +279,5 @@ return view.extend({
 		const store = app.store({ devices: data[0] });
 		app.poll(store, () => common.callDevices().then((d) => ({ devices: d })), POLL / 1000);
 		return app.mount(this, Page, { store });
-	},
-
-	// Политика меняется прямо в браузере: сохранить — отправить эти изменения, сбросить — перечитать страницу.
-	handleSave: function() {
-		return uci.save().then(() => app.changes.set({ n: app.changeCount() }));
-	},
-
-	handleReset: function() {
-		window.location.reload();
 	}
 });

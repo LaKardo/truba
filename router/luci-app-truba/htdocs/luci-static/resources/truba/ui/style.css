@@ -421,7 +421,7 @@
 		position: sticky;
 		bottom: var(--changes-h, 0px);   /* над панелью изменений, когда она есть */
 		z-index: 1;
-		max-height: 75vh;
+		max-height: calc(75vh - var(--changes-h, 0px));   /* выше начала списка панель не поднимется */
 		overflow: auto;
 		border-radius: 14px 14px 10px 10px;
 		box-shadow: 0 -6px 24px rgba(0, 0, 0, .25);
@@ -557,6 +557,15 @@
 }
 .changes .btn:disabled { opacity: .5; cursor: not-allowed; }
 .changes .link { margin: 0; padding: 0; border: 0; background: none; color: inherit; font: inherit; font-weight: 600; text-decoration: underline; cursor: pointer; }
+/* Ссылка-кнопка в тексте: Категория в итоге проверки, адрес в «Куда ходит сейчас». */
+.check-res .link, .conn .link {
+	margin: 0; padding: 0; border: 0; background: none; color: inherit; font: inherit;
+	text-decoration: underline dotted; text-underline-offset: 2px; cursor: pointer; overflow-wrap: anywhere;
+}
+.check-res .link:hover, .conn .link:hover { color: var(--tun); }
+.check-stale { margin-top: 6px; font-size: 12px; }
+.cats-anchor { scroll-margin-top: 12px; }
+.cat.hl { background: color-mix(in srgb, var(--tun) 8%, transparent); }
 
 /* ---- «Правила» ---- */
 .grid.g2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }

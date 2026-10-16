@@ -93,6 +93,8 @@ check('план: «Выборочный» — по умолчанию Напря
 	sel.mode_default == 'direct' && same(map(sel.geosite, g => g.tag + '=' + g.action), [ 'unused=tunnel' ]));
 check('план: отпечаток geosite меняется с Действием',
 	P.geosite_key(plan, 'h') != P.geosite_key(P.compute({ mode: 'all', rules: [ ...rules, { mode: 'all', set: 'geosite', tag: 'unused', action: 'direct' } ] }, cats), 'h'));
+check('план: отпечаток geosite не зависит от geoip.dat',
+	P.geosite_key(plan, 'gi1:gs') == P.geosite_key(plan, 'gi2:gs') && P.geosite_key(plan, 'gi1:gs') != P.geosite_key(plan, 'gi1:gs2'));
 
 // ---- Приоритет: одна таблица для правил и для объяснения ----
 
@@ -505,7 +507,8 @@ writefile(C.LISTS_DIR + '/geosite.dat',
 	T.geosite_cat('zfull', [ 'full:exact.example.io' ]) +
 	T.geosite_cat('zrx', [ 'regexp:^rx-[0-9]+\\.example\\.io$' ]) +
 	T.geosite_cat('zkw', [ 'keyword:kwtest' ]) +
-	T.geosite_cat('zmode', [ 'domain:mode.example.io' ]));
+	T.geosite_cat('zmode', [ 'domain:mode.example.io' ]) +
+	T.geosite_cat('zmode2', [ 'domain:mode.example.io' ]));
 writefile(C.LISTS_DIR + '/geoip.dat', T.geoip_cat('ru', [ '5.0.0.0/8' ]) + T.geoip_cat('private', [ '192.168.0.0/16' ]));
 let rule = (tag, action) => sprintf("config rule\n\toption mode 'all'\n\toption set 'geosite'\n\toption tag '%s'\n\toption action '%s'\n\n", tag, action);
 config("config main 'main'\n\toption mode 'all'\n\n" + rule('zwide', 'direct') + rule('znarrow', 'tunnel') +
@@ -551,6 +554,25 @@ let iv = K.ip_verdicts([ '5.6.7.8', '192.168.5.5' ], null);
 check('решения для соединений: geoip — только Категории с Действием',
 	same(map(iv ?? [], v => v.geoip), [ [ 'ru' ], [] ]) && iv[0].action == 'direct' && iv[0].reason == 'geoip' &&
 	same(K.check('192.168.5.5').ips[0].geoip, [ 'private' ]), sprintf('%J', iv));
+// Одинаковые Категории (zmode, zmode2) не вложены друг в друга: иначе каждая — «в» другой.
+let ucats = json(readfile(C.CATS_FILE) ?? 'null');
+let sub = {};
+for (let c in ucats?.cats ?? [])
+	sub[c.tag] = c.subset_of;
+check('вложенность: одинаковые Категории не вложены друг в друга', same(sub.zmode, []) && same(sub.zmode2, []),
+	sprintf('%J %J', sub.zmode, sub.zmode2));
+// Маршрутизация выключена: всё напрямую, Категории — для справки.
+let cfg0 = readfile('/etc/config/truba');
+config("config main 'main'\n\toption mode 'all'\n\toption routing '0'\n\n" + rule('zkw', 'block') +
+	"config rule\n\toption mode 'all'\n\toption set 'geoip'\n\toption tag 'ru'\n\toption action 'direct'\n");
+x = K.check('my-kwtest.example.io');
+check('Маршрутизация выкл: домен — Напрямую, Категории видны',
+	x.action == 'direct' && x.reason == 'routing_off' && x.decisive == null && same(map(x.geosite, h => h.tag), [ 'zkw' ]),
+	sprintf('%s/%s %J', x.action, x.reason, x.geosite));
+x = K.check('5.6.7.8');
+check('Маршрутизация выкл: IP — Напрямую, Категории geoip видны',
+	x.action == 'direct' && x.reason == 'routing_off' && same(x.ips[0].geoip, [ 'ru' ]), sprintf('%J', x.ips));
+config(cfg0);
 // Категории geoip адресов: у ru на NC-1812 35 тысяч подсетей, а «Куда ходит сейчас» спрашивает до 20 адресов
 // раз в 5 с — подсеть разбирается, только если в её первом октете есть адрес (было 3,7 с на Роутере).
 // Сеть шире /8 захватывает и другие первые октеты.

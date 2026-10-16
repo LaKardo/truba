@@ -186,12 +186,13 @@ function RuleSets({ store, timing }) {
 	</${kit.Card}>`;
 }
 
-function Cat({ c, mode, action, changed }) {
+function Cat({ c, mode, action, changed, hl }) {
 	const { html } = app.lib;
-	const meta = [ (c.set == 'geoip' ? _('geoip · %s subnets') : _('geosite · %s entries')).format(common.fmtNum(c.count)) ];
+	// У geoip — число IPv4-подсетей: в наборы попадают только они (ADR 0005).
+	const meta = [ (c.set == 'geoip' ? _('geoip · %s subnets') : _('geosite · %s entries')).format(common.fmtNum(c.count4 ?? c.count)) ];
 	if ((c.subset_of || []).length)
 		meta.push(_('in %s').format(c.subset_of.join(', ')));
-	return html`<div class="cat" data-cat=${c.set + ':' + c.tag}>
+	return html`<div class=${'cat' + (hl ? ' hl' : '')} data-cat=${c.set + ':' + c.tag}>
 		<span class="n"><b>${c.tag}</b>${changed ? html` <${kit.Dot} level="warn" label=${_('changed, not applied yet')} />` : ''}
 			<span class="mu">${meta.join(' · ')}</span></span>
 		<${kit.ActionPicker} label=${_('Action for %s').format(c.tag)} value=${action} onChange=${(a) => setAction(mode, c.set, c.tag, a)} />
@@ -199,18 +200,27 @@ function Cat({ c, mode, action, changed }) {
 }
 
 // Категории одного Режима: по умолчанию — Режима страницы (и несохранённого), сегмент в шапке
-// показывает Действия другого, не меняя Режим.
-function Categories({ cats, snap }) {
-	const { html, useState, useEffect, useMemo } = app.lib;
+// показывает Действия другого, не меняя Режим. focus — { key, n } Категории, нажатой в «Куда пойдёт»: поиск
+// по ней и прокрутка к карточке.
+function Categories({ cats, focus }) {
+	const { html, useState, useEffect, useMemo, useRef } = app.lib;
+	const ref = useRef(null);
 	const pageMode = common.get('main', 'mode');
 	const [ shown, setShown ] = useState(null);
 	useEffect(() => setShown(null), [ pageMode ]);
 	const mode = shown || pageMode;
 	const [ q, setQ ] = useState(''), [ f, setF ] = useState('explicit'), [ dlg, setDlg ] = useState(false);
+	useEffect(() => {
+		if (!focus)
+			return;
+		setQ(focus.key);
+		setF('all');
+		ref.current?.scrollIntoView?.({ block: 'start', behavior: 'smooth' });
+	}, [ focus?.n ]);
 	// «Показать все» — для поиска, чипа и Режима, при которых нажата: смена любого снова даёт первые строки.
 	const [ fullFor, setFullFor ] = useState(null);
 	const list = useMemo(() => sorted(cats?.cats || []), [ cats ]);
-	const acts = common.ruleActions(mode), was = snap[mode];
+	const acts = common.ruleActions(mode), was = common.savedRuleActions(mode);
 	const act = (c) => acts.get(c.set + ':' + c.tag) || 'mode';
 
 	const n = { all: list.length, explicit: 0, tunnel: 0, direct: 0, block: 0 };
@@ -240,7 +250,7 @@ function Categories({ cats, snap }) {
 	};
 	const A = common.ACTION_LABELS;
 
-	return html`<${kit.Card} cls="w3 rules-cats" title=${_('Categories')}
+	return html`<div class="w3 cats-anchor" ref=${ref}><${kit.Card} cls="rules-cats" title=${_('Categories')}
 		aside=${html`<span class="mu">${_('%s · with an action %s').format(common.fmtNum(n.all), common.fmtNum(n.explicit))}</span>
 			<${kit.Segmented} label=${_('Show actions for mode')} items=${MODES()} value=${mode} onChange=${setShown} />`}>
 		${missing.length ? html`<div class="missing">
@@ -248,7 +258,7 @@ function Categories({ cats, snap }) {
 			<button type="button" class="btn" data-act="remove-missing" onClick=${removeMissing}>${_('Remove', 'truba')}</button>
 		</div>` : ''}
 		<div class="toolbar">
-			<input type="search" aria-label=${_('Find a category')} placeholder=${_('Find a category')} value=${q} onInput=${search} />
+			<input type="search" aria-label=${_('Find a category')} placeholder=${_('Category name, e.g. youtube or geoip:ru')} value=${q} onInput=${search} />
 			<${kit.Chips} label=${_('Filter by action')} value=${f} onChange=${setF} items=${[
 				[ 'all', _('All'), n.all ], [ 'explicit', _('With an action'), n.explicit ],
 				[ 'tunnel', A.tunnel, n.tunnel ], [ 'direct', A.direct, n.direct ], [ 'block', A.block, n.block ]
@@ -259,6 +269,7 @@ function Categories({ cats, snap }) {
 			: _('Rule sets are not downloaded yet — see Rule sets above.')} />`
 			: !total ? html`<${kit.Empty} text=${_('No categories match the filter.')} />`
 			: html`<div class="cats">${rows.map((c) => html`<${Cat} key=${c.set + ':' + c.tag} c=${c} mode=${mode} action=${act(c)}
+				hl=${focus && focus.key == c.set + ':' + c.tag && q == focus.key}
 				changed=${(was.get(c.set + ':' + c.tag) || 'mode') != act(c)} />`)}</div>`}
 		${(total > rows.length) ? html`<button type="button" class="btn more" data-act="show-all" onClick=${() => setFullFor(sig)}>
 			${_('Show all (%d)').format(total)}</button>` : ''}
@@ -266,30 +277,31 @@ function Categories({ cats, snap }) {
 			onConfirm=${() => toStarting(mode, cats?.starting || [])} onClose=${() => setDlg(false)}>
 			${_('Mode: %s. The change is applied with the Apply button, like the others.').format(MODES().find(([ v ]) => v == mode)[1])}
 		</${kit.Dialog}>
-	</${kit.Card}>`;
+	</${kit.Card}></div>`;
 }
 
-function Page({ store, snap, timing, view }) {
-	const { html } = app.lib;
+function Page({ store, timing, view }) {
+	const { html, useState } = app.lib;
 	const { cats, offline } = app.use(store);
 	app.use(app.changes);   // карточки читают UCI браузера — перерисовка после app.set
+	const [ focus, setFocus ] = useState(null);
+	const onCat = (set, tag) => setFocus((f) => ({ key: set + ':' + tag, n: (f?.n || 0) + 1 }));
 	return html`
-		<div class="head">
-			<h2>${_('Rules')}</h2>
-			<span class="mu">${_('Which traffic goes through the tunnel. Categories are taken from geoip.dat and geosite.dat as they are; new categories are never created.')}</span>
-			${offline ? html`<${kit.Badge} level="err"><${kit.Icon} name="wifi-off" />${_('No connection to the router')}</${kit.Badge}>` : ''}
-		</div>
+		<${kit.PageHead} title=${_('Rules')} offline=${offline}
+			text=${_('Which traffic goes through the tunnel. Categories are taken from geoip.dat and geosite.dat as they are; new categories are never created.')} />
 		<div class="grid g2">
-			<${kit.Card} cls="w3 where" title=${_('Where it goes')} aside=${_('for all devices')}><${kit.Check} full /></${kit.Card}>
+			<${kit.Card} cls="w3 where" title=${_('Where it goes')} aside=${_('for all devices')}><${kit.Check} full onCat=${onCat} /></${kit.Card}>
 			<${ModeCard} />
 			<${RuleSets} store=${store} timing=${timing} />
-			<${Categories} cats=${cats} snap=${snap} />
+			<${Categories} cats=${cats} focus=${focus} />
 		</div>
 		<${kit.ChangesBar} view=${view} />
 		<${kit.Toast} />`;
 }
 
 return view.extend({
+	...app.actions,
+
 	load: function() {
 		return Promise.all([ app.load(), common.loadSchema() ]).then(() => Promise.all([
 			common.callCategories(), common.callLists(), common.callStatus().catch(() => null), common.callSets().catch(() => null),
@@ -298,9 +310,6 @@ return view.extend({
 
 	render: function(data) {
 		const store = app.store({ cats: data[0], lists: data[1], status: data[2], sets: data[3], offline: data[2] == null });
-		// Действия при загрузке страницы — для точки «изменено»: секции rule удаляются и заводятся заново,
-		// поэтому несохранённое у секции не говорит, другое ли Действие.
-		const snap = { all: common.ruleActions('all'), selective: common.ruleActions('selective') };
 		// kickedAt — когда нажали «Откатить»: замок применения берётся не сразу, опрос чаще 15 с.
 		// kick — запуск «Обновить сейчас», пока нет его итога (common.listsKick).
 		const timing = { polledAt: Date.now(), kickedAt: -Infinity, kick: null };
@@ -326,25 +335,6 @@ return view.extend({
 			}
 			return Promise.all(calls).then(() => patch);
 		}, POLL / 1000);
-		return app.mount(this, Page, { store, snap, timing });
-	},
-
-	// «Применить» панели изменений и «Сохранить и применить» LuCI: пока есть неверные поля, ничего не
-	// сохраняется — иначе применилось бы остальное, а введённое значение молча пропало бы.
-	handleSaveApply: function(ev, mode) {
-		if (app.changes.get().bad) {
-			app.toast(_('Fix the highlighted fields'));
-			return Promise.resolve();
-		}
-		return this.super('handleSaveApply', [ ev, mode ]);
-	},
-
-	// Настройки меняются прямо в браузере: сохранить — отправить эти изменения, сбросить — перечитать страницу.
-	handleSave: function() {
-		return uci.save().then(() => app.changes.set({ n: app.changeCount() }));
-	},
-
-	handleReset: function() {
-		window.location.reload();
+		return app.mount(this, Page, { store, timing });
 	}
 });

@@ -184,6 +184,12 @@ async function waitApply(page) {
 
 	const el = async (sel) => (await shadowSel(page, sel)).asElement();
 	const tap = async (sel) => { const e = await el(sel); if (e) await e.click(); return !!e; };
+	// «Сбросить» панели изменений: без перезагрузки страницы (app.reset) — ждать, пока панель не уйдёт.
+	const resetChanges = async () => {
+		await tap('.changes [data-act="reset"]');
+		await page.waitForFunction(() => !document.querySelector('.truba-root')?.shadowRoot?.querySelector('.changes'), { timeout: 10000 }).catch(() => {});
+		await settled(page);
+	};
 	const clickIn = (sel, re) => page.evaluate((sel, re) => [ ...document.querySelector('.truba-root').shadowRoot.querySelectorAll(sel) ]
 		.find((b) => new RegExp(re).test(b.textContent))?.click(), sel, re);
 	// Нажатый вариант группы сегментов.
@@ -362,7 +368,7 @@ async function waitApply(page) {
 	await sleep(300);
 	const z2 = await uciZone();
 	result(JSON.stringify(z1) == '["lan","wan"]' && JSON.stringify(z2) == '["wan"]', '«Правила»: Зоны — добавить и снять', JSON.stringify({ z1, z2 }));
-	await Promise.all([ page.waitForNavigation({ waitUntil: 'networkidle2' }).catch(() => {}), tap('.changes [data-act="reset"]') ]);
+	await resetChanges();
 
 	// «Устройства» (ADR 0018): на стенде сосед с MAC и узел mesh-VPN без него (stand.sh).
 	const rowSel = (ip) => `button.dev[data-ip="${ip}"]`;
@@ -477,7 +483,7 @@ async function waitApply(page) {
 	const afterStart = await pressed(catRow + ' .seg');
 	result(dlgOpen && afterStart == LABEL[startAct] && !await shadowHas(page, 'dialog[open]'),
 		'«Правила»: «Стартовые настройки» — окно подтверждения, Действие как у новой установки', `${dlgOpen} ${afterStart} / ${LABEL[startAct]}`);
-	await Promise.all([ page.waitForNavigation({ waitUntil: 'networkidle2' }).catch(() => {}), tap('.changes [data-act="reset"]') ]);
+	await resetChanges();
 
 	// Правило для Категории, которой нет в Наборе: предупреждение с «Remove», после применения секции нет.
 	await ubus('uci', 'add', { config: 'truba', type: 'rule', values: { set: 'geosite', tag: 'zz-gone', action: 'tunnel' } });
@@ -601,7 +607,7 @@ async function waitApply(page) {
 		uci: await uciTtl() };
 	result(!!ttl && /Unapplied changes: 1/.test(badTtl.bar) && /30 to 86400/.test(badTtl.err) && badTtl.apply === true && badTtl.uci === ttlBefore &&
 		goodTtl.apply === false && goodTtl.uci == '600', '«DNS»: неверное значение не пишется и держит «Применить»', JSON.stringify({ badTtl, goodTtl }));
-	await Promise.all([ page.waitForNavigation({ waitUntil: 'networkidle2' }).catch(() => {}), tap('.changes [data-act="reset"]') ]);
+	await resetChanges();
 	await settled(page);
 	// Перехват DNS: «Применить» доходит до настроек и службы; затем прежнее значение.
 	const hijack = async () => (await ubus('uci', 'get', { config: 'truba', section: 'main', option: 'dns_hijack' }).catch(() => ({}))).value;
@@ -716,7 +722,7 @@ async function waitApply(page) {
 	}
 	ud = await ups('ups-direct');
 	result(ud.rows.length == 1 && JSON.stringify(ud.off) == '[true]', '«DNS»: последний сервер не удаляется', JSON.stringify(ud));
-	await Promise.all([ page.waitForNavigation({ waitUntil: 'networkidle2' }).catch(() => {}), tap('.changes [data-act="reset"]') ]);
+	await resetChanges();
 	// Неверный адрес из сохранённых настроек: помечен, удаляется, применение без предупреждений.
 	t0 = await time();
 	await setUp('direct_upstream', [ ...[].concat(await uciUp('direct_upstream') || []), 'htps://bad.example' ]);
@@ -750,7 +756,7 @@ async function waitApply(page) {
 	result(await applied(t0, (st) => st.mosdns && !(st.applied.invalid || []).length), '«DNS»: прежние серверы Напрямую');
 	await page.goto(url('dns'), { waitUntil: 'networkidle2' });
 	await settled(page);
-	const resetDns = () => Promise.all([ page.waitForNavigation({ waitUntil: 'networkidle2' }).catch(() => {}), tap('.changes [data-act="reset"]') ]);
+	const resetDns = resetChanges;
 	const appBad = () => page.evaluate(async () => (await L.require('truba.ui.app')).changes.get().bad);
 	// Повтор в поле: ошибка видна, но «Применить» не держит (сервер уже в списке); строку удалили — ошибка
 	// не остаётся, набранный адрес снова можно добавить.
@@ -1039,7 +1045,7 @@ async function waitApply(page) {
 		uci: await uciMtu() };
 	result(!!mtu && /576/.test(badMtu.err) && badMtu.apply === true && badMtu.uci === mtuBefore && badMtu.ks === ksBefore && /Fix the highlighted fields/.test(badMtu.toast) &&
 		goodMtu.apply === false && goodMtu.uci === '1280', '«Туннель»: MTU — неверное не пишется и держит «Применить» и «Save & Apply»', JSON.stringify({ badMtu, goodMtu }));
-	await Promise.all([ page.waitForNavigation({ waitUntil: 'networkidle2' }).catch(() => {}), tap('.changes [data-act="reset"]') ]);
+	await resetChanges();
 	await settled(page);
 	// Импорт router.conf: файл в зону — UCI браузера; адрес, строка «Протокол» и поля — новые. S1 меньше
 	// 12 при защите заголовков — ошибка у поля.
@@ -1080,7 +1086,7 @@ async function waitApply(page) {
 	});
 	result(/198\.51\.100\.7:40243/.test(imp.text) && /AmneziaWG 3\.1/.test(imp.text) && imp.proto == 'amneziawg' && imp.port == '40243' && imp.s1 == '20' && imp.bar &&
 		/at least 12/.test(imp.s1Err), '«Туннель»: импорт router.conf — адрес, протокол и поля; S1 меньше 12 с защитой заголовков — ошибка', JSON.stringify(imp));
-	await Promise.all([ page.waitForNavigation({ waitUntil: 'networkidle2' }).catch(() => {}), tap('.changes [data-act="reset"]') ]);
+	await resetChanges();
 	await settled(page);
 	// Неверная вставка — ошибка под зоной, изменений нет.
 	await (await el('.drop textarea'))?.type('[Peer]\nPublicKey = x');
@@ -1111,7 +1117,7 @@ async function waitApply(page) {
 		{ timeout: 5000 }).then(() => true).catch(() => false);
 	const reProto = await page.evaluate(async () => (await L.require('uci')).get('network', 'awg0', 'proto') ?? null);
 	result(reimp && reProto == 'amneziawg', '«Туннель»: импорт после удаления секции в браузере — интерфейс снова есть', `${reimp}/${reProto}`);
-	await Promise.all([ page.waitForNavigation({ waitUntil: 'networkidle2' }).catch(() => {}), tap('.changes [data-act="reset"]') ]);
+	await resetChanges();
 	await settled(page);
 	// Вёрстка (видна на Роутере): поля соседних колонок — на одной высоте, хоть у одного и есть подсказка; описание
 	// проверки — с отступом от подсказок полей.
@@ -1204,7 +1210,7 @@ async function waitApply(page) {
 	}
 	result(zoneRing?.file && zoneRing.outline == 'solid', '«Туннель»: фокус на выборе файла — рамка у зоны', JSON.stringify(zoneRing));
 	await page.evaluate(() => document.querySelector('.truba-root').shadowRoot.activeElement?.blur());
-	await Promise.all([ page.waitForNavigation({ waitUntil: 'networkidle2' }).catch(() => {}), tap('.changes [data-act="reset"]') ]);
+	await resetChanges();
 	await settled(page);
 
 	// ---- Вёрстка «Туннеля» ----
@@ -1429,7 +1435,7 @@ async function waitApply(page) {
 		uci: (await L.require('uci')).sections('truba', 'device').find((s) => String(s.mac).toLowerCase() == '02:11:22:33:44:55')?.name
 	}));
 	result(!!nameIn && renamed.uci == 'tv-box' && /tv-box/.test(renamed.row), '«Устройства»: имя меняется в панели', JSON.stringify(renamed));
-	await Promise.all([ page.waitForNavigation({ waitUntil: 'networkidle2' }).catch(() => {}), tap('.changes [data-act="reset"]') ]);
+	await resetChanges();
 	await settled(page);
 
 	// «По правилам» убирает секцию: устройство без Политики и без трафика уходит из списка.
@@ -1441,8 +1447,12 @@ async function waitApply(page) {
 		.then(() => true).catch(() => false);
 	await tap('.changes [data-act="apply"]');
 	await waitApply(page);
+	// «По правилам»: у устройства своё имя (console) — секция остаётся только с ним (policy 'rules'), Политики нет,
+	// устройство без трафика уходит из списка.
+	const leftSecs = () => devSecs('02:aa:bb:cc:dd:01');
 	result(gone && await applied(t0, async () => !(await ubus('truba', 'devices')).devices.some((x) => x.mac == '02:aa:bb:cc:dd:01')) &&
-		!(await devSecs('02:aa:bb:cc:dd:01')).length, '«По правилам»: секция убрана, устройство ушло из списка');
+		(await leftSecs()).length == 1 && (await leftSecs()).every((s) => s.policy == 'rules' && s.name == 'console'),
+		'«По правилам»: Политика снята, имя осталось, устройство ушло из списка', JSON.stringify(await leftSecs()));
 
 	// Секция с неверным MAC: служба её пропускает и предупреждает, ссылка ведёт сюда — здесь её видно и можно убрать.
 	await ubus('uci', 'add', { config: 'truba', type: 'device', values: { mac: 'zz:zz', policy: 'direct' } });
@@ -1564,7 +1574,7 @@ async function waitApply(page) {
 		return { panel: p && Math.round(p.bottom), bar: b && Math.round(b.top) };
 	});
 	result(overlap.bar != null && overlap.panel <= overlap.bar + 1, '«Устройства» 375: панель изменений не закрывает панель устройства', JSON.stringify(overlap));
-	await Promise.all([ page.waitForNavigation({ waitUntil: 'networkidle2' }).catch(() => {}), tap('.changes [data-act="reset"]') ]);
+	await resetChanges();
 	await page.screenshot({ path: `${out}/devices-375.png`, fullPage: true });
 
 	// «Правила» на телефоне: около 1 700 Категорий — не больше 100 строк сразу, Действие — системный выбор,

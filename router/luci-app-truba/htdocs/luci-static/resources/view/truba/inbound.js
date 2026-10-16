@@ -59,10 +59,12 @@ function UpnpCard({ st, devices }) {
 const PROTOS = { 'tcp udp': 'TCP+UDP', tcp: 'TCP', udp: 'UDP' };
 const OTHER = 'other';   // «Другой IP-адрес…» в выборе устройства
 
-// Устройства с IP для выбора: сначала с именем — по имени, затем по IP.
+// Устройства с IP для выбора: сначала с именем — по имени, затем по IP. Имя — как на «Устройствах».
 function devChoices(devices) {
 	const num = (ip) => ip.split('.').reduce((n, x) => n * 256 + +x, 0);
-	return devices.filter((d) => d.ip).sort((a, b) => (!a.name - !b.name) || String(a.name || '').localeCompare(String(b.name || '')) || num(a.ip) - num(b.ip));
+	const named = (d) => (common.deviceName(d) != d.ip) ? common.deviceName(d) : '';
+	return devices.filter((d) => d.ip).map((d) => ({ ip: d.ip, name: named(d) }))
+		.sort((a, b) => (!a.name - !b.name) || a.name.localeCompare(b.name) || num(a.ip) - num(b.ip));
 }
 
 // Окно правки проброса. Пишутся только опции, которые есть в окне; остальные
@@ -105,14 +107,9 @@ function FwdDialog({ row, devices, onClose, onDeleted }) {
 		onDeleted();
 	};
 
-	// Поле окна: подпись, элемент, ошибка и подсказка — как у kit.Field.
-	const field = (k, label, control, hint) => html`<div class=${'field' + (shown[k] ? ' bad' : '')}>
-		<label for=${'fwd-' + k}>${label}</label>
-		${control({ id: 'fwd-' + k, 'data-f': k, 'aria-invalid': shown[k] ? 'true' : undefined, 'aria-describedby': shown[k] ? 'fwd-' + k + '-e' : undefined,
-			onBlur: touch(k) })}
-		${shown[k] ? html`<div class="err-text" id=${'fwd-' + k + '-e'} role="alert">${shown[k]}</div>` : ''}
-		${hint ? html`<div class="mu">${hint}</div>` : ''}
-	</div>`;
+	// Поле окна — оформление kit.FieldBox, как у kit.Field: подпись, элемент, ошибка и подсказка.
+	const field = (k, label, control, hint) => html`<${kit.FieldBox} id=${'fwd-' + k} label=${label} err=${shown[k]} hint=${hint}
+		control=${(a) => control({ ...a, 'data-f': k, 'aria-invalid': shown[k] ? 'true' : undefined, onBlur: touch(k) })} />`;
 	const input = (k, extra) => (a) => html`<input ...${a} autocomplete="off" value=${v[k]} onInput=${set(k)} ...${extra || {}} />`;
 	const protos = PROTOS[v.proto] ? Object.entries(PROTOS) : [ ...Object.entries(PROTOS), [ v.proto, v.proto ] ];
 
@@ -171,13 +168,10 @@ function Page({ store, view, devices }) {
 	app.use(app.changes);   // карточки читают UCI браузера — перерисовка после app.set
 	const st = status || {};
 	return html`
-		<div class="head">
-			<h2>${_('Inbound')}</h2>
-			<span class="mu">${_('All ports of the Truba IP %s (except the VPS SSH and tunnel ports) reach the router. Full cone NAT keeps mappings open for any remote host; ports for home devices are opened manually or via UPnP.').format(st.vps_ip || '—')}
+		<${kit.PageHead} title=${_('Inbound')} offline=${offline}
+			text=${html`${_('All ports of the Truba IP %s (except the VPS SSH and tunnel ports) reach the router. Full cone NAT keeps mappings open for any remote host; ports for home devices are opened manually or via UPnP.').format(st.vps_ip || '—')}
 				${' '}${_('Replies always go back through the tunnel, even to Russian clients.')}
-				${' '}<${kit.Go} tab="overview" label=${_('Inbound traffic is on the Overview.')} /></span>
-			${offline ? html`<${kit.Badge} level="err"><${kit.Icon} name="wifi-off" />${_('No connection to the router')}</${kit.Badge}>` : ''}
-		</div>
+				${' '}<${kit.Go} tab="overview" label=${_('Inbound traffic is on the Overview.')} />`} />
 		<div class="grid g2">
 			<${NatCard} st=${st} />
 			<${UpnpCard} st=${st} devices=${devices} />
@@ -188,6 +182,8 @@ function Page({ store, view, devices }) {
 }
 
 return view.extend({
+	...app.actions,
+
 	load: function() {
 		return Promise.all([ app.load(), common.loadSchema() ]).then(() => Promise.all([
 			common.callStatus().catch(() => null), common.callDevices().catch(() => null), uci.load('truba'), uci.load('firewall'), uci.load('network') ]));
@@ -198,24 +194,5 @@ return view.extend({
 		const store = app.store({ status: data[0], offline: data[0] == null });
 		app.poll(store, () => common.callStatus().then((s) => ({ status: s })), POLL);
 		return app.mount(this, Page, { store, devices: data[1]?.devices || [] });
-	},
-
-	// «Применить» панели изменений и «Сохранить и применить» LuCI: пока есть неверные поля, ничего не
-	// сохраняется — иначе применилось бы остальное, а введённое значение молча пропало бы.
-	handleSaveApply: function(ev, mode) {
-		if (app.changes.get().bad) {
-			app.toast(_('Fix the highlighted fields'));
-			return Promise.resolve();
-		}
-		return this.super('handleSaveApply', [ ev, mode ]);
-	},
-
-	// Настройки меняются прямо в браузере: сохранить — отправить эти изменения, сбросить — перечитать страницу.
-	handleSave: function() {
-		return uci.save().then(() => app.changes.set({ n: app.changeCount() }));
-	},
-
-	handleReset: function() {
-		window.location.reload();
 	}
 });

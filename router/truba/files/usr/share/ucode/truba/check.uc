@@ -171,6 +171,10 @@ function verdicts(cfg, plan, cats, ips, mac) {
 		return [];
 	let nums = map(ips, U.ip2int);
 	let hits = geoip_hits(cats, nums);
+	// Маршрутизация выключена: в таблице нет classify (R.nft_minimal), всё идёт напрямую.
+	// Категории адреса остаются для справки.
+	if (!cfg.routing)
+		return map(ips, (ip, k) => ({ ip, geoip: hits[k], sets: {}, action: 'direct', reason: 'routing_off' }));
 	let kern = { bypass4: kernel_set('bypass4'), gs_tunnel4: kernel_set('gs_tunnel4'), gs_direct4: kernel_set('gs_direct4') };
 	let out = [];
 	for (let k = 0; k < length(ips); k++)
@@ -251,6 +255,15 @@ export function check(target, mac) {
 	res.router_host = m.router_host;
 	res.decisive = m.router_host ? null : m.decisive;
 	let decisive = res.decisive;
+
+	if (!cfg.routing) {
+		// Категории домена — для справки: без Маршрутизации ни mosdns, ни наборов gs_* нет.
+		res.decisive = null;
+		res.ips = verdicts(cfg, plan, cats, U.nslookup(d, '127.0.0.1'), mac);
+		res.action = 'direct';
+		res.reason = 'routing_off';
+		return res;
+	}
 
 	if (decisive?.action == 'block') {
 		res.action = 'block';

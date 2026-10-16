@@ -245,6 +245,13 @@ function pending(config, sid) {
 	return !!(sid && (st.creates?.[config]?.[sid] || st.changes?.[config]?.[sid] || st.deletes?.[config]?.[sid]));
 }
 
+// У опции есть несохранённое изменение (точка «изменено» у поля и переключателя) — и когда она снята:
+// тогда она в deletes, а не в changes.
+function changed(config, sid, option) {
+	const st = uci.state || {};
+	return !!option && (st.changes?.[config]?.[sid]?.[option] !== undefined || (st.deletes?.[config]?.[sid] || {})[option] !== undefined);
+}
+
 // Повторять fn раз в ms, но следующий вызов — только после ответа на прошлый, как poll LuCI: медленный
 // ответ службы не копит вызовы в rpcd, который обслуживает их по одному. Ошибка не останавливает.
 // Возвращает stop.
@@ -284,6 +291,11 @@ function usePoll(fetchFn, ms, deps) {
 
 // ---- Страница ----
 
+// Страницы, ещё не снятые: когда LuCI рисует вид заново, новая страница, попав в документ, снимает прежние,
+// которых в нём уже нет, вместе с подписками на документ — иначе наблюдатели темы копились бы. Страница, которую
+// так и не вставили, никого не снимает. Поля прежней страницы снимают свои отметки сами (app.invalid, onFlush).
+const mounted = new Set();
+
 // Корень страницы — свой Shadow DOM: стили темы LuCI не попадают внутрь, наши — наружу.
 function mount(view, Page, props) {
 	const host = E('div', { 'class': 'truba-root' });
@@ -303,30 +315,102 @@ function mount(view, Page, props) {
 	// Фон предков известен, только когда LuCI вставит страницу в документ. LuCI вставляет её сразу после render();
 	// страницу, которую так и не вставили (ошибка LuCI), не ждать вечно — не дольше 60 кадров.
 	let frames = 0;
-	const first = () => host.isConnected ? apply() : (++frames < 60) && requestAnimationFrame(first);
+	const first = () => {
+		if (!host.isConnected)
+			return (++frames < 60) && requestAnimationFrame(first);
+		for (let m of mounted)
+			if (m.host != host && !m.host.isConnected)
+				m.unmount();
+		apply();
+	};
 	requestAnimationFrame(first);
 	// Тема или её режим сменились (Bootstrap «авто» меняет data-darkmode по системной настройке).
 	const later = () => requestAnimationFrame(apply);
 	const mo = new MutationObserver(later);
 	for (let el of [ document.documentElement, document.body ])
 		mo.observe(el, { attributes: true, attributeFilter: [ 'class', 'style', 'data-darkmode', 'data-theme' ] });
-	window.matchMedia(DARK).addEventListener('change', later);
+	const mq = window.matchMedia(DARK);
+	mq.addEventListener('change', later);
 	// Тема с плавной сменой фона: в первом кадре после смены фон ещё прежний — режим проверяется ещё раз, когда
 	// переход фона у предка страницы закончится. Переходы внутри самой страницы (до document они доходят с
 	// target = host) не в счёт.
-	document.addEventListener('transitionend', (ev) => {
+	const onTransition = (ev) => {
 		if (ev.propertyName == 'background-color' && ev.target != host && ev.target.contains?.(host))
 			later();
-	});
+	};
+	document.addEventListener('transitionend', onTransition);
+
+	// gen — ключ корня: «Сбросить» (reset) рисует страницу заново, и поля читают настройки заново.
+	let gen = 0;
+	const draw = () => lib.render(lib.html`<${Page} key=${gen} ...${props} view=${view} />`, wrap);
+	const self = {
+		host,
+		redraw() {
+			gen++;
+			draw();
+		},
+		unmount() {
+			mo.disconnect();
+			mq.removeEventListener('change', later);
+			document.removeEventListener('transitionend', onTransition);
+			lib.render(null, wrap);
+			mounted.delete(self);
+		}
+	};
+	mounted.add(self);
 
 	changes.set({ n: changeCount() });
-	lib.render(lib.html`<${Page} ...${props} view=${view} />`, wrap);
+	draw();
 	return host;
 }
 
+// «Сбросить»: несохранённые изменения снимаются, конфигурации с ними перечитываются, страница рисуется
+// заново — без перезагрузки: опрос и данные службы остаются. Новые значения подставляются разом, после ответа:
+// опрос между запросом и ответом не нарисует страницу без настроек.
+function reset() {
+	const st = uci.state || {};
+	const configs = [ ...new Set([ st.creates, st.changes, st.deletes, st.reorder ].flatMap((x) => Object.keys(x || {}))) ];
+	return Promise.all(configs.map((c) => uci.callLoad(c))).then((vals) => {
+		uci.unload(configs);
+		configs.forEach((c, i) => {
+			delete st.reorder?.[c];
+			st.values[c] = vals[i];
+			uci.loaded[c] = vals[i];
+		});
+		changes.set({ n: changeCount() });
+		for (let m of mounted)
+			if (m.host.isConnected)
+				m.redraw();
+	});
+}
+
+// Обработчики LuCI вкладок с настройками: view.extend({ ...app.actions, load, render }).
+const actions = {
+	// «Применить» панели изменений и «Сохранить и применить» LuCI: пока есть неверные поля, ничего не
+	// сохраняется — иначе применилось бы остальное, а введённое значение молча пропало бы.
+	handleSaveApply: function(ev, mode) {
+		if (changes.get().bad) {
+			toast(_('Fix the highlighted fields'));
+			return Promise.resolve();
+		}
+		return this.super('handleSaveApply', [ ev, mode ]);
+	},
+
+	// Настройки меняются прямо в браузере: сохранить — отправить эти изменения (с набранным, но не
+	// добавленным — flush). uci.save() сам перечитывает сохранённые конфигурации.
+	handleSave: function() {
+		flush();
+		return uci.save().then(() => changes.set({ n: changeCount() }));
+	},
+
+	handleReset: function() {
+		return reset();
+	}
+};
+
 return baseclass.extend({
-	load, lib, luminance, schemeFrom, mount, store, use, scheme, changes, changeCount, pending, every, usePoll,
-	invalid, toast, toasts, onFlush, flush,
+	load, lib, luminance, schemeFrom, mount, store, use, scheme, changes, changeCount, pending, changed, every, usePoll,
+	invalid, toast, toasts, onFlush, flush, reset, actions,
 	poll: pollStore,
 	set: setOpt,
 	add: addSection,
