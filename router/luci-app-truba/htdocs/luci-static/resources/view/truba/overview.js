@@ -198,7 +198,7 @@ function FlowCard({ st, devices }) {
 	const p = latest(), c = st.counters || {}, pct = tunnelShare(c);
 	const active = devices ? (devices.devices || []).filter((d) => common.devActive(d, devices.now)).length : null;
 	return html`<${kit.Card} cls="w2" title=${_('Where traffic goes')} aside=${_('now')}>
-		<${flow.Flow} devices=${active} block=${c.block?.packets || 0}
+		<${flow.Flow} devices=${active} block=${(c.block?.packets || 0) + (st.dns_cache?.blocked || 0)}
 			tunnel=${p ? [ p[COLS.tunnel.down], p[COLS.tunnel.up] ] : null}
 			direct=${p ? [ p[COLS.direct.down], p[COLS.direct.up] ] : null}
 			caption=${(pct == null) ? _('No outgoing connections yet.') : _('%d%% of new connections via tunnel').format(pct)} />

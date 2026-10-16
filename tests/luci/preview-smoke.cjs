@@ -20,6 +20,11 @@ const path = require('node:path');
 				errors = [];
 				await page.goto(`${base}/?${new URLSearchParams({ theme, size, lang, tab })}`);
 				await page.waitForFunction(() => !!document.body.dataset.ready);
+				if (tab == 'overview') {
+					const blocked = await page.evaluate(() => [...document.querySelector('.truba-root').shadowRoot.querySelectorAll('.flow')]
+						.every((svg) => /(?:block|блок): 30/i.test(svg.textContent)));
+					if (!blocked) { fails++; console.log('FAIL combined DNS and packet block count'); }
+				}
 				if (tab == 'devices') {
 					await page.evaluate(() => document.querySelector('.truba-root').shadowRoot.querySelector('button.dev')?.click());
 					await page.waitForFunction(() => document.querySelector('.truba-root')?.shadowRoot?.querySelector('.conn button'));

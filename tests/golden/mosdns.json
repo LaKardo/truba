@@ -249,6 +249,18 @@
 			]
 		},
 		{
+			"tag": "flow_block",
+			"type": "sequence",
+			"args": [
+				{
+					"exec": "metrics_collector block"
+				},
+				{
+					"exec": "reject 3"
+				}
+			]
+		},
+		{
 			"tag": "main",
 			"type": "sequence",
 			"args": [
@@ -268,7 +280,7 @@
 					"matches": [
 						"qname $c_0"
 					],
-					"exec": "reject 3"
+					"exec": "goto flow_block"
 				},
 				{
 					"matches": [

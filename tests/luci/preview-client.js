@@ -64,6 +64,7 @@ const devices = Array.from({length: 24}, (_, i) => ({ ip: '192.168.1.' + (50 + i
 values.truba.demoRule = { '.name': 'demoRule', '.type': 'rule', mode: 'all', set: 'geosite', tag: 'youtube', action: 'tunnel' };
 values.truba.demoDirect = { '.name': 'demoDirect', '.type': 'rule', mode: 'all', set: 'geosite', tag: 'ru', action: 'direct' };
 const status = { service: true, routing: true, mosdns: true, vps_ip: '203.0.113.10', mode: 'all', zones: ['lan'],
+	counters: { block: { packets: 7, bytes: 420 } }, dns_cache: { blocked: 23, query: 100, hit: 70, size: 50, max: 1024 },
 	tunnel: { configured: true, up: true, iface: 'awg0', awg: { handshake: now - 20, handshake_age: 20, rx: 123000000, tx: 4500000 } },
 	applied: { time: now, routing: true, mode: 'all', zones: ['lan'], dns_hijack: true },
 	dns: { running: true }, health: { state: 'up', rtt: 32, probes: [31, 32, 34, 30, 32, 33], big: { ok: true } },

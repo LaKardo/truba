@@ -48,11 +48,16 @@ check "full: — поддомен не совпадает, по Режиму ч�
 check "domain: и regexp: — через «Напрямую»" eval '[ "$(ask a.zz-dom.trubatest)" = 44.0.0.2 ] && [ "$(ask zzrx-42.trubatest)" = 44.0.0.2 ]'
 check "Категория «Туннель» — через «Туннель», IP в gs_tunnel4" eval '[ "$(ask zz-tun.trubatest)" = 44.0.0.1 ] && in_set gs_tunnel4 44.0.0.1'
 ADS="$(sed -n '1s/^domain://p' /var/lib/truba/geosite/category-ads.txt)"
+blocked() { truba status | jsonfilter -e '@.dns_cache.blocked'; }
+B0="$(blocked)"
 check "Блок ($ADS из category-ads) → NXDOMAIN, и поддомен тоже" eval 'nx "$ADS" && nx "sub.$ADS"'
+check "статистика DNS-блокировок: два отклонённых запроса учтены" eval '[ "$(blocked)" -ge "$((B0 + 2))" ]'
+B1="$(blocked)"
 check "AAAA → пустой ответ" eval '[ -z "$(ask zz-tun.trubatest AAAA)" ]'
 # ipv4hint в HTTPS-записи клиент взял бы мимо A-ответа, и адрес не попал бы в набор Категории.
 check "HTTPS (SVCB) → пустой ответ, хотя сервер «Туннеля» его отдаёт" eval \
 	'ucode /repo/tests/lib/dns_ttl.uc 5401 zz-tun.trubatest 127.0.0.1 65 | grep -q "^rr 65" && [ -z "$(ucode /repo/tests/lib/dns_ttl.uc "$(dns_port)" zz-tun.trubatest 127.0.0.1 65)" ]'
+check "подавление AAAA и HTTPS не считается блокировкой рекламы" eval '[ "$(blocked)" -eq "$B1" ]'
 check "Проверить домен: IP из DNS «Напрямую» — через набор в ядре" eval 'truba check zz-full.trubatest > /tmp/c1 && grep -q "\"reason\": \"geosite_ip\"" /tmp/c1 && grep -q "\"action\": \"direct\"" /tmp/c1'
 check "Проверить IP: geoip:ru — через набор в ядре" eval 'truba check 77.88.8.8 > /tmp/c2 && grep -q "\"reason\": \"geoip\"" /tmp/c2 && [ "$(jsonfilter -i /tmp/c2 -e "@.ips[0].sets.gi_direct")" = true ]'
 check "status и sets: счётчики кэша и IP из DNS" eval '[ "$(truba status | jsonfilter -e "@.dns_cache.query")" -gt 0 ] && [ "$(truba status | jsonfilter -e "@.dns_cache.max")" -eq 65536 ] && [ "$(truba sets | jsonfilter -e "@.dns.direct")" -ge 1 ] && [ "$(truba sets | jsonfilter -e "@.dns.tunnel")" -ge 1 ]'

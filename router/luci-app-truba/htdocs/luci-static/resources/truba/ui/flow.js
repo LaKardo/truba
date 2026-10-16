@@ -43,7 +43,7 @@ function branch(html, d, cls, w) {
 	return html`<path d=${d} class=${'base ' + cls} stroke-width=${w.toFixed(1)} /><path d=${d} class=${'an ' + cls} />`;
 }
 
-// devices — число активных устройств или null (пока его нет), block — отброшенных пакетов,
+// devices — число активных устройств или null (пока его нет), block — сумма отброшенных пакетов и DNS-блокировок,
 // tunnel и direct — [ к устройствам, от устройств ] в байт/с или null, caption — подпись под схемой.
 function Flow({ devices, block, tunnel, direct, caption }) {
 	const { html } = app.lib;

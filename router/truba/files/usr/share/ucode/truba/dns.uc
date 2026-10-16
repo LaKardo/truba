@@ -120,7 +120,7 @@ export function mosdns(cfg, plan, router_hosts, gsdir) {
 	for (let grp in groups) {
 		let tag = sprintf('c_%d', i++);
 		push(plugins, { tag, type: 'domain_set', args: { files: map(grp.tags, t => D.geosite_file(t, gsdir)) } });
-		let ex = (grp.action == 'block') ? 'reject 3' : ((grp.action == 'tunnel') ? 'goto flow_tunnel' : 'goto flow_direct');
+		let ex = (grp.action == 'block') ? 'goto flow_block' : ((grp.action == 'tunnel') ? 'goto flow_tunnel' : 'goto flow_direct');
 		push(main, { matches: [ 'qname $' + tag ], exec: ex });
 	}
 	push(main, { exec: 'goto flow_default' });
@@ -159,6 +159,12 @@ export function mosdns(cfg, plan, router_hosts, gsdir) {
 		push(plugins, { tag: 'flow_' + f[0], type: 'sequence', args: flow });
 	}
 
+	// Один коллектор для всех блокирующих Категорий: только запросы, отклонённые
+	// нашими правилами, а не NXDOMAIN внешнего сервера или подавление AAAA/HTTPS.
+	push(plugins, { tag: 'flow_block', type: 'sequence', args: [
+		{ exec: 'metrics_collector block' },
+		{ exec: 'reject 3' },
+	] });
 	push(plugins, { tag: 'main', type: 'sequence', args: main });
 
 	let listen = sprintf('%s:%d', C.MOSDNS_ADDR, cfg.dns.port);

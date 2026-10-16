@@ -182,7 +182,11 @@ let msets = map(filter(mfull.plugins, p => p.type == 'domain_set'), p => map(p.a
 let mmain = map(filter(mfull.plugins, p => p.tag == 'main')[0].args, x => x.exec);
 check('mosdns: соседние Категории с одним Действием — один domain_set, порядок Приоритета сохранён',
 	same(msets, [ [ 'ads' ], [ 'tunnel' ], [ 'adirect', 'zdirect', 'wide' ] ]) &&
-	same(mmain, [ 'reject 0', 'reject 3', 'goto flow_tunnel', 'goto flow_direct', 'goto flow_default' ]), sprintf('%J %J', msets, mmain));
+	same(mmain, [ 'reject 0', 'goto flow_block', 'goto flow_tunnel', 'goto flow_direct', 'goto flow_default' ]), sprintf('%J %J', msets, mmain));
+check('mosdns: блокирующая ветка считает запрос перед NXDOMAIN, коллектор один',
+	same(filter(mfull.plugins, p => p.tag == 'flow_block')[0]?.args,
+		[ { exec: 'metrics_collector block' }, { exec: 'reject 3' } ]) &&
+	length(filter(mfull.plugins, p => p.type == 'sequence' && length(filter(p.args, a => a.exec == 'metrics_collector block')))) == 1);
 let split_plan = { ...plan, geosite: [ { tag: 'a', action: 'direct' }, { tag: 'b', action: 'tunnel' }, { tag: 'c', action: 'direct' } ] };
 check('mosdns: несоседние Категории с одним Действием не объединяются',
 	length(filter(DNS.mosdns(mk(), split_plan, []).plugins, p => p.type == 'domain_set')) == 3);

@@ -175,13 +175,17 @@ function http_get(addr, path, timeout) {
 }
 
 // Счётчики кэша mosdns из его API: query — запросов, hit — ответов из кэша (вместе с
-// истёкшими), lazy_hit — истёкших, size — записей сейчас. Отсчёт — с запуска mosdns.
+// истёкшими), lazy_hit — истёкших, size — записей сейчас, blocked — запросов,
+// отклонённых Категориями geosite. Отсчёт — с запуска mosdns.
 function dns_cache(api, cfg) {
 	let res = {};
 	for (let l in split(http_get(api, '/metrics', 1000) ?? '', '\n')) {
 		let m = match(l, /^mosdns_cache_(query_total|hit_total|lazy_hit_total|size_current)(\{[^}]*\})? ([0-9.e+]+)$/);
 		if (m)
 			res[replace(m[1], /_(total|current)$/, '')] = int(+m[3]);
+		let blocked = match(l, /^mosdns_metrics_collector_query_total\{name="block"\} ([0-9.e+]+)$/);
+		if (blocked)
+			res.blocked = int(+blocked[1]);
 	}
 	if (res.query == null)
 		return null;
