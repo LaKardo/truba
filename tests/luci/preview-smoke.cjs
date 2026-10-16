@@ -20,6 +20,19 @@ const path = require('node:path');
 				errors = [];
 				await page.goto(`${base}/?${new URLSearchParams({ theme, size, lang, tab })}`);
 				await page.waitForFunction(() => !!document.body.dataset.ready);
+				if (tab == 'devices') {
+					await page.evaluate(() => document.querySelector('.truba-root').shadowRoot.querySelector('button.dev')?.click());
+					await page.waitForFunction(() => document.querySelector('.truba-root')?.shadowRoot?.querySelector('.conn button'));
+					const names = await page.evaluate(() => {
+						const r = document.querySelector('.truba-root').shadowRoot;
+						const a = r.querySelector('[data-addr="198.51.100.7"]');
+						return a?.textContent == 'www.example.org' && a.closest('.conn').textContent.includes('198.51.100.7') &&
+							r.querySelector('[data-addr="192.0.2.8"]')?.textContent == '192.0.2.8';
+					});
+					if (!names) { fails++; console.log('FAIL DNS names and IP fallback'); }
+					await page.evaluate(() => document.querySelector('.truba-root').shadowRoot.querySelector('[data-addr="198.51.100.7"]').click());
+					await page.waitForFunction(() => document.querySelector('.truba-root')?.shadowRoot?.querySelector('input[name="target"]')?.value == 'www.example.org');
+				}
 				await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
 				const state = await page.evaluate(() => {
 					const tr = document.querySelector('.truba-root')?.shadowRoot?.querySelector('.tr');

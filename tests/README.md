@@ -11,6 +11,12 @@
 в Bootstrap light/dark при 1280 и 375 px и проверяет горизонтальное переполнение.
 При наличии Puppeteer: `node tests/luci/preview-smoke.cjs http://127.0.0.1:8080 <каталог>` —
 56 сочетаний вкладки, темы, ширины и языка, с проверкой JS, переполнения и сохранением снимков.
+На «Устройствах» дополнительно открывается панель: домен из DNS-кэша, сохранённый IP,
+запасной показ IP без имени и передача домена в форму проверки.
+
+Разбор DNS-кэша проверяется в `units` (`unit/dnsnames.uc`: A/CNAME, сжатие имён,
+сроки, общий IP, несколько блоков, повреждённый protobuf и циклы указателей).
+Часть `router-dns` проверяет чтение настоящего gzip-дампа API mosdns.
 
 Всё идёт в Docker на настоящей ImmortalWrt (rootfs 25.12): Linux, CI или Windows из Git Bash с Docker Desktop. Нужен `docker` с правом `--privileged`. Почему так — [ADR 0012](../docs/adr/0012-tests-on-real-immortalwrt-in-docker.md).
 

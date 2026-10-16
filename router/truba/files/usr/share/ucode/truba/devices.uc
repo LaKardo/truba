@@ -10,6 +10,7 @@ import * as C from 'truba.const';
 import * as U from 'truba.util';
 import * as F from 'truba.conf';
 import * as DV from 'truba.devstats';
+import * as DN from 'truba.dnsnames';
 
 const DHCP_LEASES = '/tmp/dhcp.leases';   // умолчание dnsmasq, если в секции нет leasefile
 
@@ -256,7 +257,10 @@ export function connections(ip) {
 		let K = loadstring("import * as K from 'truba.check'; return K;")();
 		vs = K.ip_verdicts(map(g.addrs, (a) => a.addr), mac_of(ip), cfg);
 	}
+	let names = DN.lookup(map(g.addrs, a => a.addr));
 	for (let i, a in g.addrs) {
+		if (names[a.addr])
+			a.domain = names[a.addr];
 		a.action = mark_action(a.mark);
 		let v = vs?.[i];
 		a.reason = v ? ((v.action == a.action) ? v.reason : 'changed') : null;

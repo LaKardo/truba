@@ -120,6 +120,8 @@ t_units() {
 	# NET_ADMIN — для nft -c: ядро проверяет сгенерированные таблицы, ничего не загружая.
 	docker run --rm --cap-add NET_ADMIN -e UPDATE_GOLDEN="${UPDATE_GOLDEN:-}" -v "$REPO:/repo:$mode" "$TEST_IMG" \
 		ucode -L '/repo/router/truba/files/usr/share/ucode/*.uc' -L '/repo/tests/lib/*.uc' /repo/tests/unit/units.uc /repo/tests/golden
+	docker run --rm -v "$REPO:/repo:ro" "$TEST_IMG" \
+		ucode -L '/repo/router/truba/files/usr/share/ucode/*.uc' -L '/repo/tests/lib/*.uc' /repo/tests/unit/dnsnames.uc
 }
 
 t_dat() {

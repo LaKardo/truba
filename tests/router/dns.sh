@@ -57,6 +57,13 @@ check "Проверить домен: IP из DNS «Напрямую» — че�
 check "Проверить IP: geoip:ru — через набор в ядре" eval 'truba check 77.88.8.8 > /tmp/c2 && grep -q "\"reason\": \"geoip\"" /tmp/c2 && [ "$(jsonfilter -i /tmp/c2 -e "@.ips[0].sets.gi_direct")" = true ]'
 check "status и sets: счётчики кэша и IP из DNS" eval '[ "$(truba status | jsonfilter -e "@.dns_cache.query")" -gt 0 ] && [ "$(truba status | jsonfilter -e "@.dns_cache.max")" -eq 65536 ] && [ "$(truba sets | jsonfilter -e "@.dns.direct")" -ge 1 ] && [ "$(truba sets | jsonfilter -e "@.dns.tunnel")" -ge 1 ]'
 
+# Живой gzip/protobuf mosdns: не только синтетический формат из units.
+ask names.zz-tun.trubatest >/dev/null
+check "DNS-имена: свежий дамп локального API распакован и найден домен" \
+	ucode -L '/usr/share/ucode/*.uc' -e 'import * as D from "truba.dnsnames"; let n = D.lookup([ "44.0.0.1" ]); exit(n["44.0.0.1"] == "names.zz-tun.trubatest" ? 0 : 1);'
+check "DNS-имена: неизвестный IP остаётся без имени" \
+	ucode -L '/usr/share/ucode/*.uc' -e 'import * as D from "truba.dnsnames"; exit(length(keys(D.lookup([ "192.0.2.123" ]))) ? 1 : 0);'
+
 section "второй сервер DNS страхует медленный первый"
 # Первый сервер «Туннеля» завис: принимает запросы и молчит. Через порог 100 мс запрос уходит
 # второму серверу, поэтому ответ не ждёт тайм-аута первого (5 с).

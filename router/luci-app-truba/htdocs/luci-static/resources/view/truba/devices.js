@@ -203,11 +203,12 @@ function Conns({ ip, onAddr }) {
 	return html`<div class="conns">
 		${data.addrs.map((a) => html`<div class="conn">
 			<span class="n"><b><button type="button" class="link" data-addr=${a.addr} title=${_('Check for this device')}
-				onClick=${() => onAddr?.(a.addr)}>${a.addr}</button></b><span class="mu">${common.connLabel(a)}</span></span>
+				onClick=${() => onAddr?.(a.domain || a.addr)}>${a.domain || a.addr}</button></b><span class="mu">${a.domain ? a.addr + ' · ' : ''}${common.connLabel(a)}</span></span>
 			<${kit.ActionTag} action=${a.action} />
 			<span class="r">${(speeds[a.addr] != null) ? common.fmtRate(speeds[a.addr]) : '—'}</span>
 		</div>`)}
 		<div class="mu">${_('Connections: %d').format(data.total)}</div>
+		${data.addrs.some((a) => a.domain) ? html`<div class="mu">${_('Names from DNS cache; shared IPs may belong to several domains.')}</div>` : ''}
 	</div>`;
 }
 

@@ -73,7 +73,10 @@ async function rpcCall(method) {
 	case 'schema': return schema;
 	case 'status': return status;
 	case 'devices': return { now, devices };
-	case 'connections': return { addrs: [], total: 0 };
+	case 'connections': return { addrs: [
+		{ addr: '198.51.100.7', domain: 'www.example.org', proto: 'tcp', port: 443, action: 'tunnel', reason: 'geosite_ip', conns: 2, up: 12000, down: 350000 },
+		{ addr: '192.0.2.8', proto: 'udp', port: 443, action: 'direct', conns: 1, up: 500, down: 1200 }
+	], total: 3, acct: true };
 	case 'rates': return { now, step: 5, points: Array.from({length: 120}, (_, i) => [now - 600 + i * 5, 180000 + Math.sin(i / 7) * 80000, 12000, 23000, 2000, 0, 0]) };
 	case 'categories': return { cats: ['youtube', 'telegram', 'games', 'ru'].map((tag) => ({ set: 'geosite', tag })), starting: [] };
 	case 'lists': return {};

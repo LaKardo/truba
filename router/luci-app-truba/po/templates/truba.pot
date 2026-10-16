@@ -1,6 +1,10 @@
 msgid ""
 msgstr "Content-Type: text/plain; charset=UTF-8"
 
+#: htdocs/luci-static/resources/view/truba/devices.js
+msgid "Names from DNS cache; shared IPs may belong to several domains."
+msgstr ""
+
 #: htdocs/luci-static/resources/truba/awg.js
 msgid "No PrivateKey in the [Interface] section"
 msgstr ""
@@ -1741,4 +1745,3 @@ msgstr ""
 #: menu.d
 msgid "Overview"
 msgstr ""
-
