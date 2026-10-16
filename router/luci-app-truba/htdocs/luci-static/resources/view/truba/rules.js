@@ -192,7 +192,7 @@ function Cat({ c, mode, action, changed, hl }) {
 	const meta = [ (c.set == 'geoip' ? _('geoip · %s subnets') : _('geosite · %s entries')).format(common.fmtNum(c.count4 ?? c.count)) ];
 	if ((c.subset_of || []).length)
 		meta.push(_('in %s').format(c.subset_of.join(', ')));
-	return html`<div class=${'cat' + (hl ? ' hl' : '')} data-cat=${c.set + ':' + c.tag}>
+	return html`<div class=${'cat a-' + action + (hl ? ' hl' : '')} data-cat=${c.set + ':' + c.tag}>
 		<span class="n"><b>${c.tag}</b>${changed ? html` <${kit.Dot} level="warn" label=${_('changed, not applied yet')} />` : ''}
 			<span class="mu">${meta.join(' · ')}</span></span>
 		<${kit.ActionPicker} label=${_('Action for %s').format(c.tag)} value=${action} onChange=${(a) => setAction(mode, c.set, c.tag, a)} />

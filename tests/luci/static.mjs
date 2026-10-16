@@ -323,6 +323,15 @@ if (!existsSync(stylePath)) {
 	fails++;
 } else if (app) {
 	const css = readFileSync(stylePath, 'utf8');
+	const lightTokens = [...css.match(/\.tr\s*\{([^}]+)\}/)[1].matchAll(/(--[\w-]+)\s*:/g)].map((m) => m[1]).sort();
+	const darkTokens = [...css.match(/\.tr\[data-scheme="dark"\]\s*\{([^}]+)\}/)[1].matchAll(/(--[\w-]+)\s*:/g)].map((m) => m[1]).sort();
+	check(JSON.stringify(lightTokens) === JSON.stringify(darkTokens), 'CSS: одинаковый набор токенов обеих тем');
+	const declared = new Set([...css.matchAll(/(--[\w-]+)\s*:/g)].map((m) => m[1]));
+	const missingTokens = [...css.matchAll(/var\((--[\w-]+)(\s*,)?/g)].filter((m) => !declared.has(m[1]) && !m[2]).map((m) => m[1]);
+	check(!missingTokens.length, 'CSS: переменные объявлены или имеют fallback: ' + missingTokens.join(', '));
+	// Тени нейтральны и не зависят от палитры; остальные цвета — через токены.
+	const rules = css.replace(/\/\*[\s\S]*?\*\//g, '').replace(/--[\w-]+\s*:[^;]+;/g, '').replace(/(?:box-shadow|background):[^;]*rgba\(0, 0, 0,[^;]+;/g, '');
+	check(!/#[\da-f]{3,8}\b|rgba?\(/i.test(rules), 'CSS: цвета вне палитры только в нейтральных тенях');
 	const hex = (h) => `rgb(${parseInt(h.slice(1, 3), 16)}, ${parseInt(h.slice(3, 5), 16)}, ${parseInt(h.slice(5, 7), 16)})`;
 	for (const [ name, sel ] of [ [ 'светлый', '.tr {' ], [ 'тёмный', '.tr[data-scheme="dark"] {' ] ]) {
 		const at = css.indexOf(sel);
@@ -359,6 +368,11 @@ if (icons)
 // Верх шкалы графика скорости и толщина веток схемы потоков.
 const chart = loadModule('truba/ui/chart.js', { baseclass, app, common });
 if (chart) {
+	check(chart.areaFill({ bbox: {} }, '47,111,203') === 'rgba(47,111,203,0.14)', 'chart.areaFill: легенда до расчёта размеров');
+	const stops = [], coords = [];
+	const gradient = { addColorStop: (...v) => stops.push(v) };
+	check(chart.areaFill({ bbox: { top: 10, height: 100 }, ctx: { createLinearGradient: (...v) => { coords.push(...v); return gradient; } } }, '47,111,203') === gradient
+		&& coords.join(',') === '0,10,0,110' && stops.length === 2, 'chart.areaFill: градиент по высоте области');
 	check(chart.scaleTop(0) === 125000, 'chart.scaleTop: не меньше 1 Мбит/с');
 	check(chart.scaleTop(130000) === 250000, 'chart.scaleTop: 1,04 Мбит/с → 2');
 	check(chart.scaleTop(600000) === 625000, 'chart.scaleTop: 4,8 Мбит/с → 5');
@@ -373,8 +387,9 @@ if (chart) {
 const flow = loadModule('truba/ui/flow.js', { baseclass, app, common });
 if (flow) {
 	check(flow.width(null, 1) === 0 && flow.width(0, 1) === 0, 'flow.width: нет трафика — 0');
-	check(flow.width(100, 100) === 14 && flow.width(400, 100) === 14, 'flow.width: потолок 14');
-	check(flow.width(25, 100) === 8, 'flow.width: корень доли');
+	check(flow.width(125000, 125000) === 14 && flow.width(500000, 125000) === 14, 'flow.width: потолок 14');
+	check(flow.width(31250, 125000) === 8, 'flow.width: корень доли');
+	check(flow.width(100, 100) < 3 && Number.isFinite(flow.width(100, 0)), 'flow.width: фоновый трафик без толстой линии');
 }
 
 // Устройства (common): Политика — как её поймёт служба, по настройкам браузера; MAC без учёта регистра

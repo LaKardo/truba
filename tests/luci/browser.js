@@ -235,6 +235,11 @@ async function waitApply(page) {
 		return r && getComputedStyle(r).display != 'none' ? r.innerText : '';
 	});
 	result(/\d\d:\d\d/.test(legendTime), '«Обзор»: при наведении на график в легенде видно время', legendTime.replace(/\s+/g, ' '));
+	const markerHidden = await sr(() => {
+		const m = document.querySelector('.truba-root').shadowRoot.querySelector('.chart-box .u-legend .u-series:first-child .u-marker');
+		return !m || getComputedStyle(m).display == 'none';
+	});
+	result(markerHidden, 'легенда графика: у времени нет маркера линии');
 	await page.mouse.move(0, 0);
 
 	// Фокус с клавиатуры не меняет форму переключателя: рамка фокуса — outline, а не border-radius.
@@ -1546,6 +1551,23 @@ async function waitApply(page) {
 				result(o.doc <= o.win && o.tr <= 0, `тема ${name} 375: без горизонтальной прокрутки`, JSON.stringify(o));
 			}
 			await page.screenshot({ path: `${out}/overview-${name}-${w}.png`, fullPage: true });
+			// Полная матрица вкладок для двух явных схем; auto/Argon проверены выше.
+			if (name == 'bootstrap-dark' || name == 'bootstrap-light') {
+				for (const tab of tabs.filter((t) => t != 'overview')) {
+					await page.goto(url(tab), { waitUntil: 'networkidle2' });
+					await settled(page);
+					await page.waitForFunction((want) => document.querySelector('.truba-root')?.shadowRoot?.querySelector('.tr')?.dataset.scheme == want,
+						{ timeout: 3000 }, want);
+					const layout = await page.evaluate(() => {
+						const tr = document.querySelector('.truba-root')?.shadowRoot?.querySelector('.tr');
+						return { scheme: tr?.dataset.scheme, overflow: tr ? tr.scrollWidth - tr.clientWidth : -1,
+							doc: document.documentElement.scrollWidth - innerWidth };
+					});
+					result(layout.scheme == want && layout.overflow == 0 && layout.doc <= 0,
+						`${tab} ${name} ${w}: тема и ширина`, JSON.stringify(layout));
+					await page.screenshot({ path: `${out}/${tab}-${name}-${w}.png`, fullPage: true });
+				}
+			}
 		}
 	}
 	await theme('/luci-static/bootstrap');

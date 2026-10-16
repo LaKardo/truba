@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="ru"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Труба — предпросмотр</title>
+<style>
+body { margin: 0; font: 14px system-ui; background: #eef0f3; color: #202630; }
+body.dark { background: #14171c; color: #e6e8ec; }
+nav { display: flex; flex-wrap: wrap; gap: 10px; padding: 12px; }
+select, button { font: inherit; padding: 6px; }
+main { margin: 12px auto; max-width: 1280px; }
+body.phone main { max-width: 390px; }
+#error { white-space: pre-wrap; }
+</style>
+<nav aria-label="Предпросмотр">
+<b>МАКЕТ · настройки не применяются</b>
+<select id="tab" aria-label="Вкладка"></select>
+<select id="theme" aria-label="Тема"><option value="light">Светлая</option><option value="dark">Тёмная</option></select>
+<select id="lang" aria-label="Язык"><option>ru</option><option>en</option></select>
+<select id="size" aria-label="Ширина"><option value="desktop">Десктоп</option><option value="phone">Телефон · 390</option></select>
+<button onclick="location.reload()">Обновить</button>
+</nav>
+<main id="view"></main><pre id="error" role="alert"></pre>
+<script type="module" src="/preview-client.js"></script></html>

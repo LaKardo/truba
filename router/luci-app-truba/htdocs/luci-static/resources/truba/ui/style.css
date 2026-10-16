@@ -18,6 +18,7 @@
 	--blk: #d24a43;
 	--inb: #7a5fb8;
 	--warn: #b07800;
+	--on-accent: #ffffff;
 }
 
 .tr[data-scheme="dark"] {
@@ -32,6 +33,7 @@
 	--blk: #f06a62;
 	--inb: #a98be6;
 	--warn: #e0a92a;
+	--on-accent: #ffffff;
 }
 
 .tr {
@@ -138,7 +140,7 @@
 	width: 12px;
 	height: 12px;
 	border-radius: 50%;
-	background: #fff;
+	background: var(--on-accent);
 	transition: left .15s;
 }
 .sw input:checked { background: var(--tun); }
@@ -175,7 +177,9 @@
 .card-h h3 { font-size: 14px; font-weight: 500; }
 /* Значок, переключатель и кнопка в заголовке — по средней линии: по базовой линии значок ниже переключателя. */
 .card-h .aside { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin-left: auto; color: var(--mu); font-size: 12px; }
-.card .sub { margin: 14px 0 6px; }
+.card .sub { margin: 14px 0 6px; padding-top: 10px; border-top: 1px solid var(--bd); }
+/* Ритм содержимого без flex-контейнера: не меняем растяжение карточек сетки. */
+.tr .card > :not(.card-h) + :where(p, .kv, .ups, .sws, .stats, .warns) { margin-top: 10px; }
 /* Две части в одной карточке (DNS и входящие); на узком месте — одна под другой. */
 .cols { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px 24px; }
 .stack { display: grid; gap: 16px; }
@@ -260,7 +264,7 @@
 	font: inherit;
 	cursor: pointer;
 }
-.btn.p { border-color: var(--tun); background: var(--tun); color: #fff; }
+.btn.p { border-color: var(--tun); background: var(--tun); color: var(--on-accent); }
 
 /* ---- Схема потоков ---- */
 .flow { display: block; width: 100%; height: auto; }
@@ -279,6 +283,8 @@
 .flow .router { fill: var(--card); stroke: var(--mu); stroke-opacity: .4; }
 .flow .n-tun { fill: var(--tun); fill-opacity: .14; }
 .flow .n-dir { fill: var(--dir); fill-opacity: .14; }
+.flow .n-tun { stroke: var(--tun); stroke-opacity: .4; }
+.flow .n-dir { stroke: var(--dir); stroke-opacity: .4; }
 .flow path { fill: none; stroke-linecap: round; }
 .flow .base { stroke-opacity: .3; }
 .flow .l-in { stroke: var(--mu); }
@@ -297,6 +303,8 @@
 .tr .uplot { font-family: inherit; }
 .tr .u-legend { margin-top: 4px; color: var(--mu); font-size: 11px; text-align: left; }
 .tr .u-legend .u-marker { width: 10px; height: 2px; border: 0 !important; }
+.tr .u-legend .u-series { margin: 2px 10px 2px 0; }
+.tr .u-legend .u-series:first-child .u-marker { display: none; }
 /* Время точки — в легенде, пока курсор над графиком: по оси видны только часы и минуты. Без курсора строки времени
    нет — в ней было бы «—». */
 .tr .chart-box:not(:hover) .u-legend .u-series:first-child { display: none; }
@@ -325,7 +333,12 @@
 	border-radius: 10px;
 	background: var(--tx);
 	color: var(--card);
+	border: 1px solid var(--warn);
+	box-shadow: 0 4px 16px color-mix(in srgb, var(--tx) 18%, transparent);
+	animation: truba-appear .18s ease-out;
 }
+@keyframes truba-appear { from { opacity: 0; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .changes { animation: none; } }
 .changes > span { flex: 1 1 12em; }
 .changes .btn { border-color: color-mix(in srgb, var(--card) 35%, transparent); }
 .changes .btn.p { border-color: var(--tun); }
@@ -364,6 +377,15 @@
 	cursor: pointer;
 }
 .dev.sel { border-top-color: transparent; background: color-mix(in srgb, var(--tun) 10%, transparent); }
+.split .list { container: devices / inline-size; }
+@container devices (max-width: 520px) {
+	.dev { grid-template-columns: minmax(0, 1fr) 92px 64px; }
+	.dev .day { display: none; }
+}
+@container devices (max-width: 360px) {
+	.dev { grid-template-columns: minmax(0, 1fr) 92px; }
+	.dev .bar { grid-column: 1 / -1; order: 3; }
+}
 .dev .n { min-width: 0; }
 .dev .n b { display: block; overflow: hidden; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
 .dev .n .mu { display: block; font-size: 11px; }
@@ -585,6 +607,10 @@
 	border-top: 1px solid var(--bd);
 }
 .cat .n { min-width: 0; }
+.cat { border-left: 3px solid transparent; padding-left: 8px; }
+.cat.a-tunnel { border-left-color: var(--tun); }
+.cat.a-direct { border-left-color: var(--dir); }
+.cat.a-block { border-left-color: var(--blk); }
 .cat .n b { font-weight: 500; overflow-wrap: anywhere; }
 .cat .n .mu { display: block; font-size: 11px; }
 .cat .dot { display: inline-block; width: 8px; height: 8px; box-shadow: none; vertical-align: 1px; }
@@ -693,10 +719,13 @@
 .log-bar .end { display: flex; align-items: center; gap: 8px; margin-left: auto; }
 .loglines {
 	display: grid;
+	max-height: min(65vh, 640px);
+	overflow-y: auto;
 	grid-template-columns: max-content max-content minmax(0, 1fr);
 	font: 11.5px/1.7 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 .loglines .ln { display: contents; }
+.loglines .ln:hover > span { background: var(--chip); }
 .loglines .ln > span { padding: 1px 0; border-top: 1px solid var(--bd); }
 .loglines .ln > span:nth-child(-n+2) { padding-right: 8px; white-space: nowrap; color: var(--mu); }
 .loglines .ln > span:last-child { min-width: 0; overflow-wrap: anywhere; }

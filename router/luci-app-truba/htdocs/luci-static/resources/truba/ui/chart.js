@@ -33,6 +33,16 @@ function token(el, name) {
 	return getComputedStyle(el).getPropertyValue('--' + name).trim();
 }
 
+// uPlot спрашивает цвет легенды ещё до вычисления области графика.
+function areaFill(u, rgb) {
+	if (!Number.isFinite(u.bbox.top) || !Number.isFinite(u.bbox.height))
+		return `rgba(${rgb},0.14)`;
+	const g = u.ctx.createLinearGradient(0, u.bbox.top, 0, u.bbox.top + u.bbox.height);
+	g.addColorStop(0, `rgba(${rgb},0.22)`);
+	g.addColorStop(1, `rgba(${rgb},0.02)`);
+	return g;
+}
+
 // uPlot в своём блоке: создаётся при монтировании и при смене режима (deps), данные — на каждую отрисовку.
 function usePlot(make, data, deps) {
 	const { useRef, useEffect } = app.lib;
@@ -92,10 +102,15 @@ function TimeChart({ series, data, from, to, height }) {
 				{ label: '', value: (u, v) => (v == null) ? '—' : new Date(v * 1000).toLocaleTimeString() },
 				...series.map((s) => {
 					const c = token(el, s.color);
+					// Canvas поддерживает CSS Color 4 не во всех версиях браузеров LuCI.
+					const sample = document.createElement('canvas').getContext('2d');
+					sample.fillStyle = c;
+					sample.fillRect(0, 0, 1, 1);
+					const rgb = Array.from(sample.getImageData(0, 0, 1, 1).data).slice(0, 3).join(',');
 					return {
 						label: s.label, stroke: c, width: 1.75, dash: s.dash ? [ 5, 3 ] : undefined,
 						// Заливка — только под линией «к устройствам»: две заливки одного цвета сливаются.
-						fill: s.dash ? undefined : c + '24',
+						fill: s.dash ? undefined : (u) => areaFill(u, rgb),
 						value: (u, v) => (v == null) ? '—' : common.fmtRate(v)
 					};
 				})
@@ -127,4 +142,4 @@ function Spark({ values, color, height }) {
 	return html`<div class="spark" ref=${box}></div>`;
 }
 
-return baseclass.extend({ scaleTop, gaps, TimeChart, Spark });
+return baseclass.extend({ scaleTop, gaps, areaFill, TimeChart, Spark });
