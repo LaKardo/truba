@@ -60,10 +60,13 @@ function upstream_group(plugins, tag, list, mark) {
 		push(ok, t + '_ok');
 	}
 	// Пары с конца: mosdns ссылается только на уже объявленные теги.
+	// threshold 100 мс: если первый сервер не ответил быстро (DoT на Трубе холодное соединение
+	// или сервер недоступен), подключается второй. Если первый сервер отвечает ошибкой
+	// или недоступен (закрытый порт), mosdns сразу идёт к secondary без ожидания threshold.
 	let rest = ok[length(ok) - 1];
 	for (let i = length(ok) - 2; i >= 0; i--) {
 		let t = i ? sprintf('%s_%d_any', tag, i) : tag;
-		push(plugins, { tag: t, type: 'fallback', args: { primary: ok[i], secondary: rest, threshold: 1, always_standby: true } });
+		push(plugins, { tag: t, type: 'fallback', args: { primary: ok[i], secondary: rest, threshold: 100 } });
 		rest = t;
 	}
 }
@@ -74,10 +77,7 @@ function upstream_group(plugins, tag, list, mark) {
 // (ttl_max, размер кэша) и обновление списков кэш сохраняют. Поколение — FNV-1a 32 бита.
 export function cache_dump(cfg, plan) {
 	let s = sprintf('%J', [ cfg.dns.tunnel, cfg.dns.direct, plan.mode_default, map(plan.geosite, g => g.tag + '=' + g.action) ]);
-	let h = 0x811c9dc5;
-	for (let i = 0; i < length(s); i++)
-		h = ((h ^ ord(s, i)) * 0x01000193) & 0xffffffff;
-	return sprintf('%s/mosdns-cache-%08x.dump', C.DATA_DIR, h);
+	return sprintf('%s/mosdns-cache-%08x.dump', C.DATA_DIR, U.fnv1a(s));
 };
 
 // Удалить дампы прежних поколений кэша.

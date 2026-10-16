@@ -97,7 +97,11 @@ function save_good(cfg, plan, ctx, hosts, res) {
 	U.mkdirp(C.GOOD_GEOSITE);
 	let meta = U.read_json(C.GOOD_META, {});
 	let gctx = { ...ctx, counters: null, gs_tunnel4: [], gs_direct4: [] };
-	let changed = U.write_if_changed(C.GOOD_NFT, plan ? R.nft_full(cfg, plan, gctx) : R.nft_minimal(cfg, gctx));
+	// При неизменной структуре таблицы её удачная копия уже соответствует настройкам.
+	// Не разбирать повторно крупные geoip-наборы только ради одинакового файла.
+	let changed = false;
+	if (!plan || meta.nft_key != res.nft_key || !stat(C.GOOD_NFT))
+		changed = U.write_if_changed(C.GOOD_NFT, plan ? R.nft_full(cfg, plan, gctx) : R.nft_minimal(cfg, gctx));
 	let keep = {};
 
 	if (plan) {
@@ -129,9 +133,9 @@ function save_good(cfg, plan, ctx, hosts, res) {
 		}
 	}
 
-	if (changed || meta.time == null)
+	if (changed || meta.time == null || meta.nft_key != res.nft_key)
 		U.write_json(C.GOOD_META, { time: time(), routing: res.routing, mode: res.mode, port: cfg.dns.port,
-		                            vps: res.vps, endpoint: res.endpoint, gkey: res.gkey, geoip_sizes: res.geoip_sizes,
+		                            vps: res.vps, endpoint: res.endpoint, gkey: res.gkey, nft_key: res.nft_key, geoip_sizes: res.geoip_sizes,
 		                            missing: res.missing, geosite_order: res.geosite_order });
 }
 
@@ -150,6 +154,32 @@ function load_good() {
 	return meta;
 }
 
+// Отпечаток структуры таблицы inet truba (FNV-1a 32 бита): зависит от входных данных,
+// влияющих на состав правил, наборов gi_*/dev_* и адресов в bypass4/local4.
+// При неизменном отпечатке таблица не перезагружается целиком (обновляются только
+// bypass4/local4), что сохраняет наборы dv_* и экономит парсинг 35k+ подсетей geoip.
+function nft_table_key(cfg, plan, ctx, gkey, vps, tinfo) {
+	let parts = [
+		cfg.routing,
+		cfg.mode,
+		cfg.iface,
+		vps,
+		tinfo.endpoint,
+		join(',', sort(ctx.lan_if)),
+		ctx.socket_mark,
+		cfg.dns_hijack,
+		cfg.dns.set_timeout,
+		join(',', sort(ctx.dev_tunnel)),
+		join(',', sort(ctx.dev_direct)),
+	];
+	if (cfg.routing) {
+		push(parts, gkey);
+		// При смене gkey наборы gs_* сбрасываются в apply_config (ctx.gs_* = []),
+		// и таблица должна перезагрузиться, чтобы обнулить их в ядре.
+	}
+	return U.fnv1a(sprintf('%J', parts));
+}
+
 // IP Трубы. Имя endpoint не отрезолвилось (DNS ещё не поднят при старте, сбой upstream) —
 // прежний адрес того же endpoint: без него в bypass4 нет адреса Трубы и её трафик ушёл бы в неё же.
 function vps_ip(tinfo, prev) {
@@ -160,6 +190,44 @@ function vps_ip(tinfo, prev) {
 	}
 	return vps;
 }
+
+// Есть ли набор в таблице Трубы. Только он: «nft list table» вывел бы и все подсети geoip.
+function set_loaded(name) {
+	return system('nft list set inet ' + C.NFT_TABLE + ' ' + name + ' >/dev/null 2>&1') == 0;
+}
+
+function refill(name, elems) {
+	let s = 'flush set inet ' + C.NFT_TABLE + ' ' + name + '\n';
+	if (length(elems))
+		s += 'add element inet ' + C.NFT_TABLE + ' ' + name + ' { ' + join(', ', elems) + ' }\n';
+	return s;
+}
+
+// Обновить только наборы локальных подсетей — bypass4 и local4 (смена адресов интерфейсов).
+// Новая подсеть, пока её нет в local4, получает подмену источника DNS — это безвредно: dnsmasq ей и так ответил бы.
+// b4, l4 — готовые списки подсетей (необязательно: по умолчанию — прочитать из конфига).
+export function refresh_bypass(b4, l4) {
+	let prev = U.read_json(C.APPLIED_FILE, {});
+	if (!prev.routing || !set_loaded('bypass4'))
+		return;
+	let s = '';
+	if (b4 != null) {
+		s = refill('bypass4', b4);
+		if (l4 != null && set_loaded('local4'))
+			s += refill('local4', l4);
+	}
+	else {
+		let cfg = F.load();
+		let tinfo = F.tunnel_info(cfg.iface);
+		s = refill('bypass4', bypass4(vps_ip(tinfo, prev), tinfo));
+		if (set_loaded('local4'))
+			s += refill('local4', F.local_subnets());
+	}
+	let tmp = C.RUN_DIR + '/bypass.nft';
+	writefile(tmp, s);
+	system('nft -f ' + U.shq(tmp) + ' >/dev/null 2>&1');
+	unlink(tmp);
+};
 
 // Применить настройки; итог — в res. Ошибка nft — res.error, остальное — исключением.
 // res.loaded — новая таблица уже в ядре.
@@ -191,6 +259,8 @@ function apply_config(res, prev) {
 	res.socket_mark = ctx.socket_mark;
 	res.counters_since = (length(ctx.counters) && prev.counters_since) ? prev.counters_since : time();
 	res.mosdns = false;
+	res.dns_hijack = cfg.dns_hijack;
+	res.zones = cfg.zones;
 	let text, plan, hosts;
 
 	if (cfg.routing) {
@@ -216,10 +286,27 @@ function apply_config(res, prev) {
 		if (cfg.dns_hijack)
 			ctx.local4 = F.local_subnets();
 
-		text = R.nft_full(cfg, plan, ctx);
+		// Отпечаток структуры таблицы: если не изменился, не перезагружать таблицу целиком.
+		let nft_key = nft_table_key(cfg, plan, ctx, gkey, vps, tinfo);
+		let skip_reload = (prev.routing && prev.nft_key == nft_key && table_loaded() && prev.gkey == gkey);
 
-		res.gkey = gkey;
-		res.geoip_sizes = ctx.set_sizes;
+		if (skip_reload) {
+			// Таблица не изменилась: обновить только bypass4 и local4.
+			refresh_bypass(ctx.bypass4, ctx.local4 ?? []);
+			res.gkey = gkey;
+			res.nft_key = nft_key;
+			res.nft_gen = prev.nft_gen ?? prev.time;
+			res.geoip_sizes = prev.geoip_sizes;
+			res.loaded = true;
+			text = null;
+		}
+		else {
+			text = R.nft_full(cfg, plan, ctx);
+			res.gkey = gkey;
+			res.nft_key = nft_key;
+			res.geoip_sizes = ctx.set_sizes;
+		}
+
 		res.missing = plan.missing;
 		res.geosite_order = map(plan.geosite, g => g.tag + '=' + g.action);
 	}
@@ -227,13 +314,16 @@ function apply_config(res, prev) {
 		text = R.nft_minimal(cfg, ctx);
 	}
 
-	U.write_atomic(C.NFT_FILE, text);
-	let r = U.run('nft -f ' + U.shq(C.NFT_FILE));
-	if (r.code != 0) {
-		res.error = 'nft: ' + trim(r.out);
-		return;
+	if (text != null) {
+		U.write_atomic(C.NFT_FILE, text);
+		let r = U.run('nft -f ' + U.shq(C.NFT_FILE));
+		if (r.code != 0) {
+			res.error = 'nft: ' + trim(r.out);
+			return;
+		}
+		res.loaded = true;
+		res.nft_gen = res.time;
 	}
-	res.loaded = true;
 
 	// Конфиг mosdns — только после загрузки таблицы: если nft её не принял, действующий
 	// конфиг mosdns должен по-прежнему соответствовать действующей (прежней) таблице.
@@ -355,35 +445,6 @@ export function teardown() {
 	unlink(C.HEALTH_FILE);
 	U.info('Труба остановлена: правила сняты');
 	lk?.close();
-};
-
-// Есть ли набор в таблице Трубы. Только он: «nft list table» вывел бы и все подсети geoip.
-function set_loaded(name) {
-	return system('nft list set inet ' + C.NFT_TABLE + ' ' + name + ' >/dev/null 2>&1') == 0;
-}
-
-function refill(name, elems) {
-	let s = 'flush set inet ' + C.NFT_TABLE + ' ' + name + '\n';
-	if (length(elems))
-		s += 'add element inet ' + C.NFT_TABLE + ' ' + name + ' { ' + join(', ', elems) + ' }\n';
-	return s;
-}
-
-// Обновить только наборы локальных подсетей — bypass4 и local4 (смена адресов интерфейсов).
-// Новая подсеть, пока её нет в local4, получает подмену источника DNS — это безвредно: dnsmasq ей и так ответил бы.
-export function refresh_bypass() {
-	let prev = U.read_json(C.APPLIED_FILE, {});
-	if (!prev.routing || !set_loaded('bypass4'))
-		return;
-	let cfg = F.load();
-	let tinfo = F.tunnel_info(cfg.iface);
-	let s = refill('bypass4', bypass4(vps_ip(tinfo, prev), tinfo));
-	if (set_loaded('local4'))
-		s += refill('local4', F.local_subnets());
-	let tmp = C.RUN_DIR + '/bypass.nft';
-	writefile(tmp, s);
-	system('nft -f ' + U.shq(tmp) + ' >/dev/null 2>&1');
-	unlink(tmp);
 };
 
 // Событие интерфейса (hotplug iface: ACTION, INTERFACE, DEVICE). Туннель: при подъёме — rp_filter 0 на его

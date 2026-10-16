@@ -44,11 +44,16 @@ function ct_in(marks) {
 // Решение для соединения держится в meta mark каждого пакета и в самом конце
 // postrouting записывается в ct mark. Так оно переживает чужие цепочки, которые
 // перезаписывают ct mark целиком раньше (например, «ct mark set ip dscp | 0x80»).
+// Для входящих соединений (MARK_INBOUND) не затираем ct mark на ответных пакетах (ct direction reply):
+// иначе ct mark мигал бы между 0x04000000 и 0x01000000 на каждом пакете.
 function persist_chain() {
 	let s = '\n\tchain persist {\n';
 	s += PERSIST_HOOK;
 	s += '\t\tmeta nfproto != ipv4 return\n';
-	for (let m in [ C.MARK_INBOUND, C.MARK_TUNNEL, C.MARK_DIRECT ])
+	// MARK_INBOUND: только на пакетах original direction (входящих из Туннеля), не на reply.
+	s += '\t\tct direction original meta mark and ' + hex(C.MARK_MASK) + ' == ' + hex(C.MARK_INBOUND) +
+		' ct mark set ct mark and ' + KEEP + ' or ' + hex(C.MARK_INBOUND) + ' return\n';
+	for (let m in [ C.MARK_TUNNEL, C.MARK_DIRECT ])
 		s += '\t\tmeta mark and ' + hex(C.MARK_MASK) + ' == ' + hex(m) +
 			' ct mark set ct mark and ' + KEEP + ' or ' + hex(m) + ' return\n';
 	s += '\t}\n';

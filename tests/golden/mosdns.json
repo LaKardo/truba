@@ -103,8 +103,7 @@
 			"args": {
 				"primary": "up_tunnel_0_ok",
 				"secondary": "up_tunnel_1_ok",
-				"threshold": 1,
-				"always_standby": true
+				"threshold": 100
 			}
 		},
 		{

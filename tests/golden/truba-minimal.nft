@@ -66,7 +66,7 @@ table inet truba {
 	chain persist {
 		type filter hook postrouting priority 300; policy accept;
 		meta nfproto != ipv4 return
-		meta mark and 0x0f000000 == 0x04000000 ct mark set ct mark and 0xf0ffffff or 0x04000000 return
+		ct direction original meta mark and 0x0f000000 == 0x04000000 ct mark set ct mark and 0xf0ffffff or 0x04000000 return
 		meta mark and 0x0f000000 == 0x01000000 ct mark set ct mark and 0xf0ffffff or 0x01000000 return
 		meta mark and 0x0f000000 == 0x02000000 ct mark set ct mark and 0xf0ffffff or 0x02000000 return
 	}

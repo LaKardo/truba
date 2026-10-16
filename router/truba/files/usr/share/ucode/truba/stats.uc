@@ -137,15 +137,14 @@ function save(hist, minutes) {
 const DNS_CHECK = 60;
 
 function dns_check() {
-	if (!U.read_json(C.APPLIED_FILE, null)?.routing)
+	let applied = U.read_json(C.APPLIED_FILE, null);
+	if (!applied?.routing || !applied?.dns_hijack)
 		return;
 	let lk = U.lock(C.LOCK_APPLY, true);
 	if (!lk)
 		return;
 	try {
-		let cfg = F.load();
-		if (cfg.routing && cfg.dns_hijack)
-			DNS.dns_heal(F.zone_devices(cfg.zones), true);
+		DNS.dns_heal(F.zone_devices(applied.zones), true);
 	}
 	catch (e) {
 		U.err('проверка DNS зон: ' + U.errmsg(e));
@@ -160,8 +159,8 @@ export function run() {
 		let m = int(U.now_ms()), t = time();
 		let applied = U.read_json(C.APPLIED_FILE, null);
 		save(hist, add(hist, snapshot(S.counters_raw(), applied?.counters_since, m, t)));
-		// По устройствам (ADR 0018): поколение — время применения, наборы при нём начаты заново.
-		DV.add(dev, DV.snapshot(S.dev_counters(), applied?.time, m, t));
+		// По устройствам (ADR 0018): поколение — nft_gen (момент перезагрузки таблицы), наборы при нём начаты заново.
+		DV.add(dev, DV.snapshot(S.dev_counters(), applied?.nft_gen ?? applied?.time, m, t));
 		DV.save(dev);
 		// Следующий замер — через STEP от начала этого, сколько бы ни шёл этот.
 		let wait = STEP * 1000 - (int(U.now_ms()) - m);

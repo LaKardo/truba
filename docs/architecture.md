@@ -388,8 +388,7 @@ table inet truba {
   }
 
   chain restore {
-    ct mark & 0x0f000000 == 0x04000000 meta mark set 0x01000000 return  # ответы на входящие
-    ct mark & 0x0f000000 == 0x01000000 meta mark set 0x01000000 return
+    ct mark & 0x0f000000 { 0x04000000, 0x01000000 } meta mark set 0x01000000 return  # ответы на входящие и «Туннель»
     ct mark & 0x0f000000 == 0x02000000 meta mark set 0x02000000 return
   }
 
@@ -405,11 +404,13 @@ table inet truba {
     meta mark set 0x01000000          # Режим «Всё в туннель»  (в «Выборочном» — 0x02000000)
   }
 
-  # Решение пакета → в соединение, последним: после всех, кто пишет ct mark целиком
+  # Решение пакета → в соединение, последним: после всех, кто пишет ct mark целиком.
+  # Для входящих соединений (MARK_INBOUND) ct mark записывается только на пакетах original direction,
+  # чтобы ответные пакеты из LAN не перетирали 0x04000000 на 0x01000000.
   chain persist {
     type filter hook postrouting priority 300; policy accept;
     meta nfproto != ipv4 return
-    meta mark & 0x0f000000 == 0x04000000 ct mark set ct mark & 0xf0ffffff | 0x04000000 return
+    ct direction original meta mark & 0x0f000000 == 0x04000000 ct mark set ct mark & 0xf0ffffff | 0x04000000 return
     meta mark & 0x0f000000 == 0x01000000 ct mark set ct mark & 0xf0ffffff | 0x01000000 return
     meta mark & 0x0f000000 == 0x02000000 ct mark set ct mark & 0xf0ffffff | 0x02000000 return
   }
@@ -485,19 +486,19 @@ log: { level: warn }
 api: { http: "127.0.0.1:5336" }   # порт DNS + 1: счётчики кэша (/metrics) для «Обзора»; там же /debug/pprof — только 127.0.0.1.
                                   # Ошибка API останавливает mosdns целиком: если порт занят другой программой (netstat -lntp), API не включается — пропадают только счётчики
 plugins:
-  # по одному domain_set на каждую Категорию с явным Действием; файлы — результат распаковщика
-  - { tag: c_category_ads,       type: domain_set, args: { files: [/var/lib/truba/geosite/category-ads.txt] } }
-  - { tag: c_category_ru,        type: domain_set, args: { files: [/var/lib/truba/geosite/category-ru.txt] } }
-  - { tag: c_category_cdn_ru,    type: domain_set, args: { files: [/var/lib/truba/geosite/category-cdn-ru.txt] } }
-  - { tag: c_private,            type: domain_set, args: { files: [/var/lib/truba/geosite/private.txt] } }
+  # Соседние Категории с одним Действием — один domain_set: план упорядочен по Приоритету,
+  # и первое совпадение в группе решает то же, что решило бы первое среди её Категорий.
+  - { tag: c_0,       type: domain_set, args: { files: [/var/lib/truba/geosite/category-ru.txt, /var/lib/truba/geosite/category-cdn-ru.txt, /var/lib/truba/geosite/private.txt] } }
+  - { tag: c_1,       type: domain_set, args: { files: [/var/lib/truba/geosite/category-ads.txt] } }
 
-  # Серверы одного пути: свой forward на каждый, запрос сразу ко всем, ответ — первый годный.
-  # idle_timeout 360: соединение живёт в паузах до 6 мин (сам mosdns закрыл бы DoH через 30 с).
+  # Серверы одного пути: свой forward на каждый, fallback без always_standby и с threshold 100 мс.
+  # Если первый сервер отвечает быстро (unbound на Трубе), второй не опрашивается; если первый
+  # недоступен или долго не отвечает, подключается второй. idle_timeout 360: соединение живёт в паузах до 6 мин.
   - { tag: up_tunnel_0, type: forward, args: { upstreams: [ { addr: "udp://10.77.77.1", idle_timeout: 360, so_mark: 0x01000000 } ] } }   # unbound на Трубе (ADR 0013)
   - { tag: up_tunnel_0_ok, type: sequence, args: [ { exec: $up_tunnel_0 }, { matches: [ "!rcode 0 3" ], exec: drop_resp } ] }   # SERVFAIL, REFUSED… — ждать другой сервер
   - { tag: up_tunnel_1, type: forward, args: { upstreams: [ { addr: "https://1.1.1.1/dns-query", idle_timeout: 360, so_mark: 0x01000000 } ] } }   # запасной
   - { tag: up_tunnel_1_ok, type: sequence, args: [ { exec: $up_tunnel_1 }, { matches: [ "!rcode 0 3" ], exec: drop_resp } ] }
-  - { tag: up_tunnel, type: fallback, args: { primary: up_tunnel_0_ok, secondary: up_tunnel_1_ok, threshold: 1, always_standby: true } }
+  - { tag: up_tunnel, type: fallback, args: { primary: up_tunnel_0_ok, secondary: up_tunnel_1_ok, threshold: 100 } }
   # up_direct — так же из tls+pipeline://common.dot.dns.yandex.net с dial_addr 77.88.8.8 и 77.88.8.1;
   # один сервер — просто forward.
 
@@ -550,7 +551,7 @@ plugins:
 
 Настоящий конфиг генерирует [dns.uc](../router/truba/files/usr/share/ucode/truba/dns.uc) в виде JSON (подмножество YAML). Эталон — `tests/golden/mosdns.json`, запуск проверяется на mosdns 5.3.3 из фида в тестах Роутера.
 
-**Серверы DNS.** Каждый запрос, которого нет в кэше, уходит сразу ко всем серверам своего пути, и в ответ идёт первый годный: NOERROR или NXDOMAIN. Поэтому зависший или оборвавший соединение сервер не задерживает ответ. Штатный `concurrent` плагина forward для этого не годится: он выбирает сервер для каждого параллельного запроса случайно и с повторами, и при двух серверах половина запросов ушла бы дважды к одному. Простаивающее соединение mosdns держит 6 минут (`idle_timeout` 360 с) — чуть меньше, чем Cloudflare (400 с), чтобы соединение закрывал mosdns, а не сервер в момент запроса. Его собственный срок для DoH — 30 с, хотя серверы держат соединение дольше: Google — 240 с, Cloudflare — 400 с. Без этого первый промах кэша после паузы ждал бы новых TCP и TLS: через Туннель это 100–170 мс. Если сервер закрывает соединение раньше (Яндекс — через 30 с), mosdns просто открывает новое. Первый сервер «Туннеля» по умолчанию — unbound на самой Трубе (`udp://10.77.77.1`, ADR 0013). Ему Роутер шлёт обычный UDP внутри Туннеля, а TLS до Cloudflare и Google держит VPS, рядом с ними. Поэтому промах через Туннель стоит одну поездку через Туннель всегда, даже после долгой паузы: в паузах до 6 минут отвечает открытый DoH Роутера, дольше — unbound, которому новое соединение с Cloudflare стоит ~14 мс. DoH 1.1.1.1 — запасной: если сервера на Трубе нет, его порт сразу отвечает «закрыт». DoT «Напрямую» идёт с pipelining (`tls+pipeline://`): несколько запросов, пришедших разом, идут по одному соединению, а не открывают TLS на каждый. Яндекс, Cloudflare и Google отвечают на такие запросы в любом порядке, как требует RFC 7766. Без pipelining mosdns не применяет к DoT и `idle_timeout`.
+**Серверы DNS.** Для каждого пути (Туннель, Напрямую) можно указать несколько серверов. Они объединяются через `fallback` с `threshold` 100 мс: если первый сервер отвечает быстро, второй не опрашивается; если первый недоступен (закрытый порт) или не отвечает ошибкой, mosdns сразу обращается к secondary; если первый долго не отвечает (холодное DoT, зависший сервер), через 100 мс подключается второй. Штатный `concurrent` плагина forward для этого не годится: он выбирает сервер для каждого параллельного запроса случайно и с повторами, и при двух серверах половина запросов ушла бы дважды к одному. Простаивающее соединение mosdns держит 6 минут (`idle_timeout` 360 с) — чуть меньше, чем Cloudflare (400 с), чтобы соединение закрывал mosdns, а не сервер в момент запроса. Его собственный срок для DoH — 30 с, хотя серверы держат соединение дольше: Google — 240 с, Cloudflare — 400 с. Без этого первый промах кэша после паузы ждал бы новых TCP и TLS: через Туннель это 100–170 мс. Если сервер закрывает соединение раньше (Яндекс — через 30 с), mosdns просто открывает новое. Первый сервер «Туннеля» по умолчанию — unbound на самой Трубе (`udp://10.77.77.1`, ADR 0013). Ему Роутер шлёт обычный UDP внутри Туннеля, а TLS до Cloudflare и Google держит VPS, рядом с ними. Поэтому промах через Туннель стоит одну поездку через Туннель всегда, даже после долгой паузы: в паузах до 6 минут отвечает открытый DoH Роутера, дольше — unbound, которому новое соединение с Cloudflare стоит ~14 мс. DoH 1.1.1.1 — запасной: если сервера на Трубе нет, его порт сразу отвечает «закрыт». DoT «Напрямую» идёт с pipelining (`tls+pipeline://`): несколько запросов, пришедших разом, идут по одному соединению, а не открывают TLS на каждый. Яндекс, Cloudflare и Google отвечают на такие запросы в любом порядке, как требует RFC 7766. Без pipelining mosdns не применяет к DoT и `idle_timeout`.
 
 **Кэш.** Ответ хранится свежим столько, сколько разрешил сервер, но не дольше часа. Устройствам доменов из Категорий он уходит с TTL не больше `ttl_max` (300 с): они часто перепроверяют адрес, и после сброса наборов IP быстро возвращаются (ADR 0007). Запись в кэше при этом не устаревает каждые 5 минут, и mosdns не обновляет её в фоне так часто. На Роутере владельца у четверти записей «Напрямую» TTL сервера больше 300 с (медиана — 9 минут). Граница проходит по цепочке `fetch_*`: кэш сохраняет ответ, когда завершилась часть цепочки после него. Поэтому `ttl` для устройств стоит после неё, а не рядом с сервером. Фоновое обновление ленивого кэша идёт только в `fetch_*`, без nftset: новые IP попадут в набор со следующим ответом устройству, тоже до него.
 
@@ -787,7 +788,7 @@ service_triggers() {
 | `/etc/apk/keys/truba.pem`, `/etc/apk/repositories.d/truba.list` | ключ и адрес фида | да (keep.d) |
 | `/var/lib/truba/` | распакованные списки, `categories.json`, хеши | нет (tmpfs, восстанавливается) |
 | `/var/etc/truba/` | `mosdns.yaml`, `truba.nft` | нет (генерируется) |
-| `/var/run/truba/` | `applied.json`, `health.json` (контроль Туннеля), `nat.json` (итог «Проверки NAT»), `devices.json` (трафик по устройствам, §4.10), `tunnel-test.json` (итог «Проверки Туннеля»), `rates.json` и `rates-min.json` (история скорости, §4.10) | нет (оперативная память) |
+| `/var/run/truba/` | `applied.json`, `health.json` (контроль Туннеля), `nat.json` (итог «Проверки NAT»), `devices.json` (трафик по устройствам, §4.10), `tunnel-test.json` (итог «Проверки Туннеля»), `rates.json` и `rates-min.json` (история скорости, §4.10), `dns-heal.json` (итог проверки DNS зон), `lists.json` (состояние обновления списков) | нет (оперативная память) |
 
 ---
 

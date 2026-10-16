@@ -176,6 +176,14 @@ export function nslookup(host, server) {
 	return uniq(ips);
 };
 
+// FNV-1a 32 бита для структурного ключа (отпечатка) данных.
+export function fnv1a(s) {
+	let h = 0x811c9dc5;
+	for (let i = 0; i < length(s); i++)
+		h = ((h ^ ord(s, i)) * 0x01000193) & 0xffffffff;
+	return h;
+};
+
 export function is_ipv4(s) {
 	return (type(s) == 'string' && match(s, /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/) && ip2int(s) != null);
 };

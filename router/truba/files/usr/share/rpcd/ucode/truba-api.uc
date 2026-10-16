@@ -1,10 +1,16 @@
 // rpcd: ubus-объект `truba` — API службы для LuCI и скриптов (ubus call truba status).
 // Логика — в /usr/sbin/truba; плагин — в пакете truba, чтобы API менялся вместе с ней (ADR 0008).
+// Быстрые синхронные методы чтения (status, lists, sets, categories, schema, devices, log)
+// вызывают ucode-модули напрямую без fork/exec CLI, экономя 2 процесса на каждый опрос.
 'use strict';
 
 import { popen, readfile } from 'fs';
 import * as C from 'truba.const';
 import * as U from 'truba.util';
+import * as S from 'truba.state';
+import * as F from 'truba.conf';
+import * as CO from 'truba.core';
+import * as DV from 'truba.devices';
 
 // rpcd работает с umask 077: без своей маски файлы, которые пишут запущенные им команды (Наборы
 // правил, состояние, распакованные списки), получали бы права 600, а из cron и консоли — 644.
@@ -45,39 +51,39 @@ function result(path) {
 const methods = {
 	status: {
 		call: function() {
-			return truba('status');
+			return S.status();
 		}
 	},
 
 	lists: {
 		call: function() {
-			return truba('lists');
+			return S.lists();
 		}
 	},
 
 	categories: {
 		call: function() {
-			return truba('categories');
+			return CO.categories();
 		}
 	},
 
 	// Схема настроек и константы службы (ADR 0015): умолчания, пределы и имена интерфейс берёт отсюда.
 	schema: {
 		call: function() {
-			return truba('schema');
+			return F.schema();
 		}
 	},
 
 	sets: {
 		call: function() {
-			return truba('sets');
+			return S.sets();
 		}
 	},
 
 	// Устройства: трафик из истории (её пишет процесс truba stats), имена, зоны и Политики.
 	devices: {
 		call: function() {
-			return truba('devices');
+			return DV.list();
 		}
 	},
 
@@ -166,8 +172,7 @@ const methods = {
 			let n = int(req.args?.lines ?? 200);
 			if (n < 10 || n > 2000)
 				n = 200;
-			// Строки отбирает команда truba (state.log): ей нужны настройки, а плагин — тонкий (ADR 0008).
-			return truba('log ' + n);
+			return S.log(n);
 		}
 	},
 };

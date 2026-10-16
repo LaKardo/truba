@@ -57,9 +57,9 @@ check "Проверить домен: IP из DNS «Напрямую» — че�
 check "Проверить IP: geoip:ru — через набор в ядре" eval 'truba check 77.88.8.8 > /tmp/c2 && grep -q "\"reason\": \"geoip\"" /tmp/c2 && [ "$(jsonfilter -i /tmp/c2 -e "@.ips[0].sets.gi_direct")" = true ]'
 check "status и sets: счётчики кэша и IP из DNS" eval '[ "$(truba status | jsonfilter -e "@.dns_cache.query")" -gt 0 ] && [ "$(truba status | jsonfilter -e "@.dns_cache.max")" -eq 65536 ] && [ "$(truba sets | jsonfilter -e "@.dns.direct")" -ge 1 ] && [ "$(truba sets | jsonfilter -e "@.dns.tunnel")" -ge 1 ]'
 
-section "второй сервер DNS страхует каждый запрос"
-# Первый сервер «Туннеля» завис: принимает запросы и молчит. Запрос идёт сразу к обоим серверам,
-# поэтому ответ второго не ждёт тайм-аута первого (5 с).
+section "второй сервер DNS страхует медленный первый"
+# Первый сервер «Туннеля» завис: принимает запросы и молчит. Через порог 100 мс запрос уходит
+# второму серверу, поэтому ответ не ждёт тайм-аута первого (5 с).
 ucode -e "import * as socket from 'socket'; let s = socket.create(socket.AF_INET, socket.SOCK_DGRAM); s.bind({ address: '127.0.0.1', port: 5409 }); sleep(300000);" & MUTE=$!
 PID="$(pidof mosdns)"
 uci -q batch <<-'EOF'

@@ -60,6 +60,10 @@ async function ubus(object, method, params = {}) {
 async function applied(prevTime, cond) {
 	for (let i = 0; i < 90; i++) {
 		const st = await ubus('truba', 'status').catch(() => null);
+		if (st?.applied?.time > prevTime && st.applied.error) {
+			console.log(`FAIL  применение настроек — ${st.applied.error}`);
+			return false;
+		}
 		if (st?.applied?.time > prevTime && !st.applied.error && await cond(st))
 			return true;
 		await sleep(500);

@@ -11,6 +11,7 @@ import { readfile, writefile, mkdir, popen, unlink } from 'fs';
 import { cursor } from 'uci';
 import * as T from 'tlib';
 import * as C from 'truba.const';
+import * as U from 'truba.util';
 import * as P from 'truba.plan';
 import * as R from 'truba.render';
 import * as F from 'truba.conf';
@@ -204,7 +205,7 @@ for (let p in three.plugins) {
 }
 let top = filter(three.plugins, p => p.tag == 'up_tunnel')[0];
 check('mosdns: три сервера — каждый в своём forward, все под up_tunnel, ссылки только назад',
-	refs_ok && top?.type == 'fallback' && top.args.always_standby && length(filter(servers, a => index(a, 'udp://192.0.2.') == 0)) == 3);
+	refs_ok && top?.type == 'fallback' && top.args.threshold == 100 && !top.args.always_standby && length(filter(servers, a => index(a, 'udp://192.0.2.') == 0)) == 3);
 // Поколение кэша: меняется вместе с серверами, Режимом и Действиями, но не с ttl_max.
 let gen = (dns, p) => DNS.cache_dump(mk(dns), p ?? plan);
 check('кэш: дамп по поколению — новый при смене серверов, Режима и Действия, прежний при смене ttl_max',
@@ -854,9 +855,15 @@ check('conntrack: 5000 соединений к 25 адресам — 20 адре
 
 // ---- ubus-API: методы, которые читают файлы, без rpcd ----
 
+check('FNV-1a: известный вектор и 32-битное число', U.fnv1a('hello') == 0x4f9f2cab && type(U.fnv1a('труба')) == 'int');
+check('FNV-1a: одинаковый ввод стабилен, изменение заметно', U.fnv1a('abc') == U.fnv1a('abc') && U.fnv1a('abc') != U.fnv1a('abd'));
+
 let api = loadfile(PLUGIN)()?.truba;
 check('API: плагин регистрирует объект truba', api?.status != null);
 check('API: плагин без своих путей и своей shq', !match(readfile(PLUGIN), /'\/(var|usr|tmp|etc)\/|function shq/));
+check('API: прямые методы чтения вызываются без ошибки',
+	api.status.call() != null && api.lists.call() != null && api.sets.call() != null && api.categories.call() != null &&
+	api.schema.call()?.sections != null && api.devices.call() != null);
 let now = time();
 system([ 'mkdir', '-p', C.RUN_DIR ]);
 writefile(C.RATES_FILE, sprintf('%J', { step: 5, points: [ [ now - 700, 1, 1, 1, 1 ], [ now - 300, 2, 2, 2, 2 ], [ now - 10 ], [ now - 5, 3, 3, 3, 3 ] ] }));
