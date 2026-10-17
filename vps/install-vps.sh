@@ -3,11 +3,14 @@
 # Все порты публичного IP, кроме SSH и порта Туннеля, уходят на Роутер (DNAT 1:1),
 # исходящий трафик Роутера выходит от IP VPS с сохранением порта (SNAT).
 #
-#   install-vps.sh install [--ssh-port N] [--awg-port N] [--no-confirm]
+#   install-vps.sh install [--ssh-port N] [--awg-port N] [--mtu N|auto] [--no-confirm]
 #   install-vps.sh show-config
 #   install-vps.sh rotate-keys
 #   install-vps.sh random-trailers on|off
 #   install-vps.sh status
+#   install-vps.sh mtu-check
+#   install-vps.sh diag [секунд]
+#   install-vps.sh repair-module
 #   install-vps.sh uninstall [--purge]
 #
 # Повторный запуск install безопасен: ключи и порты берутся из /etc/truba/pipe.env.
@@ -25,6 +28,7 @@ ROUTER_CONF="$OUT_DIR/router.conf"
 SSHD_DROPIN=/etc/ssh/sshd_config.d/10-truba.conf
 F2B_JAIL=/etc/fail2ban/jail.d/truba.local
 PIPE_UNIT=/etc/systemd/system/truba-pipe.service
+AWG_DROPIN=/etc/systemd/system/awg-quick@$AWG_IF.service.d/10-truba.conf
 SYSCTL_FILE=/etc/sysctl.d/90-truba.conf
 # Каталоги sysctl.d по старшинству: из файлов с одинаковым именем systemd-sysctl берёт первый.
 SYSCTL_DIRS="/etc/sysctl.d /run/sysctl.d /usr/local/lib/sysctl.d /usr/lib/sysctl.d"
@@ -32,22 +36,36 @@ MODULES_FILE=/etc/modules-load.d/truba.conf
 UNBOUND_CONF=/etc/unbound/unbound.conf.d/truba.conf
 UNATTENDED_CONF=/etc/apt/apt.conf.d/52truba
 JOURNAL_CONF=/etc/systemd/journald.conf.d/90-truba.conf
+LOCK_FILE=/run/lock/truba-installer.lock
+# Что установщик застал и поменял в системе (UFW, unbound) — для uninstall. Хранится отдельно от
+# pipe.env: откат установки возвращает pipe.env, а эти отметки должны остаться.
+OWNED="$STATE_DIR/owned.env"
+# Снимок файлов на время установки или rotate-keys.
+TXN_DIR="$STATE_DIR/txn"
+# Отдельный таймер systemd откатывает SSH и правила, если новый порт не подтвердили, даже когда
+# сам установщик убит вместе с оборвавшейся сессией SSH.
+ROLLBACK_UNIT=truba-rollback
 
 VPS_TUN=10.77.77.1
 RTR_TUN=10.77.77.2
 # MTU Туннеля — не больше MTU_MAX и такой, чтобы пакет Туннеля с обёрткой помещался в сеть
-# VPS целиком: IPv4 20 + UDP 8 + заголовок и тег AWG 32 + S4 до 27 = 87 байт. Иначе VPS режет
-# каждый полноразмерный пакет на два фрагмента: у части провайдеров сеть VPS — 1400, а не 1500.
+# VPS целиком: IPv4 20 + UDP 8 + заголовок и тег AWG 32 + S4 до 27 + добавка AWG 3.1 до 15 = 102
+# байта. Иначе VPS режет полноразмерные пакеты на два фрагмента: у части провайдеров сеть VPS —
+# 1400, а не 1500. Добавка ограничена окном, которое модуль узнаёт и по принятым пакетам, поэтому
+# на неё тоже оставлен запас.
 MTU_MAX=1380
-TUN_OVERHEAD=87
+# Меньше — слишком мелкие пакеты: пути уже 1280 + 102 байт почти не встречаются.
+MTU_MIN=1280
+TUN_OVERHEAD=102
 # AWG 3.1. Добавка к пакетам данных — случайная, вместо дополнения до кратного 16: иначе длины
-# всех пакетов Туннеля дают один и тот же остаток от деления на 16. В среднем это те же ~7,5 байта,
-# а полноразмерные пакеты не растут: добавка не выходит за самый большой пакет Туннеля.
+# всех пакетов Туннеля дают один и тот же остаток от деления на 16. В среднем это те же ~7,5 байта.
 AWG_PADDING=0-15
 # Keepalive Роутера держит открытым NAT его провайдера. Период случайный, чтобы у простаивающего
 # Туннеля не было ровного ритма; верхняя граница — прежние 25 с, так что NAT не закроется раньше.
 AWG_KEEPALIVE=15-25
 CONFIRM_TIMEOUT=120
+# Таймер отката срабатывает позже окна подтверждения: сначала откатывает сам установщик.
+ROLLBACK_DELAY=$((CONFIRM_TIMEOUT + 60))
 # Сколько ждать apt, занятый другим процессом (на свежем VPS — cloud-init и автообновления), с.
 APT_WAIT=600
 BOOT_DIR=/boot
@@ -88,13 +106,19 @@ put_file() {
 	fi
 }
 
-# MTU Туннеля по MTU интерфейса WAN: при 1500 — 1380, при 1400 — 1313.
-tunnel_mtu() {
+# MTU Туннеля по MTU интерфейса WAN: при 1500 — 1380, при 1400 — 1298.
+auto_mtu() {
 	local nic m
 	nic=$(cat "$SYS_NET/${WAN_IF:-}/mtu" 2>/dev/null) || nic=1500
 	m=$((nic - TUN_OVERHEAD))
 	[ "$m" -le "$MTU_MAX" ] || m=$MTU_MAX
 	echo "$m"
+}
+
+# Заданный вручную (--mtu, TUN_MTU в pipe.env) — например, если путь до дома уже сети VPS
+# (PPPoE, мобильная связь): его показывает mtu-check.
+tunnel_mtu() {
+	if [ -n "${TUN_MTU:-}" ]; then echo "$TUN_MTU"; else auto_mtu; fi
 }
 
 port_busy() { ss -Hlntu "( sport = :$1 )" 2>/dev/null | grep -q .; }
@@ -111,11 +135,51 @@ pick_port() {
 	die "не удалось подобрать свободный порт"
 }
 
-load_state() {
-	# shellcheck disable=SC1090
-	[ -f "$STATE" ] && . "$STATE"
+STATE_KEYS="WAN_IF PUB_IP SSH_PORT AWG_PORT AWG_PROTO VPS_PRIV VPS_PUB RTR_PRIV RTR_PUB PSK JC JMIN JMAX
+S1 S2 S3 S4 H1 H2 H3 H4 I1 HPK RANDOM_TRAILERS SSH_CONFIRMED SSH_FALLBACK TUN_MTU
+UFW_DISABLED UNBOUND_PREEXISTING RESOLVCONF_ENABLED"
+
+# Допустимо ли значение поля pipe.env. Пустое — у полей, которых может ещё не быть.
+state_value_ok() {
+	local k=$1 v=$2
+	[ -n "$v" ] || return 0
+	case $k in
+		WAN_IF) [[ $v =~ ^[A-Za-z0-9_.@:-]{1,15}$ ]] ;;
+		PUB_IP) [[ $v =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]] ;;
+		SSH_PORT|AWG_PORT|SSH_FALLBACK) [[ $v =~ ^[0-9]{1,5}$ ]] && [ "$v" -ge 1 ] && [ "$v" -le 65535 ] ;;
+		AWG_PROTO) [[ $v =~ ^[123]$ ]] ;;
+		VPS_PRIV|VPS_PUB|RTR_PRIV|RTR_PUB|PSK|HPK) [[ $v =~ ^[A-Za-z0-9+/=]+$ ]] ;;
+		JC|JMIN|JMAX|S1|S2|S3|S4) [[ $v =~ ^[0-9]{1,5}$ ]] ;;
+		TUN_MTU) [[ $v =~ ^[0-9]{4}$ ]] && [ "$v" -ge "$MTU_MIN" ] && [ "$v" -le "$MTU_MAX" ] ;;
+		H1|H2|H3|H4) [[ $v =~ ^[0-9]{1,10}(-[0-9]{1,10})?$ ]] ;;
+		I1) [[ $v =~ ^[A-Za-z0-9\<\>\ ]+$ ]] ;;
+		RANDOM_TRAILERS|SSH_CONFIRMED|UFW_DISABLED|UNBOUND_PREEXISTING|RESOLVCONF_ENABLED) [[ $v =~ ^[01]$ ]] ;;
+		*) return 0 ;;
+	esac
+}
+
+# pipe.env и owned.env читаются как данные, а не исполняются: только строки KEY='значение' из
+# известных полей с проверенным значением. Поля прежних версий (например, AWG_VERSION) пропускаются.
+load_env() {
+	local f=$1 meta line k v
+	[ -e "$f" ] || return 0
+	if [ ! -f "$f" ] || [ -L "$f" ]; then die "$f: не обычный файл"; fi
+	meta=$(stat -c '%u %a' "$f")
+	if [ "${meta% *}" != 0 ] || (( (8#${meta#* } & 8#022) != 0 )); then
+		die "$f: владелец должен быть root, запись — только у владельца (chown root; chmod 600)"
+	fi
+	while IFS= read -r line || [ -n "$line" ]; do
+		[[ -z $line || $line == \#* ]] && continue
+		[[ $line =~ ^([A-Z][A-Z0-9_]*)=\'([^\']*)\'$ ]] || die "$f: неверная строка «${line%%=*}=…»"
+		k=${BASH_REMATCH[1]}; v=${BASH_REMATCH[2]}
+		[[ " ${STATE_KEYS//$'\n'/ } " == *" $k "* ]] || continue
+		state_value_ok "$k" "$v" || die "$f: недопустимое значение $k"
+		printf -v "$k" '%s' "$v"
+	done < "$f"
 	return 0
 }
+
+load_state() { load_env "$STATE"; }
 
 save_state() {
 	install -d -m 700 "$STATE_DIR"
@@ -146,7 +210,35 @@ save_state() {
 		RANDOM_TRAILERS='${RANDOM_TRAILERS:-0}'
 		SSH_CONFIRMED='${SSH_CONFIRMED:-0}'
 		SSH_FALLBACK='${SSH_FALLBACK:-}'
+		TUN_MTU='${TUN_MTU:-}'
 	EOF
+}
+
+# Что было в системе до первой установки. Пустое значение — неизвестно (установка прежней версии).
+save_owned() {
+	install -d -m 700 "$STATE_DIR"
+	put_file 600 "$OWNED" <<-EOF
+		UFW_DISABLED='${UFW_DISABLED:-}'
+		UNBOUND_PREEXISTING='${UNBOUND_PREEXISTING:-}'
+		RESOLVCONF_ENABLED='${RESOLVCONF_ENABLED:-}'
+	EOF
+}
+
+# Записывается один раз, до установки пакетов. У Трубы прежней версии исходное состояние уже не
+# узнать: поля остаются пустыми, и uninstall ведёт себя как раньше. Отметка ufw ставится позже,
+# когда ufw действительно выключен (txn_commit).
+record_owned() {
+	if [ -f "$OWNED" ]; then load_env "$OWNED"; return 0; fi
+	UFW_DISABLED='' UNBOUND_PREEXISTING='' RESOLVCONF_ENABLED=''
+	# Трубы ещё нет: система в исходном состоянии.
+	if [ -z "${VPS_PRIV:-}" ] && [ ! -e "$PIPE_UNIT" ]; then
+		UFW_DISABLED=0
+		UNBOUND_PREEXISTING=0
+		if systemctl is-enabled -q unbound 2>/dev/null; then UNBOUND_PREEXISTING=1; fi
+		RESOLVCONF_ENABLED=0
+		if systemctl is-enabled -q unbound-resolvconf.service 2>/dev/null; then RESOLVCONF_ENABLED=1; fi
+	fi
+	save_owned
 }
 
 # ---------- apt ----------
@@ -276,18 +368,120 @@ running_headers() {
 	echo "$h"
 }
 
-# Есть ли модуль amneziawg у самого нового установленного ядра — его VPS загрузит после
-# перезагрузки. Печатает строку для status; без модуля — предупреждение.
-kernel_module_check() {
+# Ядра, у которых нет модуля amneziawg. Проверяются все установленные: какое загрузится
+# следующим, решает GRUB, и это не обязательно самое новое.
+kernels_without_module() {
 	local k
-	k=$(find "$BOOT_DIR" -maxdepth 1 -name 'vmlinuz-*' -printf '%f\n' 2>/dev/null | sed 's/^vmlinuz-//' | sort -V | tail -1) || true
-	[ -n "$k" ] || return 0
-	if find "$MODULES_DIR/$k" -name 'amneziawg.ko*' 2>/dev/null | grep -q .; then
-		echo "Модуль amneziawg для ядра после перезагрузки ($k): есть"
-	else
-		warn "модуля amneziawg нет для ядра $k: после перезагрузки VPS Туннель не поднимется. Поставьте linux-headers-$k и выполните dkms autoinstall -k $k"
+	find "$BOOT_DIR" -maxdepth 1 -name 'vmlinuz-*' -printf '%f\n' 2>/dev/null | sed 's/^vmlinuz-//' | sort -V \
+		| while IFS= read -r k; do
+			find "$MODULES_DIR/$k" -name 'amneziawg.ko*' 2>/dev/null | grep -q . || echo "$k"
+		done
+}
+
+# Строка для status; если у какого-то ядра модуля нет — предупреждение и код 1.
+kernel_module_check() {
+	local missing k
+	find "$BOOT_DIR" -maxdepth 1 -name 'vmlinuz-*' 2>/dev/null | grep -q . || return 0
+	missing=$(kernels_without_module | xargs)
+	if [ -z "$missing" ]; then
+		echo "Модуль amneziawg: есть у всех установленных ядер"
+		return 0
+	fi
+	for k in $missing; do
+		if [ "$k" = "$(uname -r)" ]; then
+			warn "модуля amneziawg нет для работающего ядра $k: install-vps.sh repair-module"
+		else
+			warn "модуля amneziawg нет для ядра $k: если VPS загрузится с ним, Туннель не поднимется. Выполните install-vps.sh repair-module"
+		fi
+	done
+	return 1
+}
+
+# Сборка модуля для ядер без него: заголовки (если есть в архиве), DKMS, depmod, проверка.
+repair_kernel() {
+	local k=$1 log
+	if [ ! -e "$MODULES_DIR/$k/build" ]; then
+		if pkg_available "linux-headers-$k"; then
+			say "$k: ставлю заголовки ядра"
+			apt_get install -y -qq "linux-headers-$k" >/dev/null || { warn "$k: заголовки не поставились"; return 1; }
+		else
+			warn "$k: заголовков нет в архиве Ubuntu — модуль не собрать. Удалите это ядро или перейдите на новое (apt-get full-upgrade)"
+			return 1
+		fi
+	fi
+	say "$k: сборка модуля amneziawg (DKMS)"
+	if ! log=$(dkms autoinstall -k "$k" 2>&1); then
+		printf '%s\n' "$log" | tail -20 >&2
+		warn "$k: DKMS не собрал модуль — журнал сборки: /var/lib/dkms/amneziawg/*/build/make.log"
 		return 1
 	fi
+	depmod -a "$k"
+	find "$MODULES_DIR/$k" -name 'amneziawg.ko*' 2>/dev/null | grep -q . || { warn "$k: модуль так и не появился"; return 1; }
+	say "$k: модуль собран"
+}
+
+cmd_repair_module() {
+	need_root
+	load_state
+	local k fails=0 running list
+	running=$(uname -r)
+	command -v dkms >/dev/null || die "нет dkms: сначала install"
+	export DEBIAN_FRONTEND=noninteractive
+	list=$(kernels_without_module)
+	if [ -z "$list" ]; then
+		say "Модуль amneziawg есть у всех установленных ядер"
+	else
+		apt_update
+		while IFS= read -r k; do
+			repair_kernel "$k" || fails=$((fails + 1))
+		done <<< "$list"
+	fi
+	# Работающее ядро: модуль загружается, а остановившийся Туннель поднимается.
+	if find "$MODULES_DIR/$running" -name 'amneziawg.ko*' 2>/dev/null | grep -q .; then
+		modprobe amneziawg || { warn "модуль amneziawg не загрузился: dmesg | tail"; fails=$((fails + 1)); }
+		if [ -n "${VPS_PRIV:-}" ] && [ ! -d "$SYS_NET/$AWG_IF" ]; then
+			if systemctl restart "$(awg_unit)"; then
+				say "Туннель поднят"
+			else
+				warn "Туннель не поднялся: journalctl -u $(awg_unit)"
+				fails=$((fails + 1))
+			fi
+		fi
+	fi
+	[ "$fails" -eq 0 ] || die "не всё удалось исправить (ошибок: $fails)"
+}
+
+# Ключ PPA add-apt-repository берёт с Launchpad и встраивает в Signed-By файла источника.
+# Сверяем полный отпечаток с закреплённым: подменённый ключ дал бы чужой модуль ядра.
+PPA_FPR=75C9DD72C799870E310542E24166F2C257290828
+PPA_SOURCES_DIR=/etc/apt/sources.list.d
+
+# Отпечатки основных ключей в Signed-By файла .sources (встроенный ключ или путь к нему).
+ppa_key_fprs() {
+	local f=$1 signed
+	signed=$(awk '/^Signed-By:/ { sub(/^Signed-By:[[:space:]]*/, ""); print; exit }' "$f")
+	if [ -n "$signed" ] && [ -f "$signed" ]; then
+		gpg --show-keys --with-colons "$signed" 2>/dev/null
+	else
+		awk '/^Signed-By:/ { on = 1; next } on && /^[^ ]/ { exit } on' "$f" \
+			| sed 's/^ //; s/^\.$//' | gpg --show-keys --with-colons 2>/dev/null
+	fi | awk -F: '$1 == "pub" { want = 1; next } want && $1 == "fpr" { print $10; want = 0 }'
+}
+
+ppa_key_check() {
+	local f fprs n=0
+	command -v gpg >/dev/null || { warn "нет gpg: ключ PPA amnezia не проверен"; return 0; }
+	for f in "$PPA_SOURCES_DIR"/*.sources "$PPA_SOURCES_DIR"/*.list; do
+		if [ ! -f "$f" ] || ! grep -qs 'amnezia/ppa' "$f"; then continue; fi
+		n=$((n + 1))
+		case $f in
+			*.list) warn "$f: старый формат источника, ключ PPA не проверен"; continue ;;
+		esac
+		fprs=$(ppa_key_fprs "$f")
+		[ "$fprs" = "$PPA_FPR" ] \
+			|| die "$f: ключ PPA amnezia не тот (${fprs:-нет ключа}), ожидается $PPA_FPR. Удалите файл и запустите install снова"
+	done
+	[ "$n" -gt 0 ] || die "источник PPA amnezia не подключён"
 }
 
 install_packages() {
@@ -302,6 +496,7 @@ install_packages() {
 		fi
 		add-apt-repository -y -n ppa:amnezia/ppa >/dev/null
 	fi
+	ppa_key_check
 	apt_update
 	local hdr metas
 	if ! hdr=$(running_headers); then
@@ -319,11 +514,17 @@ install_packages() {
 	# Модуль собирается DKMS по одним заголовкам ядра: исходники ядра (deb-src) ему не нужны.
 	apt_get install -y -qq amneziawg >/dev/null
 	modprobe amneziawg || die "модуль amneziawg не загрузился (проверьте dkms status)"
+}
 
+# ufw мешает правилам nftables Трубы. Выключается внутри транзакции, прямо перед загрузкой правил:
+# откат включит его снова, а uninstall — по отметке в owned.env.
+ufw_off() {
 	if command -v ufw >/dev/null && ufw status 2>/dev/null | grep -q 'Status: active'; then
-		warn "ufw включён и мешает правилам nftables Трубы — выключаю"
+		warn "ufw включён и мешает правилам nftables Трубы — выключаю (uninstall включит его снова)"
 		ufw disable >/dev/null
+		if [ -d "$TXN_DIR" ]; then touch "$TXN_DIR/ufw-off"; fi
 	fi
+	return 0
 }
 
 # Версия AmneziaWG на Трубе для сверки с router/awg/SOURCES: что сообщает о себе модуль
@@ -355,7 +556,7 @@ awg_proto_supported() {
 		proto=2
 		# Пир без Endpoint: интерфейс выключен, и пробный keepalive никуда не уходит.
 		key=$(awg genkey)
-		printf '%s\nHeaderProtectionKey = %s\nDisableCookies = on\nRandomTrailers = off\nContentPaddingAddition = %s\n\n[Peer]\nPublicKey = %s\nPersistentKeepalive = %s\n' \
+		printf '%s\nHeaderProtectionKey = %s\nDisableCookies = off\nRandomTrailers = off\nContentPaddingAddition = %s\n\n[Peer]\nPublicKey = %s\nPersistentKeepalive = %s\n' \
 			"$base" "$key" "$AWG_PADDING" "$key" "$AWG_KEEPALIVE" > "$f"
 		if awg setconf "$t" "$f" 2>/dev/null; then
 			proto=3
@@ -386,17 +587,29 @@ gen_params() {
 		local s3min=8 s4min=4
 		if [ "$AWG_PROTO" -ge 3 ]; then s3min=12; s4min=12; fi
 		S3=$(rand_between "$s3min" 55)
+		# Ответ cookie (64 + S3) не должен совпадать по длине с ответом рукопожатия (92 + S2).
+		while [ "$S3" -eq $((S2 + 28)) ]; do S3=$(rand_between "$s3min" 55); done
 		# S4 удлиняет каждый пакет данных: tunnel_mtu оставляет под него до 27 байт.
 		S4=$(rand_between "$s4min" 27)
-		# Четыре непересекающихся диапазона: по одному в каждой четверти пространства.
-		local q=$((2147483647 / 4)) i lo w
-		local hs=()
-		for i in 0 1 2 3; do
-			w=$(rand_between 100000 5000000)
-			lo=$(( i * q + 5 + $(rand_between 0 $((q - w - 10))) ))
-			hs+=("$lo-$((lo + w))")
-		done
-		mapfile -t hs < <(printf '%s\n' "${hs[@]}" | shuf)
+		local hs=() i lo w used=" " h
+		if [ "$AWG_PROTO" -ge 3 ]; then
+			# С защитой заголовков тип пакета и так скрыт: широкие диапазоны H ничего не прячут,
+			# а лишь повышают шанс принять пакет данных подходящей длины за служебный.
+			for i in 0 1 2 3; do
+				while :; do h=$(rand_between 5 2147483647); [[ "$used" != *" $h "* ]] && break; done
+				used+="$h "
+				hs+=("$h")
+			done
+		else
+			# Четыре непересекающихся диапазона: по одному в каждой четверти пространства.
+			local q=$((2147483647 / 4))
+			for i in 0 1 2 3; do
+				w=$(rand_between 100000 5000000)
+				lo=$(( i * q + 5 + $(rand_between 0 $((q - w - 10))) ))
+				hs+=("$lo-$((lo + w))")
+			done
+			mapfile -t hs < <(printf '%s\n' "${hs[@]}" | shuf)
+		fi
 		H1=${hs[0]}; H2=${hs[1]}; H3=${hs[2]}; H4=${hs[3]}
 		# Пакет-приманка в форме DNS-ответа (I1 не обязан совпадать у сторон).
 		I1='<r 2><b 0x858000010001000000000377777706676f6f676c6503636f6d0000010001c00c000100010000012c0004><r 4>'
@@ -435,8 +648,8 @@ awg_params_block() {
 	[ -n "${I1:-}" ] && echo "I1 = $I1"
 	if [ "${AWG_PROTO:-1}" -ge 3 ]; then
 		[ -n "${HPK:-}" ] && echo "HeaderProtectionKey = $HPK"
-		# Ответы cookie шлются только под нагрузкой; с одним пиром они не нужны, а их размер узнаваем.
-		echo "DisableCookies = on"
+		# Оставляем защиту AWG от нагрузки рукопожатиями включённой. Это не влияет на RTT данных.
+		echo "DisableCookies = off"
 		# Запас на случай DPI по размерам пакетов: дорого по трафику, включается отдельной командой.
 		# Добавку модуль берёт вместо RandomTrailers, поэтому с ним её нет.
 		if [ "${RANDOM_TRAILERS:-0}" = 1 ]; then
@@ -710,6 +923,7 @@ setup_awg_service() {
 			[Unit]
 			Description=Труба: Туннель AmneziaWG
 			After=network-online.target truba-pipe.service
+			Requires=truba-pipe.service
 			Wants=network-online.target
 
 			[Service]
@@ -720,6 +934,14 @@ setup_awg_service() {
 
 			[Install]
 			WantedBy=multi-user.target
+		EOF
+		[ "$FILE_CHANGED" = 0 ] || systemctl daemon-reload
+	else
+		# Пакетный юнит: без правил Трубы Туннель не поднимается (иначе без фильтра).
+		put_file 644 "$AWG_DROPIN" <<-EOF
+			[Unit]
+			After=truba-pipe.service
+			Requires=truba-pipe.service
 		EOF
 		[ "$FILE_CHANGED" = 0 ] || systemctl daemon-reload
 	fi
@@ -783,6 +1005,7 @@ write_unbound_conf() {
 # Конфиг пишет install_packages до установки пакета; здесь unbound перезапускается, только если
 # конфиг изменился или служба не работает (перезапуск сбрасывает её кэш).
 setup_unbound() {
+	unbound-checkconf "$UNBOUND_CONF" || die "конфиг unbound не прошёл проверку"
 	# Пакет может прописать unbound DNS-сервером самого VPS (resolvconf). VPS резолвит как прежде:
 	# этот unbound отвечает только Роутеру.
 	systemctl disable --now unbound-resolvconf.service >/dev/null 2>&1 || true
@@ -832,7 +1055,17 @@ ssh_restart() {
 	if systemctl is-enabled ssh.socket >/dev/null 2>&1; then
 		systemctl restart ssh.socket
 	fi
-	systemctl restart ssh.service 2>/dev/null || true
+	if systemctl is-enabled ssh.service >/dev/null 2>&1 || ! systemctl is-enabled ssh.socket >/dev/null 2>&1; then
+		systemctl restart ssh.service || die "не удалось перезапустить ssh.service"
+	fi
+}
+
+ssh_validate_effective() {
+	local effective
+	effective=$(sshd -T) || die "не удалось прочитать эффективную конфигурацию sshd"
+	grep -qx 'passwordauthentication no' <<< "$effective" || die "sshd фактически разрешает вход по паролю"
+	grep -qx 'kbdinteractiveauthentication no' <<< "$effective" || die "sshd фактически разрешает keyboard-interactive"
+	grep -qx 'permitrootlogin prohibit-password' <<< "$effective" || die "sshd не применил PermitRootLogin prohibit-password"
 }
 
 ssh_apply() {
@@ -848,6 +1081,7 @@ ssh_apply() {
 		echo "X11Forwarding no"
 	)
 	sshd -t || die "конфиг sshd не прошёл проверку"
+	ssh_validate_effective
 	[ "$FILE_CHANGED" = 0 ] || ssh_restart
 }
 
@@ -875,25 +1109,145 @@ confirm_ssh() {
 }
 
 rollback_ssh() {
-	if [ -n "${SSH_FALLBACK:-}" ]; then
-		# Смена порта у работающей Трубы: SSH и правила возвращаются к прежнему порту.
-		warn "откат: SSH остаётся на прежнем порту $SSH_FALLBACK"
-		SSH_PORT=$SSH_FALLBACK
-		SSH_FALLBACK=''
-		SSH_CONFIRMED=1
-		save_state
-		ssh_apply "$SSH_PORT"
-		write_nft
-		nft -f "$NFT_FILE"
-		exit 1
-	fi
-	rm -f "$SSHD_DROPIN"
-	ssh_restart
-	nft delete table ip truba_nat 2>/dev/null || true
-	nft delete table inet truba_filter 2>/dev/null || true
-	systemctl disable --now truba-pipe.service >/dev/null 2>&1 || true
-	warn "откат: правила Трубы сняты, SSH снова слушает прежние порты: $(sshd_ports)"
+	rollback_timer_stop
+	txn_restore
+	warn "откат: SSH и правила Трубы — как до запуска, SSH слушает: $(sshd_ports)"
 	exit 1
+}
+
+# ---------- транзакция: снимок файлов и откат ----------
+
+# Файлы, которые install и rotate-keys меняют вместе: при откате возвращаются все сразу.
+txn_files() {
+	printf '%s\n' "$STATE" "$AWG_CONF" "$ROUTER_CONF" "$SSHD_DROPIN" "$NFT_FILE" "$PIPE_UNIT" "$AWG_DROPIN" \
+		/etc/systemd/system/truba-awg.service
+}
+
+awg_unit() {
+	if systemctl cat "awg-quick@.service" >/dev/null 2>&1; then echo "awg-quick@$AWG_IF"; else echo truba-awg.service; fi
+}
+
+# Снимок до изменений: копии файлов (отсутствующие — только в списке), какие службы работали.
+# Список с путями пишется последним: без него снимок неполный и при откате просто удаляется.
+txn_begin() {
+	rm -rf "$TXN_DIR"
+	install -d -m 700 "$STATE_DIR" "$TXN_DIR"
+	local i=0 f unit
+	: > "$TXN_DIR/manifest.tmp"
+	while IFS= read -r f; do
+		i=$((i + 1))
+		if [ -e "$f" ]; then cp -a "$f" "$TXN_DIR/$i"; fi
+		printf '%s\t%s\n' "$i" "$f" >> "$TXN_DIR/manifest.tmp"
+	done < <(txn_files)
+	if systemctl is-active -q truba-pipe.service 2>/dev/null; then touch "$TXN_DIR/pipe-active"; fi
+	if systemctl is-enabled -q truba-pipe.service 2>/dev/null; then touch "$TXN_DIR/pipe-enabled"; fi
+	unit=$(awg_unit)
+	echo "$unit" > "$TXN_DIR/awg-unit"
+	if systemctl is-active -q "$unit" 2>/dev/null; then touch "$TXN_DIR/awg-active"; fi
+	if systemctl is-enabled -q "$unit" 2>/dev/null; then touch "$TXN_DIR/awg-enabled"; fi
+	mv "$TXN_DIR/manifest.tmp" "$TXN_DIR/manifest"
+	TXN_ACTIVE=1
+}
+
+# Возврат к снимку. Без die: откат доводится до конца, даже если отдельный шаг не удался.
+txn_restore() {
+	local i f unit awg_changed=0
+	if [ ! -f "$TXN_DIR/manifest" ]; then
+		rm -rf "$TXN_DIR"
+		TXN_ACTIVE=0
+		return 0
+	fi
+	unit=$(cat "$TXN_DIR/awg-unit" 2>/dev/null) || unit="awg-quick@$AWG_IF"
+	# Службы, которых до запуска не было, выключаются, пока их юниты ещё на месте:
+	# truba-pipe при остановке сам снимает правила.
+	if [ ! -e "$TXN_DIR/awg-enabled" ]; then systemctl disable "$unit" >/dev/null 2>&1 || true; fi
+	if [ ! -e "$TXN_DIR/awg-active" ]; then systemctl stop "$unit" >/dev/null 2>&1 || true; fi
+	if [ ! -e "$TXN_DIR/pipe-enabled" ]; then systemctl disable truba-pipe.service >/dev/null 2>&1 || true; fi
+	if [ ! -e "$TXN_DIR/pipe-active" ]; then systemctl stop truba-pipe.service >/dev/null 2>&1 || true; fi
+	while IFS=$'\t' read -r i f; do
+		if [ -e "$TXN_DIR/$i" ]; then
+			cmp -s "$TXN_DIR/$i" "$f" && continue
+			mkdir -p "${f%/*}"
+			cp -a "$TXN_DIR/$i" "$f" || warn "откат: не удалось вернуть $f"
+		elif [ -e "$f" ]; then
+			rm -f "$f"
+		else
+			continue
+		fi
+		[ "$f" != "$AWG_CONF" ] || awg_changed=1
+	done < "$TXN_DIR/manifest"
+	systemctl daemon-reload >/dev/null 2>&1 || true
+	( ssh_restart ) || warn "откат: sshd не перезапустился"
+	if [ -e "$TXN_DIR/pipe-active" ] && [ -f "$NFT_FILE" ]; then
+		nft -f "$NFT_FILE" || warn "откат: прежние правила nftables не загрузились"
+	else
+		nft delete table ip truba_nat 2>/dev/null || true
+		nft delete table inet truba_filter 2>/dev/null || true
+	fi
+	if [ -e "$TXN_DIR/awg-active" ] && [ "$awg_changed" = 1 ]; then
+		systemctl restart "$unit" || warn "откат: Туннель не перезапустился"
+	fi
+	if [ -e "$TXN_DIR/ufw-off" ]; then
+		ufw --force enable >/dev/null || warn "откат: ufw не включился"
+	fi
+	rm -rf "$TXN_DIR"
+	TXN_ACTIVE=0
+}
+
+# Снимок прошлой операции остался (VPS перезагрузился до таймера отката): сначала вернуть его.
+txn_recover() {
+	warn "прошлая операция не завершилась — возвращаю настройки, какими они были до неё"
+	rollback_timer_stop
+	txn_restore
+}
+
+txn_commit() {
+	rollback_timer_stop
+	if [ -e "$TXN_DIR/ufw-off" ]; then
+		load_env "$OWNED"
+		UFW_DISABLED=1
+		save_owned
+	fi
+	rm -rf "$TXN_DIR"
+	TXN_ACTIVE=0
+}
+
+# Выход по ошибке или сигналу (оборвалась сессия SSH) посреди транзакции — откат сразу, не дожидаясь
+# таймера. Вывод может уже не дойти до терминала, поэтому ошибки печати не прерывают откат.
+txn_on_exit() {
+	[ "${TXN_ACTIVE:-0}" = 1 ] || return 0
+	[ "$BASHPID" = "$$" ] || return 0
+	set +e
+	trap '' PIPE HUP INT TERM
+	warn "изменения не завершены — возвращаю прежние настройки" 2>/dev/null
+	rollback_timer_stop
+	txn_restore 2>/dev/null
+}
+
+# Таймер в отдельном юните systemd: он сработает, даже если установщик убит вместе с сессией SSH.
+# Запускает копию скрипта из снимка — исходный файл могут удалить или заменить.
+rollback_timer_start() {
+	local self
+	self=$(readlink -f "${BASH_SOURCE[0]}")
+	[ -f "$self" ] || die "таймеру отката нужен файл скрипта: скачайте install-vps.sh и запустите bash install-vps.sh install"
+	rollback_timer_stop
+	cp "$self" "$TXN_DIR/install-vps.sh"
+	systemd-run --quiet --unit="$ROLLBACK_UNIT" --on-active="${ROLLBACK_DELAY}s" --timer-property=AccuracySec=1s \
+		/bin/bash "$TXN_DIR/install-vps.sh" txn-rollback >/dev/null \
+		|| die "не удалось запустить таймер отката (systemd-run)"
+}
+
+rollback_timer_stop() {
+	systemctl stop "$ROLLBACK_UNIT.timer" >/dev/null 2>&1 || true
+	systemctl reset-failed "$ROLLBACK_UNIT.timer" "$ROLLBACK_UNIT.service" >/dev/null 2>&1 || true
+}
+
+# Чужой awg0.conf (другой туннель на этом VPS) первая установка не перезаписывает.
+check_foreign_awg_conf() {
+	[ -z "${VPS_PRIV:-}" ] || return 0
+	[ -f "$AWG_CONF" ] || return 0
+	head -1 "$AWG_CONF" | grep -q '^# Труба:' \
+		|| die "$AWG_CONF уже есть и создан не Трубой: перенесите его или задайте другой интерфейс"
 }
 
 setup_fail2ban() {
@@ -956,11 +1310,18 @@ choose_ssh_port() {
 cmd_install() {
 	need_root
 	load_state
+	# Порт SSH и терминал для его проверки — до любых изменений (preflight может поставить curl).
+	local previous_awg=${AWG_PORT:-} previous_ssh=${SSH_PORT:-}
+	choose_ssh_port
+	if [ "${NO_CONFIRM:-0}" != 1 ] && [ "${SSH_CONFIRMED:-0}" != 1 ]; then
+		{ : </dev/tty; } 2>/dev/null || die "нужен интерактивный терминал для проверки нового порта SSH (или --no-confirm)"
+		# Таймер отката запускает копию скрипта, поэтому нужен сам файл, а не bash <(curl …).
+		[ -f "$(readlink -f "${BASH_SOURCE[0]}")" ] \
+			|| die "скачайте install-vps.sh в файл и запустите: bash install-vps.sh install"
+	fi
 	preflight          # WAN_IF и PUB_IP — всегда свежие, остальное из состояния
 
 	# Порты — до пакетов: ошибка видна сразу, а не после нескольких минут установки.
-	local previous_awg=${AWG_PORT:-} previous_ssh=${SSH_PORT:-}
-	choose_ssh_port
 	AWG_PORT=${OPT_AWG_PORT:-${AWG_PORT:-}}
 	[ -n "$AWG_PORT" ] || AWG_PORT=$(pick_port "$SSH_PORT")
 	[ "$SSH_PORT" != "$AWG_PORT" ] || die "порты SSH и Туннеля совпадают"
@@ -969,6 +1330,13 @@ cmd_install() {
 		check_port_available t "$SSH_PORT" "$previous_ssh"
 	fi
 	check_port_available u "$AWG_PORT" "$previous_awg"
+	case ${OPT_MTU:-} in
+		'') ;;
+		auto) TUN_MTU='' ;;
+		*) TUN_MTU=$OPT_MTU ;;
+	esac
+	check_foreign_awg_conf
+	record_owned
 
 	install_packages
 	detect_awg_proto
@@ -984,9 +1352,12 @@ cmd_install() {
 		gen_keys
 		gen_params
 	fi
-	save_state
-
 	write_sysctl
+
+	# Отсюда SSH, правила и конфиги Туннеля меняются вместе: при ошибке, обрыве сессии или без
+	# подтверждения нового порта всё возвращается к снимку.
+	txn_begin
+	save_state
 	write_awg_conf
 	write_router_conf
 
@@ -998,12 +1369,16 @@ cmd_install() {
 		[ -n "$keep" ] || keep=$(sshd_ports "$SSH_PORT")
 		if [ -n "$keep" ]; then
 			read -ra keep_ports <<< "$keep"
+			if [ "${NO_CONFIRM:-0}" != 1 ]; then rollback_timer_start; fi
 			say "SSH: временно слушает ${keep// /, } и $SSH_PORT"
 			ssh_apply "${keep_ports[@]}" "$SSH_PORT"
 			write_nft "$keep"
+			ufw_off
 			nft -f "$NFT_FILE"
 			write_pipe_unit
 			confirm_ssh "$keep" || rollback_ssh
+			# Новый порт работает: дальше откат нужен только при ошибке, его сделает сам скрипт.
+			rollback_timer_stop
 		fi
 		SSH_CONFIRMED=1
 		SSH_FALLBACK=''
@@ -1013,9 +1388,11 @@ cmd_install() {
 	say "SSH: только порт $SSH_PORT; порт 22 и все остальные уходят на Роутер"
 	ssh_apply "$SSH_PORT"
 	write_nft
+	ufw_off
 	nft -f "$NFT_FILE"
 	write_pipe_unit
 	setup_awg_service
+	txn_commit
 	setup_unbound
 	setup_fail2ban
 	setup_unattended
@@ -1028,7 +1405,7 @@ cmd_install() {
 	echo "  IP Трубы:        $PUB_IP"
 	echo "  SSH VPS:         ssh -p $SSH_PORT root@$PUB_IP"
 	echo "  Туннель:         udp/$AWG_PORT, протокол AmneziaWG ${AWG_PROTO}.x"
-	echo "  MTU Туннеля:     $(tunnel_mtu) (сеть VPS: $(cat "$SYS_NET/$WAN_IF/mtu"))"
+	echo "  MTU Туннеля:     $(tunnel_mtu)${TUN_MTU:+ (задан вручную)} (сеть VPS: $(cat "$SYS_NET/$WAN_IF/mtu")); проверка пути до Роутера — mtu-check"
 	echo "  DNS для Роутера: udp://$VPS_TUN — сервер «Туннеля» на вкладке «DNS»"
 	echo "  Конфиг Роутера:  $ROUTER_CONF"
 	echo
@@ -1049,6 +1426,81 @@ cmd_show_config() {
 	cat "$ROUTER_CONF"
 }
 
+# Путь до Роутера по ping с запретом фрагментации до его внешнего адреса (Endpoint у awg0):
+# самый большой пакет, который проходит целиком, — MTU пути. Меряется путь VPS → дом; ответы
+# идут обратно тем же путём. Роутер за CGNAT провайдера на ping может не отвечать.
+path_mtu() {
+	local ip=$1 lo=$2 hi=$3 mid
+	ping_df "$ip" "$lo" || return 1
+	while [ $((hi - lo)) -gt 1 ]; do
+		mid=$(((lo + hi) / 2))
+		if ping_df "$ip" "$mid"; then lo=$mid; else hi=$mid; fi
+	done
+	ping_df "$ip" "$hi" && lo=$hi
+	echo "$lo"
+}
+
+# Пакет целиком (IPv4 20 + ICMP 8 + данные) размером size доходит без фрагментации. Три попытки:
+# потеря одного пакета не должна занижать MTU.
+ping_df() { ping -n -q -c 3 -i 0.2 -W 1 -M 'do' -s $(($2 - 28)) "$1" >/dev/null 2>&1; }
+
+# Счётчики фрагментации IPv4 из /proc/net/snmp: FragCreates — фрагментов нарезано при отправке,
+# ReasmReqds — пришло фрагментов на сборку. Внешние пакеты Туннеля идут без запрета фрагментации,
+# поэтому слишком большой пакет не теряется, а режется — и виден здесь.
+ip_frag_counters() {
+	awk '$1 == "Ip:" { if (!n++) { for (i = 2; i <= NF; i++) k[i] = $i } else for (i = 2; i <= NF; i++)
+		if (k[i] ~ /^(FragCreates|ReasmReqds|ReasmFails)$/) print "ip." k[i], $i }' "$PROC/net/snmp" 2>/dev/null || true
+}
+
+# Замер без ping: Роутер за CGNAT или с закрытым ping не отвечает, но фрагменты видны по счётчикам.
+# Счётчики общие для всего VPS: в них попадает и проброшенный на Роутер трафик.
+mtu_passive() {
+	local secs=$1 a b
+	a=$(ip_frag_counters); sleep "$secs"; b=$(ip_frag_counters)
+	diag_delta <(echo "$a") <(echo "$b") | awk -v secs="$secs" -v mtu="$2" -v auto="$3" '
+		{ v[$1] = $2 }
+		END {
+			printf "  за %d с: VPS нарезал при отправке %d фрагментов, пришло на сборку %d\n", secs, v["ip.FragCreates"], v["ip.ReasmReqds"]
+			if (v["ip.FragCreates"] > 0 && mtu > auto)
+				print "!! пакеты к дому не помещаются в сеть VPS: MTU Туннеля " mtu " больше " auto ". Выполните install-vps.sh install и импортируйте router.conf в Роутер заново"
+			else if (v["ip.FragCreates"] > 0)
+				print "!! VPS режет исходящие пакеты, хотя MTU Туннеля в сеть VPS помещается: режется проброшенный на Роутер трафик или MTU интерфейса Туннеля другой (ip link show awg0)"
+			if (v["ip.ReasmReqds"] > 0)
+				print "!! пакеты от дома приходят фрагментами: путь уже MTU Туннеля. Уменьшайте --mtu шагами по 20 (install-vps.sh install --mtu N) и повторяйте mtu-check под нагрузкой"
+			if (v["ip.FragCreates"] + v["ip.ReasmReqds"] == 0)
+				print "==> фрагментов нет: при трафике через Туннель пакеты помещаются в путь целиком"
+		}'
+}
+
+cmd_mtu_check() {
+	need_root
+	load_state
+	[ -n "${VPS_PRIV:-}" ] || die "Труба не установлена"
+	local ep ip nic p rec cur
+	ep=$(timeout 5 awg show "$AWG_IF" endpoints 2>/dev/null | awk 'NR == 1 { print $2 }') || ep=''
+	ip=${ep%:*}
+	valid_ipv4 "$ip" || die "адрес Роутера неизвестен: Туннель не поднят или Роутер ещё не подключался"
+	nic=$(cat "$SYS_NET/$WAN_IF/mtu" 2>/dev/null) || nic=1500
+	cur=$(cat "$SYS_NET/$AWG_IF/mtu" 2>/dev/null) || cur=$(tunnel_mtu)
+	say "Проверка пути до Роутера ($ip): ping без фрагментации, до $nic байт"
+	if ! p=$(path_mtu "$ip" 1028 "$nic"); then
+		warn "Роутер ($ip) не отвечает на ping (CGNAT провайдера или ping с WAN закрыт) — смотрю фрагменты по счётчикам ядра"
+		say "Замер 30 с. Запустите дома скачивание и отправку (например, тест скорости) через Туннель"
+		mtu_passive 30 "$cur" "$(auto_mtu)"
+		return 0
+	fi
+	rec=$((p - TUN_OVERHEAD))
+	[ "$rec" -le "$MTU_MAX" ] || rec=$MTU_MAX
+	echo "  MTU пути VPS → Роутер: $p   MTU Туннеля сейчас: $cur${TUN_MTU:+ (задан вручную)}   по пути — не больше $rec"
+	if [ "$rec" -lt "$MTU_MIN" ]; then
+		warn "путь уже $((MTU_MIN + TUN_OVERHEAD)) байт: Туннель будет работать с фрагментацией"
+	elif [ "$cur" -gt "$rec" ]; then
+		warn "полноразмерные пакеты Туннеля режутся на фрагменты. Уменьшите MTU: install-vps.sh install --mtu $rec, затем импортируйте router.conf в Роутер"
+	else
+		say "MTU Туннеля помещается в путь целиком"
+	fi
+}
+
 cmd_rotate_keys() {
 	need_root
 	load_state
@@ -1059,10 +1511,13 @@ cmd_rotate_keys() {
 	say "Новые ключи и параметры маскировки"
 	gen_keys
 	gen_params
+	# Ключи меняются целиком: при ошибке остаются прежние pipe.env, awg0.conf и router.conf.
+	txn_begin
 	save_state
 	write_awg_conf
 	write_router_conf
 	setup_awg_service
+	txn_commit
 	say "Готово. Импортируйте заново $ROUTER_CONF в Роутер — старый конфиг больше не подключится"
 }
 
@@ -1091,22 +1546,45 @@ cmd_random_trailers() {
 	echo "  (с RandomTrailers меняется и добавка к пакетам, поэтому одного флага у $AWG_IF мало)"
 }
 
+# awg show без секретов: ключ защиты заголовков awg выводит открытым, а по выводу status
+# просят помощи. Строки с ключами скрываются, как приватный ключ у самого awg.
+awg_show_masked() {
+	local out
+	out=$(timeout 5 awg show "$AWG_IF" 2>/dev/null) || return 1
+	printf '%s\n' "$out" | sed -E 's/^([[:space:]]*(private key|preshared key|header protection key):).*/\1 (hidden)/'
+}
+
 cmd_status() {
 	need_root
 	load_state
+	if [ -f "$TXN_DIR/manifest" ]; then
+		warn "прошлая установка или rotate-keys не завершились: следующая изменяющая команда сначала вернёт прежние настройки"
+	fi
 	echo "IP Трубы: ${PUB_IP:-?}   SSH: ${SSH_PORT:-?}   Туннель: udp/${AWG_PORT:-?}   AmneziaWG $(awg_version), протокол ${AWG_PROTO:-?}.x"
-	echo "MTU Туннеля: $(cat "$SYS_NET/$AWG_IF/mtu" 2>/dev/null || echo ?) (по сети VPS — не больше $(tunnel_mtu))   очередь ${WAN_IF:-?}: $(wan_qdisc_show)"
+	echo "MTU Туннеля: $(cat "$SYS_NET/$AWG_IF/mtu" 2>/dev/null || echo ?) ($([ -n "${TUN_MTU:-}" ] && echo "задан вручную; по сети VPS — до $(auto_mtu)" || echo "по сети VPS — не больше $(auto_mtu)"))   очередь ${WAN_IF:-?}: $(wan_qdisc_show)"
 	if [ "${AWG_PROTO:-1}" -ge 3 ]; then
-		local rt="выкл   добавка к пакетам: $AWG_PADDING байт"
+		local rt="выкл   добавка к пакетам: $AWG_PADDING байт" dc cookies
 		[ "${RANDOM_TRAILERS:-0}" = 1 ] && rt=вкл
-		echo "Защита заголовков: $([ -n "${HPK:-}" ] && echo вкл || echo выкл)   DisableCookies: вкл   RandomTrailers: $rt"
+		# Фактическое состояние интерфейса, а не записанное в конфиг.
+		if [ -d "$SYS_NET/$AWG_IF" ]; then
+			dc=$(timeout 5 awg show "$AWG_IF" disable-cookies 2>/dev/null) || dc=''
+			case $dc in
+				off) cookies=вкл ;;
+				on) cookies='ВЫКЛ (DisableCookies = on)' ;;
+				*) cookies='не удалось проверить' ;;
+			esac
+			rt="$rt (у интерфейса: $(timeout 5 awg show "$AWG_IF" random-trailers 2>/dev/null || echo ?))"
+		else
+			cookies='Туннель не поднят'
+		fi
+		echo "Защита заголовков: $([ -n "${HPK:-}" ] && echo вкл || echo выкл)   Cookie-защита: $cookies   RandomTrailers: $rt"
 	fi
 	kernel_module_check || true
 	local over
 	over=$(sysctl_overrides)
 	[ -z "$over" ] || printf 'sysctl: при загрузке VPS настройки Трубы перебьют строки (уберите их):\n%s\n' "$over"
 	echo
-	awg show "$AWG_IF" 2>/dev/null || echo "Туннель не поднят"
+	awg_show_masked || echo "Туннель не поднят"
 	echo
 	nft list tables 2>/dev/null | grep truba || echo "правила Трубы не загружены"
 	echo
@@ -1116,35 +1594,213 @@ cmd_status() {
 	systemctl --no-pager --lines=0 status truba-pipe.service "awg-quick@$AWG_IF" unbound 2>/dev/null | grep -E '●|Active:' || true
 }
 
+# ---------- diag: замер потерь и упоров за интервал ----------
+
+PROC=/proc
+# Внешний адрес для сравнения: задержку самого VPS отделить от задержки пути до дома.
+DIAG_REF_IP=1.1.1.1
+
+# Счётчики «имя значение». Снимаются дважды, отчёт — по разнице.
+diag_snapshot() {
+	local d f hdr row i v
+	for d in "$WAN_IF" "$AWG_IF"; do
+		[ -d "$SYS_NET/$d/statistics" ] || continue
+		for f in rx_packets tx_packets rx_dropped tx_dropped rx_errors tx_errors; do
+			printf '%s.%s %s\n' "$d" "$f" "$(cat "$SYS_NET/$d/statistics/$f" 2>/dev/null || echo 0)"
+		done
+	done
+	# Отброшенное очередью WAN — по корню (mq суммирует дочерние), переполнение fq_codel — по всем.
+	{ tc -s qdisc show dev "$WAN_IF" 2>/dev/null || true; } | awk '
+		$1 == "qdisc" { root = ($4 == "root"); next }
+		root && $1 == "Sent" { gsub(/[(),]/, " "); for (i = 1; i < NF; i++) if ($i == "dropped") d = $(i + 1) }
+		{ for (i = 1; i < NF; i++) if ($i == "drop_overlimit") o += $(i + 1) }
+		END { print "qdisc.dropped", d + 0; print "qdisc.overlimit", o + 0 }'
+	awk '$1 == "Udp:" { if (!n++) { for (i = 2; i <= NF; i++) k[i] = $i } else for (i = 2; i <= NF; i++)
+		if (k[i] ~ /^(InErrors|RcvbufErrors|SndbufErrors)$/) print "udp." k[i], $i }' "$PROC/net/snmp" 2>/dev/null || true
+	ip_frag_counters
+	# softnet_stat: по строке на CPU, второй столбец — отброшено из очереди приёма, третий — ядру не
+	# хватило бюджета на разбор (time_squeeze). Числа шестнадцатеричные.
+	local drop=0 squeeze=0 a b c
+	while read -r a b c _; do
+		: "$a"
+		drop=$((drop + 16#$b)); squeeze=$((squeeze + 16#$c))
+	done < "$PROC/net/softnet_stat"
+	echo "softnet.dropped $drop"; echo "softnet.squeeze $squeeze"
+	# cpu — сумма, cpuN — каждое ядро: всего, простой (idle + iowait), softirq, steal.
+	awk '/^cpu/ { t = 0; for (i = 2; i <= 9; i++) t += $i
+		print $1 ".total", t; print $1 ".idle", $5 + $6; print $1 ".softirq", $8; print $1 ".steal", $9 }' "$PROC/stat"
+	# Столбцы conntrack по заголовку: набор столбцов зависит от версии ядра.
+	if [ -r "$PROC/net/stat/nf_conntrack" ]; then
+		{
+			read -ra hdr
+			local -A sum=()
+			while read -ra row; do
+				for i in "${!hdr[@]}"; do
+					case ${hdr[i]} in insert_failed|drop|early_drop) v=${row[i]:-0}; sum[${hdr[i]}]=$(( ${sum[${hdr[i]}]:-0} + 16#$v )) ;; esac
+				done
+			done
+			for i in insert_failed drop early_drop; do echo "conntrack.$i ${sum[$i]:-0}"; done
+		} < "$PROC/net/stat/nf_conntrack"
+	fi
+}
+
+# Разница двух снимков.
+diag_delta() { awk 'NR == FNR { a[$1] = $2; next } { print $1, $2 - (($1 in a) ? a[$1] : 0) }' "$1" "$2"; }
+
+# Итог ping: «потери% min avg max» или пусто.
+ping_summary() {
+	awk '/packet loss/ { for (i = 1; i <= NF; i++) if ($i ~ /%$/) l = $i }
+		/^(rtt|round-trip)/ { split($4, r, "/"); s = r[1] " " r[2] " " r[3] }
+		END { if (l != "") print l, (s == "" ? "- - -" : s) }' "$1"
+}
+
+# Отчёт по разнице счётчиков (stdin) за secs секунд. Только наблюдения и подсказки, ничего не меняет.
+diag_report() {
+	local secs=$1 tun_ping=$2 ref_ping=$3
+	awk -v secs="$secs" -v wan="$WAN_IF" -v awg="$AWG_IF" -v tp="$tun_ping" -v rp="$ref_ping" -v ref="$DIAG_REF_IP" '
+		{ v[$1] = $2 }
+		function pct(a, b) { return b > 0 ? 100 * a / b : 0 }
+		function nic(d,   s) {
+			if (!((d ".rx_packets") in v)) return
+			printf "  %-6s принято %d пак/с, отправлено %d пак/с; отброшено: приём %d, отправка %d; ошибки: %d/%d\n", d,
+				v[d ".rx_packets"] / secs, v[d ".tx_packets"] / secs, v[d ".rx_dropped"], v[d ".tx_dropped"], v[d ".rx_errors"], v[d ".tx_errors"]
+		}
+		function rtt(name, s, tunnel,   f) {
+			if (s == "") { printf "  %s: ping не запускался\n", name; return }
+			split(s, f, " ")
+			# Вход на Роутер из зоны Туннеля закрыт: на ping от VPS он не отвечает, и это не потери.
+			if (f[2] == "-" && tunnel) printf "  %s: Роутер не отвечает на ping из Туннеля (вход закрыт) — замер на Роутере: truba tunnel-test\n", name
+			else if (f[2] == "-") printf "  %s: нет ответа (потери %s)\n", name, f[1]
+			else printf "  %s: %s / %s / %s мс (мин / сред / макс), потери %s\n", name, f[2], f[3], f[4], f[1]
+		}
+		END {
+			printf "За %d с:\n", secs
+			nic(wan); nic(awg)
+			printf "  очередь WAN: отброшено %d (из них при переполнении %d)\n", v["qdisc.dropped"], v["qdisc.overlimit"]
+			printf "  UDP: ошибки приёма %d, мал буфер приёма %d, мал буфер отправки %d\n", v["udp.InErrors"], v["udp.RcvbufErrors"], v["udp.SndbufErrors"]
+			printf "  фрагменты IPv4: VPS нарезал при отправке %d, пришло на сборку %d (не собралось %d)\n", v["ip.FragCreates"], v["ip.ReasmReqds"], v["ip.ReasmFails"]
+			printf "  разбор входящих: отброшено %d, не хватило бюджета %d раз\n", v["softnet.dropped"], v["softnet.squeeze"]
+			if ("conntrack.drop" in v)
+				printf "  conntrack: отброшено %d, не вставлено %d, вытеснено %d\n", v["conntrack.drop"], v["conntrack.insert_failed"], v["conntrack.early_drop"]
+			steal = pct(v["cpu.steal"], v["cpu.total"]); si = pct(v["cpu.softirq"], v["cpu.total"])
+			for (k in v) if (k ~ /^cpu[0-9]+\.total$/) {
+				c = k; sub(/\.total$/, "", c)
+				b = pct(v[c ".total"] - v[c ".idle"], v[c ".total"]); if (b > busy) { busy = b; bc = c }
+				s = pct(v[c ".softirq"], v[c ".total"]); if (s > msi) msi = s
+			}
+			printf "  CPU: steal %.1f %%, softirq %.1f %% (на самом занятом ядре — %.1f %%), самое занятое ядро %s — %.0f %%\n", steal, si, msi, bc, busy
+			rtt("RTT Туннеля (до Роутера)", tp, 1)
+			rtt("RTT VPS → " ref, rp, 0)
+			print ""
+			n = 0
+			# Steal сам по себе не вред: важно, растёт ли при нём задержка. До 10 % — только к сведению.
+			if (steal >= 10) { n++; print "! steal " sprintf("%.1f", steal) " %: хост VPS делит процессор с соседями, задержка Туннеля скачет. Настройкой не лечится — только другой тариф или провайдер" }
+			else if (steal >= 5) print "  steal " sprintf("%.1f", steal) " %: соседи по хосту иногда забирают процессор; это заметно, только если под нагрузкой растёт RTT"
+			if (busy >= 90) { n++; print "! ядро " bc " занято на " sprintf("%.0f", busy) " %: упор в процессор (шифрование Туннеля идёт в основном на одном ядре)" }
+			if (v["softnet.dropped"] > 0) {
+				n++; print "! ядро отбрасывает входящие пакеты, не успевая их разобрать: кандидат — net.core.netdev_max_backlog"
+				if (v["softnet.squeeze"] > secs) print "  разбор прерывался по лимиту (" v["softnet.squeeze"] " раз): кандидат — и net.core.netdev_budget"
+			} else if (v["softnet.squeeze"] > 0)
+				# Без потерь это не упор: остаток пакетов ядро разбирает на следующем проходе. В ВМ чаще всего
+				# срабатывает лимит времени 2 мс, когда гипервизор забирает vCPU, — бюджет в пакетах не поможет.
+				print "  разбор прерывался по лимиту без потерь — остаток разбирается следующим проходом, настройка не нужна"
+			if (v["udp.RcvbufErrors"] + v["udp.SndbufErrors"] > 0) { n++; print "! UDP теряет пакеты из-за буфера сокета: кандидат — net.core.rmem_max/wmem_max" }
+			if (v["qdisc.overlimit"] > 0) { n++; print "! очередь WAN переполняется (drop_overlimit): пакетов больше, чем она держит" }
+			if (v["ip.FragCreates"] > 0) { n++; print "! VPS режет исходящие пакеты на фрагменты: пакет Туннеля не помещается в сеть VPS — install-vps.sh mtu-check" }
+			if (v["ip.ReasmReqds"] > 0) { n++; print "! входящие пакеты приходят фрагментами: путь от дома уже MTU Туннеля — install-vps.sh mtu-check" }
+			else if (v["qdisc.dropped"] > 0) print "  очередь WAN отбрасывала пакеты при перегрузке — так fq_codel держит задержку низкой, это нормально"
+			if (v["conntrack.drop"] + v["conntrack.insert_failed"] + v["conntrack.early_drop"] > 0) { n++; print "! conntrack отбрасывает соединения: таблица переполнена" }
+			if (v[wan ".rx_errors"] + v[wan ".tx_errors"] + v[awg ".tx_errors"] > 0) { n++; print "! ошибки интерфейсов: dmesg | tail, ip -s link" }
+			if (v[wan ".rx_dropped"] > 0) print "  " wan ": отброшенные при приёме — часто это пакеты неизвестных протоколов, сами по себе не потери"
+			if (!n) print "Потерь и упоров не найдено."
+		}'
+}
+
+# Замер на работающей Трубе. Запускать дважды: в простое и под нагрузкой (скачивание дома через
+# Туннель) — по разнице видно, где растёт задержка и теряются пакеты.
+cmd_diag() {
+	need_root
+	load_state
+	[ -n "${WAN_IF:-}" ] || die "Труба не установлена"
+	local secs=${1:-30} dir
+	if ! [[ $secs =~ ^[0-9]+$ ]] || [ "$secs" -lt 5 ] || [ "$secs" -gt 600 ]; then die "diag: длительность — от 5 до 600 секунд"; fi
+	local mem cpu
+	mem=$(awk '/^MemTotal:/ { printf "%.1f ГБ", $2 / 1048576 }' "$PROC/meminfo")
+	cpu=$(awk -F': ' '/^model name/ { print $2; exit }' "$PROC/cpuinfo")
+	echo "VPS: $(nproc) vCPU (${cpu:-?}), память $mem, ядро $(uname -r), виртуализация $(systemd-detect-virt 2>/dev/null || echo ?)"
+	echo "WAN $WAN_IF: драйвер $(basename "$(readlink "$SYS_NET/$WAN_IF/device/driver" 2>/dev/null)" 2>/dev/null || echo ?), очередей приёма $(find "$SYS_NET/$WAN_IF/queues" -maxdepth 1 -name 'rx-*' 2>/dev/null | wc -l), очередь: $(wan_qdisc_show)"
+	dir=$(mktemp -d)
+	say "Замер ${secs} с. Для замера под нагрузкой запустите дома скачивание через Туннель"
+	diag_snapshot > "$dir/a"
+	ping -n -q -c "$secs" -i 1 -W 2 "$RTR_TUN" > "$dir/tun" 2>&1 &
+	ping -n -q -c "$secs" -i 1 -W 2 "$DIAG_REF_IP" > "$dir/ref" 2>&1 &
+	sleep "$secs"
+	wait || true
+	diag_snapshot > "$dir/b"
+	diag_delta "$dir/a" "$dir/b" | diag_report "$secs" "$(ping_summary "$dir/tun")" "$(ping_summary "$dir/ref")"
+	rm -rf "$dir"
+}
+
 cmd_uninstall() {
 	need_root
 	load_state
+	load_env "$OWNED"
+	rollback_timer_stop
+	rm -rf "$TXN_DIR"
 	say "Остановка Туннеля и снятие правил"
 	systemctl disable --now "awg-quick@$AWG_IF" >/dev/null 2>&1 || true
 	systemctl disable --now truba-awg.service >/dev/null 2>&1 || true
 	systemctl disable --now truba-pipe.service >/dev/null 2>&1 || true
-	systemctl disable --now unbound >/dev/null 2>&1 || true
 	nft delete table ip truba_nat 2>/dev/null || true
 	nft delete table inet truba_filter 2>/dev/null || true
-	rm -f "$PIPE_UNIT" /etc/systemd/system/truba-awg.service "$F2B_JAIL" "$SYSCTL_FILE" "$MODULES_FILE" "$UNBOUND_CONF"
+	rm -f "$PIPE_UNIT" /etc/systemd/system/truba-awg.service "$AWG_DROPIN" "$F2B_JAIL" "$SYSCTL_FILE" "$MODULES_FILE" "$UNBOUND_CONF"
 	rm -f "$UNATTENDED_CONF" "$JOURNAL_CONF"
+	rmdir "${AWG_DROPIN%/*}" 2>/dev/null || true
 	systemctl restart systemd-journald
 	systemctl daemon-reload
 	systemctl restart fail2ban >/dev/null 2>&1 || true
+	# unbound, стоявший до Трубы, остаётся работать со своими настройками; поставленный ею — выключается.
+	if [ "${UNBOUND_PREEXISTING:-}" = 1 ]; then
+		systemctl try-restart unbound >/dev/null 2>&1 || true
+	else
+		systemctl disable --now unbound >/dev/null 2>&1 || true
+	fi
+	if [ "${RESOLVCONF_ENABLED:-}" = 1 ]; then
+		systemctl enable --now unbound-resolvconf.service >/dev/null 2>&1 || true
+	fi
 	rm -f "$SSHD_DROPIN"
 	ssh_restart
 	say "SSH вернулся к прежним настройкам, порт: $(sshd_ports) (текущая сессия сохранится)"
+	if [ "${UFW_DISABLED:-}" = 1 ] && command -v ufw >/dev/null; then
+		say "Включаю ufw снова: его выключила установка Трубы"
+		ufw --force enable >/dev/null || warn "ufw не включился: ufw enable"
+	fi
+	# Исходное состояние unbound и resolvconf остаётся для новой установки. ufw возвращён — его отметка снимается.
+	if [ -f "$OWNED" ]; then UFW_DISABLED=0; save_owned; fi
 	if [ "${1:-}" = "--purge" ]; then
 		rm -rf "$STATE_DIR" "$OUT_DIR" "$AWG_CONF"
 	fi
 	say "Готово. Пакеты amneziawg и unbound не удалялись"
 }
 
+# Вызывает таймер отката (systemd-run), если новый порт SSH так и не подтвердили.
+cmd_txn_rollback() {
+	need_root
+	[ -f "$TXN_DIR/manifest" ] || exit 0
+	warn "вход по новому порту SSH не подтверждён — возвращаю прежние SSH и правила"
+	txn_restore
+}
+
 main() {
 	trap 'on_err $? $LINENO "$BASH_COMMAND"' ERR
+	# Обрыв сессии SSH (HUP) и Ctrl+C тоже ведут к выходу, а значит — к откату незавершённых изменений.
+	trap 'txn_on_exit' EXIT
+	trap 'exit 129' HUP
+	trap 'exit 130' INT
+	trap 'exit 143' TERM
 	local cmd=${1:-} arg=''
 	shift || true
-	if [ "$cmd" = random-trailers ]; then
+	if [ "$cmd" = random-trailers ] || { [ "$cmd" = diag ] && [[ ${1:-} =~ ^[0-9]+$ ]]; }; then
 		arg=${1:-}
 		shift || true
 	fi
@@ -1158,18 +1814,46 @@ main() {
 				if [ "$1" = --ssh-port ]; then OPT_SSH_PORT=$2; else OPT_AWG_PORT=$2; fi
 				shift 2 ;;
 			--no-confirm) NO_CONFIRM=1; shift ;;
+			--mtu)
+				[ $# -ge 2 ] || die "--mtu: укажите число или auto"
+				if [ "$2" != auto ] && ! state_value_ok TUN_MTU "$2"; then
+					die "--mtu: число от $MTU_MIN до $MTU_MAX или auto"
+				fi
+				OPT_MTU=$2
+				shift 2 ;;
 			--purge) PURGE=1; shift ;;
 			*) die "неизвестный параметр: $1" ;;
 		esac
 	done
 	case "$cmd" in
-		install) cmd_install ;;
+		install|rotate-keys|random-trailers|uninstall|repair-module|txn-rollback)
+			need_root
+			install -d -m 755 "${LOCK_FILE%/*}"
+			exec 9>"$LOCK_FILE"
+			if [ "$cmd" = txn-rollback ]; then
+				# Установщик мог ещё не выйти: он откатывает сам. Если он завис, вход важнее — откат всё равно.
+				flock -w 60 9 || warn "установщик не отпускает блокировку — откатываю без неё"
+			else
+				flock -n 9 || die "другая изменяющая команда уже выполняется"
+			fi
+			case "$cmd" in
+				txn-rollback) ;;
+				# Снимок прошлой операции (VPS перезагрузился до таймера отката) — до чтения pipe.env.
+				*) if [ -e "$TXN_DIR" ]; then txn_recover; fi ;;
+			esac
+			case "$cmd" in
+				install) cmd_install ;;
+				rotate-keys) cmd_rotate_keys ;;
+				random-trailers) cmd_random_trailers "$arg" ;;
+				uninstall) cmd_uninstall ${PURGE:+--purge} ;;
+				repair-module) cmd_repair_module ;;
+				txn-rollback) cmd_txn_rollback ;;
+			esac ;;
 		show-config) cmd_show_config ;;
-		rotate-keys) cmd_rotate_keys ;;
-		random-trailers) cmd_random_trailers "$arg" ;;
 		status) cmd_status ;;
-		uninstall) cmd_uninstall ${PURGE:+--purge} ;;
-		*) sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+		mtu-check) cmd_mtu_check ;;
+		diag) cmd_diag ${arg:+"$arg"} ;;
+		*) sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
 	esac
 }
 

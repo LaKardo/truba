@@ -7,7 +7,8 @@ set -uo pipefail
 
 FAILS=0
 ok()   { echo "ok    $*"; }
-fail() { echo "FAIL  $*"; FAILS=$((FAILS + 1)); }
+# Проверки в подоболочках тоже должны попасть в итог: счётчик ещё и в файле.
+fail() { echo "FAIL  $*"; if [ -n "${T:-}" ]; then echo x >> "$T/fails"; else FAILS=$((FAILS + 1)); fi; }
 
 SCRIPT=${1:-/repo/vps/install-vps.sh}
 
@@ -56,7 +57,12 @@ unset -f systemctl
 # Проверяем реальные строки конфигурации SSH и fail2ban без перезапуска служб хоста.
 SSHD_DROPIN="$T/sshd.conf"; F2B_JAIL="$T/fail2ban.local"
 saved_ssh_restart=$(declare -f ssh_restart)
-sshd() { return 0; }; ssh_restart() { :; }; systemctl() { :; }
+sshd() {
+	case "$1" in
+		-T) printf '%s\n' 'passwordauthentication no' 'kbdinteractiveauthentication no' 'permitrootlogin prohibit-password' ;;
+		*) return 0 ;;
+	esac
+}; ssh_restart() { :; }; systemctl() { :; }
 ssh_apply 52222
 grep -qx 'MaxAuthTries 3' "$SSHD_DROPIN" && grep -qx 'LoginGraceTime 20' "$SSHD_DROPIN" && grep -qx 'X11Forwarding no' "$SSHD_DROPIN" \
 	&& ok "SSH: лимиты авторизации и запрет X11" || fail "SSH: защитные параметры"
@@ -140,6 +146,7 @@ apt-get() { echo "apt-get $*" >> "$LOG"; }
 apt-mark() { echo "apt-mark $*" >> "$LOG"; }
 add-apt-repository() { echo "add-apt-repository $*" >> "$LOG"; }
 modprobe() { :; }
+ppa_key_check() { :; }
 uname() { echo 6.8.0-146-generic; }
 dpkg-query() { case "$*" in *linux-image-*) echo 'ii  linux-image-generic' ;; *) return 1 ;; esac; }
 apt-cache() { printf '%s:\n  Candidate: 1\n' "$2"; }
@@ -160,8 +167,27 @@ apt-cache() { case "$2" in linux-headers-6.8.0-*) printf '%s:\n  Candidate: (non
 out=$( (install_packages) 2>&1 )
 grep -q 'заголовков ядра 6.8.0-146-generic нет в архиве' <<< "$out" && ! grep -q install "$LOG" \
 	&& ok "пакеты: заголовков ядра нет в архиве — понятный выход до установки" || fail "пакеты: без заголовков: $out"$'\n'"$(cat "$LOG")"
-unset -f apt-get apt-mark add-apt-repository modprobe uname dpkg-query apt-cache
-
+unset -f apt-get apt-mark add-apt-repository modprobe uname dpkg-query apt-cache ppa_key_check
+eval "$(sed -n '/^ppa_key_check()/,/^}/p' "$SCRIPT")"
+apt-get install -y -qq gnupg iputils-ping >/dev/null 2>&1
+# Ключ PPA: полный отпечаток встроенного в Signed-By ключа сверяется с закреплённым.
+apt-get install -y -qq gnupg >/dev/null 2>&1
+(
+	PPA_SOURCES_DIR="$T/sources"; mkdir -p "$PPA_SOURCES_DIR"; export GNUPGHOME="$T/gnupg"; mkdir -m 700 -p "$GNUPGHOME"
+	gpg --batch --quiet --passphrase '' --quick-gen-key 'truba-test <t@example.invalid>' ed25519 sign never 2>/dev/null
+	fpr=$(gpg --with-colons --list-keys | awk -F: '$1 == "fpr" { print $10; exit }')
+	src() { { printf 'Types: deb\nURIs: https://ppa.launchpadcontent.net/amnezia/ppa/ubuntu/\nSuites: noble\nComponents: main\nSigned-By:\n'
+		gpg --armor --export "$fpr" | sed 's/^$/./; s/^/ /'; } > "$PPA_SOURCES_DIR/amnezia-ubuntu-ppa-noble.sources"; }
+	src
+	PPA_FPR=$fpr; ( ppa_key_check ) && ok "ключ PPA: отпечаток совпадает — продолжение" || fail "ключ PPA: свой ключ отклонён"
+	PPA_FPR=75C9DD72C799870E310542E24166F2C257290828
+	out=$( (ppa_key_check) 2>&1 ); grep -q 'ключ PPA amnezia не тот' <<< "$out" && ok "ключ PPA: чужой ключ — отказ до установки" || fail "ключ PPA: чужой: $out"
+	gpg --export "$fpr" > "$T/ppa.gpg"
+	printf 'Types: deb\nURIs: https://ppa.launchpadcontent.net/amnezia/ppa/ubuntu/\nSuites: noble\nSigned-By: %s\n' "$T/ppa.gpg" > "$PPA_SOURCES_DIR/amnezia-ubuntu-ppa-noble.sources"
+	PPA_FPR=$fpr; ( ppa_key_check ) && ok "ключ PPA: Signed-By с путём к файлу" || fail "ключ PPA: путь"
+	rm -f "$PPA_SOURCES_DIR"/*
+	out=$( (ppa_key_check) 2>&1 ); grep -q 'не подключён' <<< "$out" && ok "ключ PPA: источника нет — отказ" || fail "ключ PPA: без источника: $out"
+)
 # Протокол AWG по пробному интерфейсу; без модуля — выход, а не молчаливый AWG 1.x.
 ip() { [ "$1 $2" != "link add" ]; }
 awg_proto_supported >/dev/null; [ $? -ne 0 ] && ok "протокол AWG: интерфейс не создаётся — код ошибки" || fail "протокол AWG: без модуля"
@@ -196,7 +222,7 @@ for i in $(seq 50); do
 	gen_params
 	[ $((S1 + 56)) -ne "$S2" ] || { fail "S1+56 == S2 ($S1, $S2)"; break; }
 	for v in S1 S2; do [ "${!v}" -ge 15 ] && [ "${!v}" -le 150 ] || fail "$v вне 15..150: ${!v}"; done
-	[ "$S3" -ge 8 ] && [ "$S3" -le 55 ] || fail "S3 вне 8..55: $S3"
+	[ "$S3" -ge 8 ] && [ "$S3" -le 55 ] && [ "$S3" -ne $((S2 + 28)) ] || fail "S3 вне 8..55 или S2+28: $S3"
 	[ "$S4" -ge 4 ] && [ "$S4" -le 27 ] || fail "S4 вне 4..27: $S4"
 	[ "$JMIN" -lt "$JMAX" ] && [ "$JMAX" -le 1280 ] || fail "Jmin/Jmax: $JMIN/$JMAX"
 	# Диапазоны H не пересекаются.
@@ -216,9 +242,12 @@ for i in $(seq 50); do
 	gen_params
 	for v in S1 S2 S3 S4; do [ "${!v}" -ge 12 ] || { fail "AWG 3: $v < 12 (${!v})"; bad=1; }; done
 	[ $((S1 + 56)) -ne "$S2" ] || { fail "AWG 3: S1+56 == S2"; bad=1; }
+	[ $((S2 + 28)) -ne "$S3" ] || { fail "AWG 3: S2+28 == S3"; bad=1; }
 	[ "$S4" -le 27 ] || { fail "AWG 3: S4 > 27"; bad=1; }
+	for v in H1 H2 H3 H4; do [[ ${!v} =~ ^[0-9]+$ ]] && [ "${!v}" -ge 5 ] || { fail "AWG 3: $v не одно число: ${!v}"; bad=1; }; done
+	[ "$(printf '%s\n' "$H1" "$H2" "$H3" "$H4" | sort -u | wc -l)" -eq 4 ] || { fail "AWG 3: H совпадают"; bad=1; }
 done
-[ "$bad" -eq 0 ] && ok "50 наборов параметров AWG 3.1: S1–S4 ≥ 12"
+[ "$bad" -eq 0 ] && ok "50 наборов параметров AWG 3.1: S1–S4 ≥ 12, S3 ≠ S2+28, H1–H4 — разные числа"
 
 AWG_PROTO=1
 gen_params
@@ -401,6 +430,32 @@ out=$(kernel_module_check 2>&1); rc=$?
 [ "$rc" -ne 0 ] && grep -q 'нет для ядра 6.8.0-100-generic' <<< "$out" && ok "новое ядро без модуля — предупреждение" || fail "новое ядро без модуля: $rc $out"
 mkdir -p "$MODULES_DIR/6.8.0-100-generic/updates/dkms"; touch "$MODULES_DIR/6.8.0-100-generic/updates/dkms/amneziawg.ko.zst"
 kernel_module_check >/dev/null 2>&1 && ok "новое ядро с модулем — без предупреждения" || fail "новое ядро с модулем"
+# Следующим GRUB может загрузить и старое ядро: модуль нужен всем установленным.
+rm "$MODULES_DIR/6.8.0-45-generic/updates/dkms/amneziawg.ko.zst"
+out=$(kernel_module_check 2>&1); rc=$?
+[ "$rc" -ne 0 ] && grep -q 'нет для ядра 6.8.0-45-generic' <<< "$out" && grep -q repair-module <<< "$out" \
+	&& ok "старое ядро без модуля — тоже предупреждение" || fail "старое ядро без модуля: $rc $out"
+# repair-module: заголовки, DKMS, depmod — только для ядер без модуля.
+(
+	LOG="$T/repair"; : > "$LOG"
+	pkg_available() { echo "avail $1" >> "$LOG"; return 0; }
+	apt_get() { echo "apt-get $*" >> "$LOG"; }
+	apt_update() { :; }
+	dkms() { echo "dkms $*" >> "$LOG"; mkdir -p "$MODULES_DIR/$3/updates/dkms"; touch "$MODULES_DIR/$3/updates/dkms/amneziawg.ko.zst"; }
+	depmod() { echo "depmod $*" >> "$LOG"; }
+	modprobe() { :; }; uname() { echo 6.8.0-100-generic; }
+	STATE="$T/none.env"
+	out=$(cmd_repair_module 2>&1); rc=$?
+	[ "$rc" -eq 0 ] && grep -qx 'apt-get install -y -qq linux-headers-6.8.0-45-generic' "$LOG" \
+		&& grep -qx 'dkms autoinstall -k 6.8.0-45-generic' "$LOG" && grep -qx 'depmod -a 6.8.0-45-generic' "$LOG" \
+		&& ! grep -q 6.8.0-100 "$LOG" && ok "repair-module: заголовки, DKMS и depmod только для ядра без модуля" \
+		|| fail "repair-module: $rc $out"$'\n'"$(cat "$LOG")"
+	rm "$MODULES_DIR/6.8.0-45-generic/updates/dkms/amneziawg.ko.zst"
+	pkg_available() { return 1; }
+	out=$(cmd_repair_module 2>&1); rc=$?
+	[ "$rc" -ne 0 ] && grep -q 'заголовков нет в архиве' <<< "$out" && ok "repair-module: заголовков нет — понятная ошибка" || fail "repair-module без заголовков: $out"
+)
+touch "$MODULES_DIR/6.8.0-45-generic/updates/dkms/amneziawg.ko.zst"
 
 # Конфиги AWG
 AWG_PROTO=2; gen_params
@@ -411,12 +466,12 @@ grep -q "^AllowedIPs = 10.77.77.2/32" "$AWG_CONF" && ok "VPS: пир — тол�
 grep -q "^Endpoint = 203.0.113.10:51820" "$ROUTER_CONF" && ok "Роутер: Endpoint" || fail "Роутер Endpoint"
 grep -q "^PersistentKeepalive = 25" "$ROUTER_CONF" && ok "Роутер: keepalive 25" || fail "keepalive"
 grep -q "^MTU = 1380" "$ROUTER_CONF" && ok "Роутер: MTU 1380 при сети VPS 1500" || fail "MTU"
-# MTU Туннеля — от сети VPS: пакет Туннеля с обёрткой (до 87 байт) помещается в неё целиком.
+# MTU Туннеля — от сети VPS: пакет Туннеля с обёрткой (до 102 байт) помещается в неё целиком.
 mtu_both() { grep -qx "MTU = $1" "$AWG_CONF" && grep -qx "MTU = $1" "$ROUTER_CONF"; }
 if ip link add trubamtu0 type dummy 2>/dev/null; then
 	WAN_IF=trubamtu0
 	ip link set trubamtu0 mtu 1400; write_awg_conf; write_router_conf
-	mtu_both 1313 && ok "сеть VPS 1400: MTU 1313 у обеих сторон" || fail "сеть 1400: $(grep '^MTU' "$ROUTER_CONF")"
+	mtu_both 1298 && ok "сеть VPS 1400: MTU 1298 у обеих сторон (запас на S4 и добавку)" || fail "сеть 1400: $(grep '^MTU' "$ROUTER_CONF")"
 	ip link set trubamtu0 mtu 9000; write_awg_conf; write_router_conf
 	mtu_both 1380 && ok "сеть VPS 9000: MTU не больше 1380" || fail "сеть 9000: $(grep '^MTU' "$ROUTER_CONF")"
 	ip link del trubamtu0
@@ -426,6 +481,38 @@ else
 fi
 WAN_IF=nonexistent0; write_router_conf
 grep -qx "MTU = 1380" "$ROUTER_CONF" && ok "интерфейса нет: MTU 1380" || fail "нет интерфейса: $(grep '^MTU' "$ROUTER_CONF")"
+TUN_MTU=1320; write_awg_conf; write_router_conf
+mtu_both 1320 && ok "MTU, заданный вручную, — у обеих сторон" || fail "ручной MTU: $(grep '^MTU' "$ROUTER_CONF")"
+TUN_MTU=''
+state_value_ok TUN_MTU 1300 && ! state_value_ok TUN_MTU 1400 && ! state_value_ok TUN_MTU 1200 && ! state_value_ok TUN_MTU 13a0 \
+	&& ok "MTU вручную: только $MTU_MIN–$MTU_MAX" || fail "MTU вручную: пределы"
+case "$( (main install --mtu 1500) 2>&1 )" in *"--mtu: число"*) ok "параметры: --mtu вне пределов";; *) fail "параметры: --mtu 1500";; esac
+# MTU пути: самый большой пакет без фрагментации — двоичным поиском, потеря не занижает.
+(
+	ping_df() { [ "$2" -le 1452 ]; }
+	[ "$(path_mtu 192.0.2.1 1028 1500)" = 1452 ] && ok "MTU пути: двоичный поиск (PPPoE 1452)" || fail "MTU пути: $(path_mtu 192.0.2.1 1028 1500)"
+	ping_df() { [ "$2" -le 1500 ]; }
+	[ "$(path_mtu 192.0.2.1 1028 1500)" = 1500 ] && ok "MTU пути: путь не уже сети VPS" || fail "MTU пути 1500"
+	ping_df() { return 1; }
+	! path_mtu 192.0.2.1 1028 1500 >/dev/null && ok "MTU пути: Роутер не отвечает — ошибка, а не 0" || fail "MTU пути без ответа"
+	# Пакет ping_df — целиком: данных на 28 байт меньше.
+	unset -f ping_df; eval "$(grep '^ping_df()' "$SCRIPT")"
+	ping() { echo "$*" > "$T/ping"; }
+	ping_df 192.0.2.1 1452; grep -q -- '-M do -s 1424 192.0.2.1' "$T/ping" && ok "MTU пути: ping без фрагментации, данные = размер − 28" || fail "ping: $(cat "$T/ping")"
+	# Роутер не отвечает на ping — фрагменты по счётчикам ядра за интервал.
+	PROC="$T/fproc"; mkdir -p "$PROC/net"
+	fsnmp() { printf 'Ip: Forwarding ReasmReqds ReasmFails FragCreates\nIp: 1 %s 0 %s\n' "$1" "$2" > "$PROC/net/snmp"; }
+	sleep() { fsnmp 0 400; }; fsnmp 0 100
+	out=$(mtu_passive 30 1313 1298)
+	grep -q 'нарезал при отправке 300' <<< "$out" && grep -q '1313 больше 1298' <<< "$out" \
+		&& ok "MTU без ping: VPS режет пакеты — MTU Туннеля больше сети VPS" || fail "mtu_passive режет: $out"
+	sleep() { fsnmp 50 100; }; fsnmp 0 100
+	out=$(mtu_passive 30 1298 1298)
+	grep -q 'приходят фрагментами' <<< "$out" && ! grep -q 'нарезал при отправке [1-9]' <<< "$out" \
+		&& ok "MTU без ping: фрагменты от дома — путь уже MTU" || fail "mtu_passive от дома: $out"
+	sleep() { :; }
+	out=$(mtu_passive 30 1298 1298); grep -q 'фрагментов нет' <<< "$out" && ok "MTU без ping: фрагментов нет" || fail "mtu_passive чисто: $out"
+)
 WAN_IF=eth0; write_awg_conf; write_router_conf
 [ "$(grep -c '^S[1-4] = ' "$ROUTER_CONF")" -eq 4 ] && ok "Роутер: S1–S4" || fail "S1-S4"
 diff <(grep -E '^(S[1-4]|H[1-4]) = ' "$AWG_CONF") <(grep -E '^(S[1-4]|H[1-4]) = ' "$ROUTER_CONF") >/dev/null \
@@ -435,16 +522,16 @@ diff <(grep -E '^(S[1-4]|H[1-4]) = ' "$AWG_CONF") <(grep -E '^(S[1-4]|H[1-4]) = 
 ! grep -qE '^(HeaderProtectionKey|DisableCookies|RandomTrailers|ContentPaddingAddition)' "$AWG_CONF" "$ROUTER_CONF" \
 	&& ok "AWG 2.0: без параметров 3.1" || fail "AWG 2.0: лишние параметры 3.1"
 
-# Конфиги AWG 3.1: ключ защиты заголовков одинаковый, DisableCookies у обеих сторон,
+# Конфиги AWG 3.1: ключ защиты заголовков одинаковый, cookie-защита включена у обеих сторон,
 # RandomTrailers — только по команде random-trailers.
 AWG_PROTO=3; gen_params; HPK='aHBrLXRlc3Qta2V5LTMyLWJ5dGVzLWxvbmctLS0tLS0='; RANDOM_TRAILERS=0
 write_awg_conf; write_router_conf
 bad=0
 for f in "$AWG_CONF" "$ROUTER_CONF"; do
-	grep -qx "HeaderProtectionKey = $HPK" "$f" && grep -qx 'DisableCookies = on' "$f" && ! grep -q '^RandomTrailers' "$f" \
+	grep -qx "HeaderProtectionKey = $HPK" "$f" && grep -qx 'DisableCookies = off' "$f" && ! grep -q '^RandomTrailers' "$f" \
 		|| { fail "AWG 3.1: $(basename "$f")"; bad=1; }
 done
-[ "$bad" -eq 0 ] && ok "AWG 3.1: HeaderProtectionKey и DisableCookies у обеих сторон, RandomTrailers выкл"
+[ "$bad" -eq 0 ] && ok "AWG 3.1: HeaderProtectionKey и cookie-защита у обеих сторон, RandomTrailers выкл"
 grep -qx 'ContentPaddingAddition = 0-15' "$AWG_CONF" && grep -qx 'ContentPaddingAddition = 0-15' "$ROUTER_CONF" \
 	&& ok "AWG 3.1: добавка к пакетам 0–15 у обеих сторон" || fail "AWG 3.1: ContentPaddingAddition"
 grep -qx 'PersistentKeepalive = 15-25' "$ROUTER_CONF" && ! grep -q '^PersistentKeepalive' "$AWG_CONF" \
@@ -458,6 +545,24 @@ STATE="$STATE_DIR/pipe.env"; save_state
 ( unset HPK RANDOM_TRAILERS; load_state; [ "$HPK" = 'aHBrLXRlc3Qta2V5LTMyLWJ5dGVzLWxvbmctLS0tLS0=' ] && [ "$RANDOM_TRAILERS" = 1 ] ) \
 	&& ok "pipe.env хранит HeaderProtectionKey и RandomTrailers" || fail "pipe.env: HPK/RandomTrailers"
 [ "$(stat -c %a "$STATE") $(stat -c %a "$STATE_DIR")" = "600 700" ] && ok "pipe.env и его каталог доступны только root" || fail "права pipe.env"
+# pipe.env — данные: код в нём не исполняется, неизвестные поля пропускаются, плохие значения — отказ.
+cp "$STATE" "$T/state.bak"
+printf "AWG_VERSION='1.0'\n" >> "$STATE"
+( load_state ) >/dev/null 2>&1 && ok "pipe.env: поле прежней версии пропускается" || fail "pipe.env: AWG_VERSION"
+printf "SSH_PORT='\$(touch %s/pwned)'\n" "$T" >> "$STATE"
+! ( load_state ) >/dev/null 2>&1 && [ ! -e "$T/pwned" ] && ok "pipe.env: подстановка команд не исполняется" || fail "pipe.env: исполнение кода"
+cp "$T/state.bak" "$STATE"; echo "touch $T/pwned" >> "$STATE"
+! ( load_state ) >/dev/null 2>&1 && [ ! -e "$T/pwned" ] && ok "pipe.env: строка-команда — отказ" || fail "pipe.env: команда"
+cp "$T/state.bak" "$STATE"; chmod 666 "$STATE"
+! ( load_state ) >/dev/null 2>&1 && ok "pipe.env: запись всем — отказ" || fail "pipe.env: права 666"
+cp "$T/state.bak" "$STATE"; chmod 600 "$STATE"
+# status не выводит ключи: awg show печатает ключ защиты заголовков открытым.
+awg() { printf 'interface: awg0\n  private key: (hidden)\n  header protection key: aHBrLXNlY3JldA==\n\npeer: cHVi\n  preshared key: (hidden)\n'; }
+timeout() { shift; "$@"; }
+out=$(awg_show_masked)
+! grep -q 'aHBrLXNlY3JldA' <<< "$out" && grep -q 'header protection key: (hidden)' <<< "$out" && grep -q 'peer: cHVi' <<< "$out" \
+	&& ok "status: ключ защиты заголовков скрыт" || fail "status: $out"
+unset -f awg timeout
 [ "$(umask)" = 0022 ] && ok "запись ключей не меняет umask: юниты и конфиги остаются читаемыми" || fail "umask после записи ключей: $(umask)"
 # random-trailers переключает на ходу и RandomTrailers, и добавку к пакетам: модуль берёт её вместо них.
 awg() { echo "$*" >> "$T/awgset"; }
@@ -478,6 +583,9 @@ rm -f "$ROUTER_CONF"; write_router_conf
 [ "$ROUTER_CONF_NEW" = 0 ] && ok "первый router.conf — без предупреждения о новом" || fail "первый router.conf: $ROUTER_CONF_NEW"
 AWG_PORT=51820
 systemctl() { echo "$*" >> "$T/sysd"; case $1 in is-active) [ "${ACTIVE:-1}" = 1 ] ;; *) return 0 ;; esac; }
+AWG_DROPIN="$T/awg-dropin/10-truba.conf"
+: > "$T/sysd"; AWG_CONF_CHANGED=0; setup_awg_service
+grep -qx 'Requires=truba-pipe.service' "$AWG_DROPIN" && ok "Туннель (пакетный юнит): не поднимается без правил Трубы" || fail "drop-in awg-quick"
 : > "$T/sysd"; AWG_CONF_CHANGED=0; setup_awg_service
 ! grep -q '^restart' "$T/sysd" && ok "Туннель: конфиг тот же — без перезапуска" || fail "Туннель перезапущен зря: $(cat "$T/sysd")"
 : > "$T/sysd"; AWG_CONF_CHANGED=1; setup_awg_service
@@ -521,14 +629,20 @@ SSH_PORT=51022 SSH_CONFIRMED=0 SSH_FALLBACK=50022; save_state
 ( unset SSH_FALLBACK; load_state; [ "$SSH_FALLBACK" = 50022 ] ) && ok "pipe.env хранит запасной порт SSH" || fail "pipe.env: SSH_FALLBACK"
 unset OPT_SSH_PORT
 # Запасные порты при первой установке — те, что sshd слушает сейчас, а не всегда 22.
-sshd() { printf '%s\n' 'port 2222' 'port 52222' 'port 2222' 'addressfamily any'; }
+sshd() {
+	case "$1" in
+		-T) printf '%s\n' 'port 2222' 'port 52222' 'port 2222' 'addressfamily any' ;;
+		-T\ *) printf '%s\n' 'port 2222' ;;
+		*) printf '%s\n' 'port 2222' 'port 52222' 'port 2222' 'addressfamily any' ;;
+	esac
+}
 [ "$(sshd_ports 52222)" = 2222 ] && [ "$(sshd_ports)" = "2222 52222" ] && ok "SSH: запасные — текущие порты sshd без нового" || fail "SSH: порты sshd: «$(sshd_ports 52222)»"
-sshd() { echo 'port 52222'; }
+sshd() { case "$1" in -T) echo 'port 52222' ;; *) echo 'port 52222' ;; esac; }
 [ -z "$(sshd_ports 52222)" ] && ok "SSH: sshd уже слушает только новый порт — запасных нет" || fail "SSH: только новый: «$(sshd_ports 52222)»"
 sshd() { return 255; }
 [ "$(sshd_ports)" = 22 ] && [ -z "$(sshd_ports 22)" ] && ok "SSH: sshd -T не ответил — запасной 22" || fail "SSH: без sshd -T: «$(sshd_ports)»"
 unset -f sshd
-# Без терминала — понятная ошибка, а не мгновенный откат: право чтения у /dev/tty есть всегда.
+# Без терминала — отказ до любых изменений установки.
 out=$( (NO_CONFIRM=0 SSH_PORT=52222 PUB_IP=203.0.113.10 confirm_ssh 22) 2>&1 </dev/null )
 grep -q 'нужен интерактивный терминал' <<< "$out" && ok "SSH: без терминала — ошибка до вопроса" || fail "SSH: без терминала: $out"
 
@@ -538,7 +652,7 @@ out=$( (
 	systemd-detect-virt() { return 1; }
 	have_key_login() { return 1; }
 	install_packages() { echo "ПАКЕТЫ"; }
-	cmd_install
+	NO_CONFIRM=1 cmd_install
 ) 2>&1 )
 grep -q 'нет ключа' <<< "$out" && ! grep -q 'ПАКЕТЫ' <<< "$out" && ok "install: ключ root — до пакетов" || fail "install: ключ root: $out"
 
@@ -624,6 +738,135 @@ out=$(set -Eeuo pipefail; unbound_status; echo конец)
 [ "$out" = конец ] && ok "status: unbound не отвечает — строк нет, status идёт дальше" || fail "status без unbound: $out"
 unset -f unbound-control
 
+# diag: разница счётчиков за интервал, подсказки только по наблюдениям.
+(
+	PROC="$T/proc"; SYS_NET="$T/dsys"; WAN_IF=eth9; AWG_IF=awg9
+	mkdir -p "$PROC/net/stat" "$SYS_NET/eth9/statistics" "$SYS_NET/awg9/statistics"
+	snap() {   # snap rx_drop softnet_drop steal user idle udp_rcvbuf — накопленные значения, как в ядре
+		for d in eth9 awg9; do for f in rx_packets tx_packets rx_dropped tx_dropped rx_errors tx_errors; do echo 0 > "$SYS_NET/$d/statistics/$f"; done; done
+		echo 3000 > "$SYS_NET/eth9/statistics/rx_packets"; echo "$1" > "$SYS_NET/eth9/statistics/rx_dropped"
+		printf 'Udp: InDatagrams NoPorts InErrors OutDatagrams RcvbufErrors SndbufErrors\nUdp: 10 0 0 10 %s 0\n' "$6" > "$PROC/net/snmp"
+		printf '00000010 %08x 00000000 0\n00000010 00000000 00000000 0\n' "$2" > "$PROC/net/softnet_stat"
+		# cpu: user nice system idle iowait irq softirq steal
+		printf 'cpu  %d 0 0 %d 0 0 10 %d\ncpu0 %d 0 0 %d 0 0 10 %d\ncpu1 0 0 0 1000 0 0 0 0\n' "$4" "$5" "$3" "$4" "$5" "$3" > "$PROC/stat"
+		printf 'entries searched found new invalid ignore delete delete_list insert insert_failed drop early_drop\n' > "$PROC/net/stat/nf_conntrack"
+		printf '00000001 0 0 0 0 0 0 0 0 00000000 00000000 00000000\n' >> "$PROC/net/stat/nf_conntrack"
+	}
+	tc() { printf 'qdisc mq 0: root\n Sent 1 bytes 1 pkt (dropped 0, overlimits 0 requeues 0)\nqdisc fq_codel 0: parent :1\n  maxpacket 1 drop_overlimit 0 new_flow_count 1\n'; }
+	snap 0 0 0 100 900 0; diag_snapshot > "$T/da"
+	snap 0 0 0 200 1800 0; diag_snapshot > "$T/db"
+	out=$(diag_delta "$T/da" "$T/db" | diag_report 10 '0% 30.1 31.0 35.2' '0% 1.1 1.2 1.5')
+	grep -q 'Потерь и упоров не найдено' <<< "$out" && grep -q 'RTT Туннеля (до Роутера): 30.1 / 31.0 / 35.2' <<< "$out" \
+		&& ok "diag: без потерь — без подсказок, RTT Туннеля и VPS" || fail "diag спокойный: $out"
+	snap 0 0 0 0 1000 0; diag_snapshot > "$T/da"
+	snap 5 7 150 900 1020 3; diag_snapshot > "$T/db"
+	out=$(diag_delta "$T/da" "$T/db" | diag_report 10 '' '100% - - -')
+	grep -q 'steal' <<< "$out" && grep -q 'netdev_max_backlog' <<< "$out" && grep -q 'rmem_max' <<< "$out" \
+		&& grep -q 'ядро cpu0 занято' <<< "$out" && grep -q 'нет ответа (потери 100%)' <<< "$out" && grep -q 'ping не запускался' <<< "$out" \
+		&& ! grep -q 'Потерь и упоров не найдено' <<< "$out" \
+		&& ok "diag: steal, упор в ядро, потери разбора и UDP-буфера — подсказки" || fail "diag с потерями: $out"
+	# Как на реальном VPS: лимит разбора срабатывал, но без потерь; Роутер на ping из Туннеля не отвечает.
+	out=$(printf '%s\n' softnet.squeeze\ 590 softnet.dropped\ 0 | diag_report 60 '100% - - -' '0% 3.6 3.8 6.7')
+	grep -q 'без потерь' <<< "$out" && ! grep -q netdev_budget <<< "$out" && grep -q 'Потерь и упоров не найдено' <<< "$out" \
+		&& grep -q 'вход закрыт' <<< "$out" && ok "diag: лимит разбора без потерь и молчащий Роутер — не тревога" || fail "diag squeeze: $out"
+	out=$(printf '%s\n' cpu.total\ 1000 cpu.steal\ 69 | diag_report 60 '' '')
+	grep -q 'только если под нагрузкой растёт RTT' <<< "$out" && ! grep -q '^! steal' <<< "$out" \
+		&& ok "diag: steal 6,9 % — к сведению, не тревога" || fail "diag steal 6.9: $out"
+	printf '%s\n' 'PING 10.77.77.2 (10.77.77.2) 56(84) bytes of data.' '' '--- 10.77.77.2 ping statistics ---' \
+		'30 packets transmitted, 29 received, 3.33333% packet loss, time 29040ms' 'rtt min/avg/max/mdev = 30.123/31.456/40.789/1.234 ms' > "$T/pingout"
+	[ "$(ping_summary "$T/pingout")" = '3.33333% 30.123 31.456 40.789' ] && ok "diag: разбор итога ping" || fail "ping_summary: $(ping_summary "$T/pingout")"
+)
+case "$( (main diag 3) 2>&1 )" in *"от 5 до 600"*) ok "параметры: diag — длительность в пределах";; *) fail "параметры: diag 3";; esac
+
+# Транзакция: снимок файлов до изменений, откат возвращает их, а созданные — удаляет.
+(
+	TXN_DIR="$T/txn"; OWNED="$T/owned.env"; AWG_DROPIN="$T/awg-dropin2/10-truba.conf"
+	SSHD_DROPIN="$T/txn-sshd.conf"; NFT_FILE="$T/txn.nft"; PIPE_UNIT="$T/txn-pipe.service"
+	AWG_CONF="$T/txn-awg0.conf"; ROUTER_CONF="$T/txn-router.conf"; STATE="$T/txn-pipe.env"
+	systemctl() {
+		echo "$*" >> "$T/txn-sysd"
+		case $1 in
+			is-active|is-enabled) [ "$2" = -q ] && [ "${3:-}" = truba-pipe.service ] && [ "${PIPE_WAS:-0}" = 1 ] ;;
+			cat) return 0 ;;
+			*) return 0 ;;
+		esac
+	}
+	nft() { echo "$*" >> "$T/txn-nft"; }
+	ssh_restart() { echo restart >> "$T/txn-ssh"; }
+	ufw() { echo "$*" >> "$T/txn-ufw"; }
+	echo 'Port 50022' > "$SSHD_DROPIN"; echo old > "$AWG_CONF"; rm -f "$PIPE_UNIT" "$NFT_FILE"
+	PIPE_WAS=0 txn_begin
+	echo 'Port 50022' > "$SSHD_DROPIN.new"; echo 'Port 51022' > "$SSHD_DROPIN"; echo new > "$AWG_CONF"
+	echo unit > "$PIPE_UNIT"; echo rules > "$NFT_FILE"; touch "$TXN_DIR/ufw-off"
+	txn_restore
+	[ "$(cat "$SSHD_DROPIN")" = 'Port 50022' ] && [ "$(cat "$AWG_CONF")" = old ] && [ ! -e "$PIPE_UNIT" ] && [ ! -e "$NFT_FILE" ] \
+		&& [ ! -e "$TXN_DIR" ] && grep -q 'delete table inet truba_filter' "$T/txn-nft" && grep -qx 'disable truba-pipe.service' "$T/txn-sysd" \
+		&& grep -q 'enable' "$T/txn-ufw" && [ -s "$T/txn-ssh" ] \
+		&& ok "откат: прежние SSH и конфиги, новые файлы удалены, правила сняты, ufw включён" \
+		|| fail "откат: $(cat "$SSHD_DROPIN" "$AWG_CONF" 2>&1; ls "$T" | grep txn)"
+	# Правила работали до запуска — откат загружает прежние, а не снимает их.
+	echo old-rules > "$NFT_FILE"; echo unit > "$PIPE_UNIT"; : > "$T/txn-nft"
+	PIPE_WAS=1 txn_begin
+	echo new-rules > "$NFT_FILE"
+	PIPE_WAS=1 txn_restore
+	[ "$(cat "$NFT_FILE")" = old-rules ] && grep -qxe "-f $NFT_FILE" "$T/txn-nft" && ! grep -q delete "$T/txn-nft" \
+		&& ok "откат: работавшие правила загружаются прежними" || fail "откат прежних правил: $(cat "$T/txn-nft")"
+	# Снимок без списка файлов (оборвался при записи) просто удаляется.
+	mkdir -p "$TXN_DIR"; echo junk > "$TXN_DIR/1"; echo new-rules > "$NFT_FILE"
+	txn_restore
+	[ ! -e "$TXN_DIR" ] && [ "$(cat "$NFT_FILE")" = new-rules ] && ok "откат: неполный снимок не применяется" || fail "неполный снимок"
+	# Подтверждение: снимок удаляется, выключенный ufw записывается для uninstall.
+	txn_begin; touch "$TXN_DIR/ufw-off"
+	txn_commit
+	[ ! -e "$TXN_DIR" ] && grep -qx "UFW_DISABLED='1'" "$OWNED" && grep -q "stop $ROLLBACK_UNIT.timer" "$T/txn-sysd" \
+		&& ok "подтверждение: снимок удалён, таймер остановлен, выключенный ufw записан" || fail "txn_commit: $(cat "$OWNED")"
+	# Выход по ошибке посреди транзакции — откат сразу (в основном процессе скрипта).
+	txn_begin; echo broken > "$AWG_CONF"
+	TXN_DIR=$TXN_DIR AWG_CONF=$AWG_CONF bash -c '
+		source "$1"; TXN_DIR=$2; AWG_CONF=$3
+		systemctl() { :; }; nft() { :; }; ssh_restart() { :; }
+		TXN_ACTIVE=1; trap txn_on_exit EXIT; exit 1' _ "$SCRIPT" "$TXN_DIR" "$AWG_CONF" 2>/dev/null
+	[ "$(cat "$AWG_CONF")" = old ] && [ ! -e "$TXN_DIR" ] && ok "ошибка или обрыв сессии — откат сразу" || fail "откат при выходе: $(cat "$AWG_CONF")"
+)
+
+# Таймер отката — отдельный юнит systemd с копией скрипта: переживает гибель установщика.
+(
+	TXN_DIR="$T/txn-timer"; mkdir -p "$TXN_DIR"
+	systemd-run() { echo "$*" > "$T/sdrun"; }
+	systemctl() { :; }
+	rollback_timer_start
+	grep -q -- "--unit=truba-rollback --on-active=${ROLLBACK_DELAY}s" "$T/sdrun" && grep -q "$TXN_DIR/install-vps.sh txn-rollback" "$T/sdrun" \
+		&& cmp -s "$TXN_DIR/install-vps.sh" "$SCRIPT" && [ "$ROLLBACK_DELAY" -gt "$CONFIRM_TIMEOUT" ] \
+		&& ok "таймер отката: копия скрипта, срабатывает позже окна подтверждения" || fail "таймер отката: $(cat "$T/sdrun")"
+	# Без снимка таймеру делать нечего.
+	rm -rf "$TXN_DIR"; txn_restore() { echo RESTORE; }
+	out=$( (cmd_txn_rollback) 2>&1 ); [ -z "$out" ] && ok "таймер отката: изменения подтверждены — ничего не делает" || fail "txn-rollback: $out"
+	mkdir -p "$TXN_DIR"; touch "$TXN_DIR/manifest"
+	out=$( (cmd_txn_rollback) 2>&1 ); grep -q RESTORE <<< "$out" && ok "таймер отката: не подтверждено — откат" || fail "txn-rollback: $out"
+)
+
+# Исходное состояние для uninstall пишется один раз и только у новой установки.
+(
+	OWNED="$T/owned2.env"; PIPE_UNIT="$T/none.service"; rm -f "$OWNED" "$PIPE_UNIT"
+	systemctl() { [ "$*" = "is-enabled -q unbound" ]; }
+	VPS_PRIV='' record_owned
+	grep -qx "UNBOUND_PREEXISTING='1'" "$OWNED" && grep -qx "RESOLVCONF_ENABLED='0'" "$OWNED" && grep -qx "UFW_DISABLED='0'" "$OWNED" \
+		&& ok "исходное состояние: unbound был включён до Трубы" || fail "record_owned: $(cat "$OWNED")"
+	systemctl() { return 1; }
+	VPS_PRIV='' record_owned
+	grep -qx "UNBOUND_PREEXISTING='1'" "$OWNED" && ok "исходное состояние: не перезаписывается повторным install" || fail "record_owned повторно"
+	rm -f "$OWNED"; VPS_PRIV=a2V5 record_owned
+	grep -qx "UNBOUND_PREEXISTING=''" "$OWNED" && ok "исходное состояние: у Трубы прежней версии — неизвестно" || fail "record_owned старой: $(cat "$OWNED")"
+)
+
+# Чужой awg0.conf первая установка не перезаписывает.
+(
+	AWG_CONF="$T/foreign.conf"; VPS_PRIV=''
+	echo '[Interface]' > "$AWG_CONF"
+	! ( check_foreign_awg_conf ) 2>/dev/null && ok "чужой awg0.conf — отказ" || fail "чужой awg0.conf"
+	echo '# Труба: Туннель к Роутеру' > "$AWG_CONF"
+	( check_foreign_awg_conf ) && ok "свой awg0.conf — продолжение" || fail "свой awg0.conf"
+)
 # Параметры: порт без значения или не число — понятная ошибка до любых изменений, а не
 # «unbound variable» и не отказ nftables посреди установки.
 arg_err() { ( main install "$@" ) 2>&1 >/dev/null; }
@@ -632,5 +875,7 @@ case "$(arg_err --awg-port 70000)" in *"неверный номер порта"*
 case "$(arg_err --ssh-port 22x)" in *"неверный номер порта"*) ok "параметры: порт не число";; *) fail "параметры: порт не число: $(arg_err --ssh-port 22x)";; esac
 
 echo
+# FAILS — ошибки до появления $T; дальше каждая — строка в файле, в том числе из подоболочек.
+FAILS=$((FAILS + $(cat "$T/fails" 2>/dev/null | wc -l)))
 [ "$FAILS" -eq 0 ] && echo "ALL OK" || echo "$FAILS FAILED"
 exit "$FAILS"
