@@ -216,7 +216,9 @@ dpkg-query() { echo '1.0.0-0~202609061402+4569c4c~ubuntu24.04.1'; }
 [ "$(awg_version)" = "3.1.20260812 (сборка PPA 20260906, 4569c4c)" ] && ok "версия AWG: модуль и сборка PPA" || fail "версия AWG: $(awg_version)"
 unset -f modinfo dpkg-query
 
-# Параметры AWG 2.x
+# Параметры AWG 2.x. DNS на VPS для I1 не спрашивается: опорные адреса из списка.
+timeout() { shift; "$@"; }
+getent() { return 2; }
 AWG_PROTO=2
 for i in $(seq 50); do
 	gen_params
@@ -251,7 +253,126 @@ done
 
 AWG_PROTO=1
 gen_params
-[ -z "$S3" ] && [ -z "$I1" ] && [[ "$H1" =~ ^[0-9]+$ ]] && ok "параметры AWG 1.x без S3/S4/I1" || fail "параметры AWG 1.x"
+[ -z "$S3" ] && [ -z "$I1" ] && [ -z "$I1_SRV" ] && [[ "$H1" =~ ^[0-9]+$ ]] && ok "параметры AWG 1.x без S3/S4/I1" || fail "параметры AWG 1.x"
+
+# I1 — пакет DNS: <r N> заменяется N нулевыми байтами, и пакет разбирается как настоящий.
+# Вывод: «флаги qd an ns ar имя тип класс | адреса | udp do длина-опций», иначе ошибка разбора.
+dns_parse() {
+	perl -e '
+		my $s = shift; my $hex = "";
+		while ($s =~ /<(\w+)(?:\s+([^>]*))?>/g) {
+			my ($t, $a) = ($1, $2);
+			if ($t eq "b") { $a =~ s/^0x//; $hex .= $a } elsif ($t eq "r") { $hex .= "00" x $a } else { die "тег $t\n" }
+		}
+		die "нечётный hex\n" if length($hex) % 2 || $hex =~ /[^0-9a-f]/;
+		my $p = pack("H*", $hex); my $o = 0;
+		my $need = sub { die "короткий пакет\n" if $o + $_[0] > length $p };
+		my $u16 = sub { $need->(2); my $v = unpack("n", substr($p, $o, 2)); $o += 2; $v };
+		my $u32 = sub { $need->(4); my $v = unpack("N", substr($p, $o, 4)); $o += 4; $v };
+		my $name = sub {
+			my @l;
+			while (1) {
+				$need->(1); my $n = ord substr($p, $o, 1);
+				if ($n == 0) { $o++; last }
+				if (($n & 0xc0) == 0xc0) { $need->(2); die "указатель не на вопрос\n" if $u16->() != 0xc00c; return "*" }
+				die "метка $n\n" if $n > 63; $o++; $need->($n); push @l, substr($p, $o, $n); $o += $n;
+			}
+			join ".", @l;
+		};
+		$u16->(); my $fl = $u16->(); my ($qd, $an, $ns, $ar) = map { $u16->() } 1..4;
+		die "qdcount $qd\n" if $qd != 1;
+		my $qn = $name->(); my $qt = $u16->(); my $qc = $u16->();
+		my @addr;
+		for (1..$an) {
+			die "имя ответа\n" if $name->() ne "*";
+			my ($t, $c) = ($u16->(), $u16->()); my $ttl = $u32->(); my $len = $u16->();
+			die "тип ответа\n" if $t != $qt || $c != 1 || $len != ($t == 1 ? 4 : 16);
+			die "TTL $ttl\n" if $ttl < 60 || $ttl > 600;
+			$need->($len); my $raw = substr($p, $o, $len); $o += $len;
+			push @addr, $len == 4 ? join(".", unpack("C4", $raw)) : join(":", map { sprintf "%x", $_ } unpack("n8", $raw));
+		}
+		die "arcount $ar\n" if $ar != 1;
+		die "OPT: имя\n" if $name->() ne "";
+		die "OPT: тип\n" if $u16->() != 41;
+		my $udp = $u16->(); $u16->(); my $do = $u16->() >> 15; my $rdl = $u16->();
+		$need->($rdl); my $end = $o + $rdl;
+		while ($o < $end) { my ($c, $l) = ($u16->(), $u16->()); die "опция $c\n" if $c != 10; $o += $l }
+		die "длина OPT\n" if $o != $end;
+		die "лишние байты\n" if $o != length $p;
+		printf "%04x %d %d %d %d %s %d %d | %s | %d %d %d\n", $fl, $qd, $an, $ns, $ar, $qn, $qt, $qc, join(" ", @addr), $udp, $do, $rdl;
+	' "$1"
+}
+# Опорные адреса имён лежат в сетях их владельцев (проверено по RIPEstat при подборе списка).
+in_owner_net() {
+	case $1 in
+		77.88.*|5.255.255.*|93.158.1[2-8][0-9].*|87.250.2[2-5][0-9].*|213.180.199.*|37.9.64.*|2a02:6b8:*) return 0 ;;
+		87.240.1[2-9][0-9].*|93.186.2[2-3][0-9].*|95.213.*) return 0 ;;
+		95.163.*|217.20.1[4-5][0-9].*|89.221.23[6-9].*|90.156.23[2-9].*|155.212.*|2a00:b4c0:*) return 0 ;;
+		213.59.25[2-5].*|84.252.149.*|178.130.128.*|217.12.98.*|185.73.19[2-5].*|185.62.202.*|2a03:720:*) return 0 ;;
+		176.114.12[0-4].*|95.129.232.*|91.236.51.*|51.250.126.*|178.248.23[2-9].*|81.19.*|194.190.139.*|178.177.*) return 0 ;;
+	esac
+	return 1
+}
+# Опорные адреса из списка.
+AWG_PROTO=3
+bad=0; seen=" "
+for i in $(seq 50); do
+	gen_params
+	q=$(dns_parse "$I1" 2>&1) || { fail "I1 не разбирается: $q — $I1"; bad=1; continue; }
+	r=$(dns_parse "$I1_SRV" 2>&1) || { fail "I1 Трубы не разбирается: $r — $I1_SRV"; bad=1; continue; }
+	read -r qfl _ qan _ _ qname qtype _ _ _ _ qdo _ <<< "$q"
+	[[ $qfl =~ ^01[02]0$ ]] && [ "$qan" = 0 ] || { fail "I1: не запрос: $q"; bad=1; }
+	[[ $I1 == '<r 2><b 0x'* ]] || { fail "I1: не с ID транзакции <r 2>: $I1"; bad=1; }
+	line=$(grep "^$qname " <<< "$I1_DOMAINS") || { fail "I1: имя не из списка: $qname"; bad=1; continue; }
+	read -r _ a4 a6 <<< "$line"
+	[ "$qtype" = 1 ] || { [ "$qtype" = 28 ] && [ "$a6" != - ]; } || { fail "I1: AAAA у $qname без такой записи"; bad=1; }
+	# Ответ Трубы — на тот же вопрос, с тем же битом DO, адреса — опорные.
+	read -r rfl _ ran _ _ rname rtype _ raddr _ rdo _ <<< "${r//|/ }"
+	[ "$rfl $rname $rtype $rdo" = "8180 $qname $qtype $qdo" ] && [ "$ran" = 1 ] || { fail "I1 Трубы: не ответ на вопрос: $q / $r"; bad=1; }
+	if [ "$qtype" = 1 ]; then [ "$raddr" = "$a4" ]; else [ "$(ipv6_hex "$raddr")" = "$(ipv6_hex "$a6")" ]; fi \
+		|| { fail "I1 Трубы: адрес $raddr, а у $qname $a4 $a6"; bad=1; }
+	in_owner_net "$raddr" || { fail "I1 Трубы: $raddr не в сети владельца $qname"; bad=1; }
+	seen+="$I1"$'\n'
+done
+[ "$bad" -eq 0 ] && ok "I1: 50 пар — корректный DNS-запрос Роутера и ответ Трубы на тот же вопрос"
+[ "$(sort -u <<< "$seen" | wc -l)" -ge 25 ] && ok "I1: у разных установок разные пакеты" || fail "I1: мало разных: $(sort -u <<< "$seen" | wc -l)"
+bad=0
+while read -r name a4 a6; do
+	in_owner_net "$a4" && { [ "$a6" = - ] || in_owner_net "$a6"; } && ipv4_hex "$a4" >/dev/null \
+		&& { [ "$a6" = - ] || ipv6_hex "$a6" >/dev/null; } || { fail "список I1: $name $a4 $a6"; bad=1; }
+	[[ $name =~ ^[a-z0-9-]+(\.[a-z0-9-]+)*\.(ru|net|com)$ ]] || { fail "список I1: имя $name"; bad=1; }
+done <<< "$I1_DOMAINS"
+[ "$bad" -eq 0 ] && ok "список I1: $(wc -l <<< "$I1_DOMAINS") российских имён, опорные адреса в сетях владельцев"
+# DNS на VPS отвечает — в ответе Трубы все настоящие адреса (не больше восьми, без повторов).
+getent() { case $1 in ahostsv4) printf '77.88.44.55 STREAM yandex.ru\n77.88.44.55 DGRAM\n5.255.255.77 STREAM\n77.88.55.88 STREAM\n' ;;
+	ahostsv6) printf '2a02:6b8:a::a STREAM yandex.ru\n::ffff:1.2.3.4 STREAM\n' ;; esac; }
+I1_DOMAINS='yandex.ru 77.88.55.88 2a02:6b8:a::a' gen_i1
+r=$(dns_parse "$I1_SRV") || fail "I1 Трубы с адресами из DNS: $I1_SRV"
+case "$(dns_parse "$I1")" in
+	*" yandex.ru 1 "*) [[ $r == *"| 77.88.44.55 5.255.255.77 77.88.55.88 |"* ]] && [[ $r == "8180 1 3 0 1 "* ]] ;;
+	*) [[ $r == *"| 2a02:6b8:a:0:0:0:0:a |"* ]] ;;
+esac && ok "I1 Трубы: настоящие адреса имени из DNS VPS" || fail "I1 Трубы с DNS: $r"
+[ "$(ipv6_hex 2a02:6b8::2:242)" = 2a0206b8000000000000000000020242 ] && [ "$(ipv4_hex 5.255.255.77)" = 05ffff4d ] \
+	&& ! ipv6_hex 1::2::3 >/dev/null && [ "$(dns_name_hex ya.ru)" = 02796102727500 ] \
+	&& ok "I1: адреса и имя в формате DNS" || fail "I1: формат адресов/имени"
+# Повторный install: прежний I1 (DNS-ответ о google.com) заменяется, ключи и S/H — нет.
+AWG_PROTO=3; gen_params; s_before="$S1 $S2 $S3 $S4 $H1 $H2 $H3 $H4"
+I1='<r 2><b 0x858000010001000000000377777706676f6f676c6503636f6d0000010001c00c000100010000012c0004><r 4>'; I1_SRV=''
+refresh_i1 >/dev/null
+[ -n "$I1_SRV" ] && [[ $I1 != *676f6f676c65* ]] && [ "$s_before" = "$S1 $S2 $S3 $S4 $H1 $H2 $H3 $H4" ] \
+	&& ok "повторный install: старый I1 заменяется, S и H прежние" || fail "повторный install: I1 $I1"
+i1_before=$I1; refresh_i1 >/dev/null
+[ "$I1" = "$i1_before" ] && ok "повторный install: новый I1 больше не меняется" || fail "повторный install: I1 сменился ещё раз"
+AWG_PROTO=1; I1=''; I1_SRV=''; refresh_i1 >/dev/null
+[ -z "$I1$I1_SRV" ] && ok "повторный install: у AWG 1.x I1 нет" || fail "повторный install: I1 у AWG 1.x"
+getent() { return 2; }
+# Таймеры: самая долгая пауза без рукопожатия меньше порога контроля Туннеля на Роутере (180 с),
+# а старая сессия закрывается позже смены ключей.
+hi() { echo "${1#*-}"; }
+lo() { echo "${1%-*}"; }
+[ $(( $(hi "$AWG_REKEY_AFTER") + $(hi "$AWG_KEEPALIVE") + $(hi "$AWG_REKEY_TIMEOUT") )) -lt 180 ] \
+	&& [ "$(lo "$AWG_REJECT_AFTER")" -gt $(( $(hi "$AWG_REKEY_AFTER") + $(hi "$AWG_KEEPALIVE") + $(hi "$AWG_REKEY_TIMEOUT") )) ] \
+	&& ok "таймеры AWG 3.1: рукопожатие чаще 180 с, RejectAfterTime позже смены ключей" || fail "таймеры AWG 3.1: пределы"
 
 # Правила nftables
 WAN_IF=eth0; PUB_IP=203.0.113.10; SSH_PORT=52222; AWG_PORT=51820
@@ -519,8 +640,11 @@ diff <(grep -E '^(S[1-4]|H[1-4]) = ' "$AWG_CONF") <(grep -E '^(S[1-4]|H[1-4]) = 
 	&& ok "S1–S4 и H1–H4 совпадают у сторон" || fail "S/H различаются"
 [ "$(stat -c %a "$ROUTER_CONF") $(stat -c %a "$AWG_CONF") $(stat -c %a "$AWG_DIR") $(stat -c %a "$OUT_DIR")" = "600 600 700 700" ] \
 	&& ok "router.conf, awg0.conf и их каталоги доступны только root" || fail "права конфигов AWG"
-! grep -qE '^(HeaderProtectionKey|DisableCookies|RandomTrailers|ContentPaddingAddition)' "$AWG_CONF" "$ROUTER_CONF" \
+! grep -qE '^(HeaderProtectionKey|DisableCookies|RandomTrailers|ContentPaddingAddition|RekeyAfterTime|RekeyTimeout|RejectAfterTime|KeepaliveTimeout|MaxHandshakeAttempts)' "$AWG_CONF" "$ROUTER_CONF" \
 	&& ok "AWG 2.0: без параметров 3.1" || fail "AWG 2.0: лишние параметры 3.1"
+grep -qxF "I1 = $I1_SRV" "$AWG_CONF" && grep -qxF "I1 = $I1" "$ROUTER_CONF" && [ "$I1" != "$I1_SRV" ] \
+	&& ok "I1: у Роутера DNS-запрос, у Трубы — ответ" || fail "I1 в конфигах: $(grep -h '^I1' "$AWG_CONF" "$ROUTER_CONF")"
+( I1_SRV=''; awg_conf | grep -qxF "I1 = $I1" ) && ok "I1: без ответа (прежняя установка) у Трубы — запрос" || fail "I1 без I1_SRV"
 
 # Конфиги AWG 3.1: ключ защиты заголовков одинаковый, cookie-защита включена у обеих сторон,
 # RandomTrailers — только по команде random-trailers.
@@ -536,12 +660,19 @@ grep -qx 'ContentPaddingAddition = 0-15' "$AWG_CONF" && grep -qx 'ContentPadding
 	&& ok "AWG 3.1: добавка к пакетам 0–15 у обеих сторон" || fail "AWG 3.1: ContentPaddingAddition"
 grep -qx 'PersistentKeepalive = 15-25' "$ROUTER_CONF" && ! grep -q '^PersistentKeepalive' "$AWG_CONF" \
 	&& ok "AWG 3.1: keepalive Роутера — случайный 15–25 с, у Трубы его нет" || fail "AWG 3.1: keepalive: $(grep -h '^PersistentKeepalive' "$AWG_CONF" "$ROUTER_CONF")"
+timers=$'RekeyAfterTime = 95-125\nRekeyTimeout = 5\nRejectAfterTime = 170-190\nKeepaliveTimeout = 8-14\nMaxHandshakeAttempts = 16-20'
+[ "$(grep -E '^(Rekey|Reject|KeepaliveTimeout|MaxHandshake)' "$AWG_CONF")" = "$timers" ] \
+	&& [ "$(grep -E '^(Rekey|Reject|KeepaliveTimeout|MaxHandshake)' "$ROUTER_CONF")" = "$timers" ] \
+	&& ok "AWG 3.1: случайные таймеры у обеих сторон" || fail "AWG 3.1: таймеры: $(grep -hE '^(Rekey|Reject|Keepalive|Max)' "$AWG_CONF" "$ROUTER_CONF")"
+grep -qx 'RekeyAfterTime = 95-125' "$T/probe" && grep -qx 'MaxHandshakeAttempts = 16-20' "$T/probe" \
+	&& ok "протокол AWG 3.1: проба и с таймерами" || fail "проба AWG 3.1 без таймеров"
 # Добавку модуль берёт вместо RandomTrailers: с ним её нет ни у одной стороны.
 RANDOM_TRAILERS=1; write_awg_conf; write_router_conf
 grep -qx 'RandomTrailers = on' "$AWG_CONF" && grep -qx 'RandomTrailers = on' "$ROUTER_CONF" \
 	&& ! grep -q '^ContentPaddingAddition' "$AWG_CONF" "$ROUTER_CONF" \
 	&& ok "AWG 3.1: RandomTrailers у обеих сторон, без добавки к пакетам" || fail "AWG 3.1: RandomTrailers"
 STATE="$STATE_DIR/pipe.env"; save_state
+( i1=$I1_SRV; unset I1_SRV; load_state; [ "$I1_SRV" = "$i1" ] ) && ok "pipe.env хранит I1 Трубы" || fail "pipe.env: I1_SRV"
 ( unset HPK RANDOM_TRAILERS; load_state; [ "$HPK" = 'aHBrLXRlc3Qta2V5LTMyLWJ5dGVzLWxvbmctLS0tLS0=' ] && [ "$RANDOM_TRAILERS" = 1 ] ) \
 	&& ok "pipe.env хранит HeaderProtectionKey и RandomTrailers" || fail "pipe.env: HPK/RandomTrailers"
 [ "$(stat -c %a "$STATE") $(stat -c %a "$STATE_DIR")" = "600 700" ] && ok "pipe.env и его каталог доступны только root" || fail "права pipe.env"

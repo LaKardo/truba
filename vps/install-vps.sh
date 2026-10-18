@@ -63,6 +63,61 @@ AWG_PADDING=0-15
 # Keepalive Роутера держит открытым NAT его провайдера. Период случайный, чтобы у простаивающего
 # Туннеля не было ровного ритма; верхняя граница — прежние 25 с, так что NAT не закроется раньше.
 AWG_KEEPALIVE=15-25
+# Таймеры AWG 3.1 — случайные из диапазона, чтобы рукопожатия не шли ровно раз в 120 с. Дольше
+# всего Туннель живёт без рукопожатия так: RekeyAfterTime до 125 + keepalive Роутера до 25 +
+# одна повторная попытка 5 = 155 с, меньше порога контроля Туннеля на Роутере (handshake_max,
+# 180 с). RejectAfterTime от 170 — позже этого: старая сессия не закрывается раньше смены ключей.
+AWG_REKEY_AFTER=95-125
+AWG_REKEY_TIMEOUT=5
+AWG_REJECT_AFTER=170-190
+AWG_KEEPALIVE_TIMEOUT=8-14
+AWG_HANDSHAKE_ATTEMPTS=16-20
+# Имена для пакета-приманки I1 (DNS): популярные российские сайты из белых списков мобильных
+# операторов, у которых в ответе нет CNAME. Поля: имя, адрес A и адрес AAAA (- если записи нет)
+# на случай, если при установке имя не разрешится. Обычно адреса берутся настоящие, через DNS.
+I1_DOMAINS="ya.ru 77.88.55.242 2a02:6b8::2:242
+yandex.ru 77.88.55.88 2a02:6b8:a::a
+mail.yandex.ru 77.88.21.37 2a02:6b8::a4
+browser.yandex.ru 93.158.134.121 2a02:6b8::3f7
+yastatic.net 37.9.64.225 2a02:6b8:23::225
+api-maps.yandex.ru 87.250.251.134 2a02:6b8::274
+dzen.ru 95.163.218.220 2a00:b4c0:9100:b000::1:b0
+www.kinopoisk.ru 213.180.199.9 2a02:6b8::473
+vk.com 87.240.132.67 -
+vk.ru 87.240.132.78 -
+api.vk.ru 87.240.137.206 -
+id.vk.ru 93.186.237.1 -
+m.vk.ru 87.240.132.72 -
+ok.ru 217.20.157.145 -
+m.ok.ru 217.20.157.145 -
+st.okcdn.ru 217.20.152.226 -
+mail.ru 89.221.239.1 2a00:b4c0:9100:b000::1
+www.mail.ru 90.156.232.41 -
+cloud.mail.ru 95.163.48.30 -
+max.ru 155.212.204.74 -
+web.max.ru 155.212.204.193 -
+gosuslugi.ru 213.59.253.7 -
+online.sberbank.ru 84.252.149.51 -
+id.sber.ru 84.252.149.147 -
+id.tbank.ru 178.130.128.26 -
+alfa-mobile.alfabank.ru 217.12.98.151 -
+www.ozon.ru 185.73.194.82 -
+ozon.ru 185.73.194.82 -
+st.ozone.ru 185.73.195.117 -
+wildberries.ru 185.62.202.2 2a03:720::173:2
+www.avito.ru 176.114.124.24 -
+m.avito.ru 176.114.120.16 -
+api.avito.ru 176.114.122.2 -
+2gis.ru 95.129.232.210 -
+api.2gis.ru 91.236.51.50 -
+auto.ru 51.250.126.110 -
+rutube.ru 178.248.233.148 -
+lenta.ru 81.19.72.32 -
+ria.ru 194.190.139.47 -
+rambler.ru 81.19.82.2 -
+gazeta.ru 81.19.72.2 -
+mts.ru 178.248.238.27 -
+megafon.ru 178.177.13.149 -"
 CONFIRM_TIMEOUT=120
 # Таймер отката срабатывает позже окна подтверждения: сначала откатывает сам установщик.
 ROLLBACK_DELAY=$((CONFIRM_TIMEOUT + 60))
@@ -136,7 +191,7 @@ pick_port() {
 }
 
 STATE_KEYS="WAN_IF PUB_IP SSH_PORT AWG_PORT AWG_PROTO VPS_PRIV VPS_PUB RTR_PRIV RTR_PUB PSK JC JMIN JMAX
-S1 S2 S3 S4 H1 H2 H3 H4 I1 HPK RANDOM_TRAILERS SSH_CONFIRMED SSH_FALLBACK TUN_MTU
+S1 S2 S3 S4 H1 H2 H3 H4 I1 I1_SRV HPK RANDOM_TRAILERS SSH_CONFIRMED SSH_FALLBACK TUN_MTU
 UFW_DISABLED UNBOUND_PREEXISTING RESOLVCONF_ENABLED"
 
 # Допустимо ли значение поля pipe.env. Пустое — у полей, которых может ещё не быть.
@@ -152,7 +207,7 @@ state_value_ok() {
 		JC|JMIN|JMAX|S1|S2|S3|S4) [[ $v =~ ^[0-9]{1,5}$ ]] ;;
 		TUN_MTU) [[ $v =~ ^[0-9]{4}$ ]] && [ "$v" -ge "$MTU_MIN" ] && [ "$v" -le "$MTU_MAX" ] ;;
 		H1|H2|H3|H4) [[ $v =~ ^[0-9]{1,10}(-[0-9]{1,10})?$ ]] ;;
-		I1) [[ $v =~ ^[A-Za-z0-9\<\>\ ]+$ ]] ;;
+		I1|I1_SRV) [[ $v =~ ^[A-Za-z0-9\<\>\ ]+$ ]] ;;
 		RANDOM_TRAILERS|SSH_CONFIRMED|UFW_DISABLED|UNBOUND_PREEXISTING|RESOLVCONF_ENABLED) [[ $v =~ ^[01]$ ]] ;;
 		*) return 0 ;;
 	esac
@@ -206,6 +261,7 @@ save_state() {
 		H3='$H3'
 		H4='$H4'
 		I1='$I1'
+		I1_SRV='${I1_SRV:-}'
 		HPK='${HPK:-}'
 		RANDOM_TRAILERS='${RANDOM_TRAILERS:-0}'
 		SSH_CONFIRMED='${SSH_CONFIRMED:-0}'
@@ -541,7 +597,7 @@ awg_version() {
 }
 
 # Какой протокол AWG поддерживает модуль: 3 — AWG 3.1 (защита заголовков, DisableCookies,
-# RandomTrailers, ContentPaddingAddition, диапазон PersistentKeepalive), 2 — AWG 2.0 (S3/S4,
+# RandomTrailers, ContentPaddingAddition, диапазоны PersistentKeepalive и таймеров), 2 — AWG 2.0 (S3/S4,
 # диапазоны H, I1), иначе 1.
 # Проверяется тем же разбором конфига, что и у настоящего интерфейса. Код 1 — интерфейс
 # AmneziaWG не создаётся: модуля нет (например, DKMS не собрал его под новое ядро).
@@ -556,8 +612,9 @@ awg_proto_supported() {
 		proto=2
 		# Пир без Endpoint: интерфейс выключен, и пробный keepalive никуда не уходит.
 		key=$(awg genkey)
-		printf '%s\nHeaderProtectionKey = %s\nDisableCookies = off\nRandomTrailers = off\nContentPaddingAddition = %s\n\n[Peer]\nPublicKey = %s\nPersistentKeepalive = %s\n' \
-			"$base" "$key" "$AWG_PADDING" "$key" "$AWG_KEEPALIVE" > "$f"
+		printf '%s\nHeaderProtectionKey = %s\nDisableCookies = off\nRandomTrailers = off\nContentPaddingAddition = %s\nRekeyAfterTime = %s\nRekeyTimeout = %s\nRejectAfterTime = %s\nKeepaliveTimeout = %s\nMaxHandshakeAttempts = %s\n\n[Peer]\nPublicKey = %s\nPersistentKeepalive = %s\n' \
+			"$base" "$key" "$AWG_PADDING" "$AWG_REKEY_AFTER" "$AWG_REKEY_TIMEOUT" "$AWG_REJECT_AFTER" \
+			"$AWG_KEEPALIVE_TIMEOUT" "$AWG_HANDSHAKE_ATTEMPTS" "$key" "$AWG_KEEPALIVE" > "$f"
 		if awg setconf "$t" "$f" 2>/dev/null; then
 			proto=3
 		fi
@@ -575,6 +632,124 @@ detect_awg_proto() {
 }
 
 # ---------- ключи и параметры маскировки ----------
+
+# Адрес в шестнадцатеричном виде, как в записи DNS: IPv4 — 4 байта, IPv6 — 16.
+ipv4_hex() {
+	local a b c d
+	valid_ipv4 "$1" || return 1
+	IFS=. read -r a b c d <<< "$1"
+	printf '%02x%02x%02x%02x' "$((10#$a))" "$((10#$b))" "$((10#$c))" "$((10#$d))"
+}
+
+ipv6_hex() {
+	local a=$1 head tail g n=0 out=''
+	local -a h=() t=()
+	[[ $a =~ ^[0-9a-fA-F:]{2,39}$ ]] || return 1
+	if [[ $a == *::* ]]; then
+		head=${a%%::*}; tail=${a#*::}
+		[[ $tail != *::* ]] || return 1
+	else
+		head=$a; tail=''
+	fi
+	[ -z "$head" ] || IFS=: read -ra h <<< "$head"
+	[ -z "$tail" ] || IFS=: read -ra t <<< "$tail"
+	if [[ $a == *::* ]]; then
+		n=$((8 - ${#h[@]} - ${#t[@]}))
+		[ "$n" -ge 1 ] || return 1
+	else
+		[ "${#h[@]}" -eq 8 ] || return 1
+	fi
+	for g in "${h[@]}"; do [[ $g =~ ^[0-9a-fA-F]{1,4}$ ]] || return 1; out+=$(printf '%04x' "$((16#$g))"); done
+	for ((; n > 0; n--)); do out+=0000; done
+	for g in "${t[@]}"; do [[ $g =~ ^[0-9a-fA-F]{1,4}$ ]] || return 1; out+=$(printf '%04x' "$((16#$g))"); done
+	printf '%s' "$out"
+}
+
+# Имя в виде вопроса DNS: метки с длиной и нулевой байт в конце.
+dns_name_hex() {
+	local label out=''
+	local -a labels=()
+	IFS=. read -ra labels <<< "$1"
+	for label in "${labels[@]}"; do
+		out+=$(printf '%02x' "${#label}")$(printf '%s' "$label" | od -An -tx1 | tr -d ' \n')
+	done
+	printf '%s00' "$out"
+}
+
+# Настоящие адреса имени (4 — A, 6 — AAAA) через DNS VPS, не больше восьми, по одному в строке.
+# Без ответа — пусто.
+i1_resolve() {
+	local fam=ahostsv4 out addr n=0 seen=' '
+	[ "$2" = 6 ] && fam=ahostsv6
+	out=$(timeout 5 getent "$fam" "$1" 2>/dev/null) || out=''
+	while read -r addr _; do
+		[ -n "$addr" ] || continue
+		if [ "$2" = 4 ]; then
+			valid_ipv4 "$addr" || continue
+		elif [[ $addr == ::ffff:* ]] || ! ipv6_hex "$addr" >/dev/null; then
+			continue
+		fi
+		[[ $seen != *" $addr "* ]] || continue
+		seen+="$addr "
+		echo "$addr"
+		n=$((n + 1)); [ "$n" -lt 8 ] || break
+	done <<< "$out"
+	return 0
+}
+
+# Пакеты-приманки I1 в форме DNS (I1 не обязан совпадать у сторон). Роутер (I1) шлёт запрос
+# о популярном российском сайте, Труба (I1_SRV) — ответ на тот же вопрос с настоящими адресами
+# сайта. Имя, тип, флаги, EDNS и TTL выбираются при установке, поэтому у каждой Трубы свои
+# пакеты; ID транзакции и DNS Cookie — случайные при каждом рукопожатии.
+gen_i1() {
+	local line name a4 a6 qtype=0001 rdlen=0004 q flags udp dobit cookie ttl ans='' n=0 addr
+	local -a addrs=()
+	line=$(printf '%s\n' "$I1_DOMAINS" | shuf -n 1)
+	read -r name a4 a6 <<< "$line"
+	# AAAA — только у имён, у которых эта запись есть: иначе ответ выдал бы подделку.
+	if [ "$a6" != - ] && [ "$(rand_between 0 2)" = 0 ]; then qtype=001c; rdlen=0010; fi
+	q="$(dns_name_hex "$name")${qtype}0001"
+	flags=$(shuf -n 1 -e 0100 0120)       # RD или RD+AD (как у dig)
+	udp=$(shuf -n 1 -e 04d0 1000)          # размер EDNS: 1232 или 4096
+	dobit=$(shuf -n 1 -e 0000 8000)        # бит DO
+	cookie=$(rand_between 0 1)
+
+	# Запрос: заголовок (qdcount 1, arcount 1 — запись OPT), вопрос, OPT.
+	if [ "$cookie" = 1 ]; then
+		I1="<r 2><b 0x${flags}0001000000000001${q}000029${udp}0000${dobit}000c000a0008><r 8>"
+	else
+		I1="<r 2><b 0x${flags}0001000000000001${q}000029${udp}0000${dobit}0000>"
+	fi
+
+	if [ "$qtype" = 001c ]; then
+		mapfile -t addrs < <(i1_resolve "$name" 6)
+		[ "${#addrs[@]}" -gt 0 ] || addrs=("$a6")
+	else
+		mapfile -t addrs < <(i1_resolve "$name" 4)
+		[ "${#addrs[@]}" -gt 0 ] || addrs=("$a4")
+	fi
+	ttl=$(printf '%08x' "$(rand_between 60 600)")
+	for addr in "${addrs[@]}"; do
+		if [ "$qtype" = 001c ]; then addr=$(ipv6_hex "$addr"); else addr=$(ipv4_hex "$addr"); fi
+		ans+="c00c${qtype}0001${ttl}${rdlen}${addr}"
+		n=$((n + 1))
+	done
+	# Ответ: RD+RA без AA (так отвечает резолвер), те же вопрос и OPT; Cookie — клиента и сервера.
+	if [ "$cookie" = 1 ]; then
+		I1_SRV="<r 2><b 0x81800001$(printf '%04x' "$n")00000001${q}${ans}00002904d00000${dobit}0014000a0010><r 16>"
+	else
+		I1_SRV="<r 2><b 0x81800001$(printf '%04x' "$n")00000001${q}${ans}00002904d00000${dobit}0000>"
+	fi
+}
+
+# Повторный install: у установок прежних версий I1 — один и тот же DNS-ответ о google.com у всех
+# Труб, а ответа для Трубы нет. Ключи, S и H не меняются; I1 не обязан совпадать у сторон, поэтому
+# прежний router.conf продолжит подключаться, пока его не импортируют заново.
+refresh_i1() {
+	[ "${AWG_PROTO:-1}" -ge 2 ] && [ -z "${I1_SRV:-}" ] || return 0
+	say "Новые пакеты-приманки I1: DNS-запрос Роутера и ответ Трубы"
+	gen_i1
+}
 
 gen_params() {
 	JC=$(rand_between 4 8)
@@ -611,10 +786,9 @@ gen_params() {
 			mapfile -t hs < <(printf '%s\n' "${hs[@]}" | shuf)
 		fi
 		H1=${hs[0]}; H2=${hs[1]}; H3=${hs[2]}; H4=${hs[3]}
-		# Пакет-приманка в форме DNS-ответа (I1 не обязан совпадать у сторон).
-		I1='<r 2><b 0x858000010001000000000377777706676f6f676c6503636f6d0000010001c00c000100010000012c0004><r 4>'
+		gen_i1
 	else
-		S3=''; S4=''; I1=''
+		S3=''; S4=''; I1=''; I1_SRV=''
 		local used=" " h v
 		for v in H1 H2 H3 H4; do
 			while :; do h=$(rand_between 5 2147483647); [[ "$used" != *" $h "* ]] && break; done
@@ -634,6 +808,7 @@ gen_keys() {
 }
 
 awg_params_block() {
+	local side=$1
 	echo "Jc = $JC"
 	echo "Jmin = $JMIN"
 	echo "Jmax = $JMAX"
@@ -645,7 +820,12 @@ awg_params_block() {
 	echo "H2 = $H2"
 	echo "H3 = $H3"
 	echo "H4 = $H4"
-	[ -n "${I1:-}" ] && echo "I1 = $I1"
+	# Роутер шлёт DNS-запрос, Труба — ответ на него. Без ответа (установка прежней версии) — запрос.
+	if [ "$side" = vps ] && [ -n "${I1_SRV:-}" ]; then
+		echo "I1 = $I1_SRV"
+	elif [ -n "${I1:-}" ]; then
+		echo "I1 = $I1"
+	fi
 	if [ "${AWG_PROTO:-1}" -ge 3 ]; then
 		[ -n "${HPK:-}" ] && echo "HeaderProtectionKey = $HPK"
 		# Оставляем защиту AWG от нагрузки рукопожатиями включённой. Это не влияет на RTT данных.
@@ -657,6 +837,11 @@ awg_params_block() {
 		else
 			echo "ContentPaddingAddition = $AWG_PADDING"
 		fi
+		echo "RekeyAfterTime = $AWG_REKEY_AFTER"
+		echo "RekeyTimeout = $AWG_REKEY_TIMEOUT"
+		echo "RejectAfterTime = $AWG_REJECT_AFTER"
+		echo "KeepaliveTimeout = $AWG_KEEPALIVE_TIMEOUT"
+		echo "MaxHandshakeAttempts = $AWG_HANDSHAKE_ATTEMPTS"
 	fi
 	return 0
 }
@@ -668,7 +853,7 @@ awg_conf() {
 	echo "Address = $VPS_TUN/30"
 	echo "ListenPort = $AWG_PORT"
 	echo "MTU = $(tunnel_mtu)"
-	awg_params_block
+	awg_params_block vps
 	echo
 	echo "[Peer]"
 	echo "# Роутер — единственный пир"
@@ -683,7 +868,7 @@ router_conf() {
 	echo "PrivateKey = $RTR_PRIV"
 	echo "Address = $RTR_TUN/30"
 	echo "MTU = $(tunnel_mtu)"
-	awg_params_block
+	awg_params_block router
 	echo
 	echo "[Peer]"
 	echo "PublicKey = $VPS_PUB"
@@ -1351,6 +1536,8 @@ cmd_install() {
 		say "Генерация ключей и параметров AmneziaWG (протокол ${AWG_PROTO}.x)"
 		gen_keys
 		gen_params
+	else
+		refresh_i1
 	fi
 	write_sysctl
 
