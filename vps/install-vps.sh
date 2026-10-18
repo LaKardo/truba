@@ -767,15 +767,12 @@ gen_params() {
 		while [ "$S3" -eq $((S2 + 28)) ]; do S3=$(rand_between "$s3min" 55); done
 		# S4 удлиняет каждый пакет данных: tunnel_mtu оставляет под него до 27 байт.
 		S4=$(rand_between "$s4min" 27)
-		local hs=() i lo w used=" " h
+		local hs=() i lo w
 		if [ "$AWG_PROTO" -ge 3 ]; then
-			# С защитой заголовков тип пакета и так скрыт: широкие диапазоны H ничего не прячут,
-			# а лишь повышают шанс принять пакет данных подходящей длины за служебный.
-			for i in 0 1 2 3; do
-				while :; do h=$(rand_between 5 2147483647); [[ "$used" != *" $h "* ]] && break; done
-				used+="$h "
-				hs+=("$h")
-			done
+			# HeaderProtectionKey шифрует заголовок целиком вместе с типом пакета, поэтому другие H
+			# ничего не прячут, а диапазоны лишь замедляют разбор пакетов. 1–4 — штатные значения
+			# Amnezia VPN на 3.x; без ключа они ушли бы открыто (проверяет awg_check_h).
+			hs=(1 2 3 4)
 		else
 			# Четыре непересекающихся диапазона: по одному в каждой четверти пространства.
 			local q=$((2147483647 / 4))
@@ -883,8 +880,28 @@ router_conf() {
 	fi
 }
 
+# H1–H4 = 1/2/3/4 — настоящие типы сообщений WireGuard: без защиты заголовков их видно снаружи.
+awg_check_h() {
+	if [ "$H1 $H2 $H3 $H4" = "1 2 3 4" ] && { [ "${AWG_PROTO:-1}" -lt 3 ] || [ -z "${HPK:-}" ]; }; then
+		die "H1–H4 = 1/2/3/4 без HeaderProtectionKey выдают WireGuard: выполните rotate-keys"
+	fi
+	return 0
+}
+
+# На AWG 3.x диапазоны H остались от прежних версий: повторный install их не меняет, иначе
+# прежний router.conf перестал бы подключаться.
+h_ranges_on_awg3() {
+	[ "${AWG_PROTO:-1}" -ge 3 ] && [[ "$H1$H2$H3$H4" == *-* ]]
+}
+
+warn_h_ranges() {
+	h_ranges_on_awg3 || return 0
+	warn "H1–H4 заданы диапазонами: на AWG 3.1 они ничего не прячут (заголовок шифрует HeaderProtectionKey) и могут снижать скорость. Чтобы перейти на 1/2/3/4: install-vps.sh rotate-keys, затем импортируйте router.conf заново"
+}
+
 # AWG_CONF_CHANGED=1 — конфиг Туннеля стал другим, и Туннель надо перезапустить.
 write_awg_conf() {
+	awg_check_h
 	install -d -m 700 "$AWG_DIR"
 	put_file 600 "$AWG_CONF" < <(awg_conf)
 	AWG_CONF_CHANGED=$FILE_CHANGED
@@ -894,6 +911,7 @@ write_awg_conf() {
 write_router_conf() {
 	local existed=0
 	[ -f "$ROUTER_CONF" ] && existed=1
+	awg_check_h
 	install -d -m 700 "$OUT_DIR"
 	put_file 600 "$ROUTER_CONF" < <(router_conf)
 	ROUTER_CONF_NEW=0
@@ -1553,6 +1571,7 @@ cmd_install() {
 		# Повторный запуск параметры не меняет: иначе старый конфиг Роутера перестал бы подключаться.
 		warn "модуль поддерживает AWG 3.1 (защита заголовков): включится после rotate-keys, затем импортируйте router.conf заново"
 	fi
+	warn_h_ranges
 
 	if [ -z "${VPS_PRIV:-}" ]; then
 		say "Генерация ключей и параметров AmneziaWG (протокол ${AWG_PROTO}.x)"
@@ -1787,6 +1806,7 @@ cmd_status() {
 			cookies='Туннель не поднят'
 		fi
 		echo "Защита заголовков: $([ -n "${HPK:-}" ] && echo вкл || echo выкл)   Cookie-защита: $cookies   RandomTrailers: $rt"
+		warn_h_ranges
 	fi
 	kernel_module_check || true
 	local over

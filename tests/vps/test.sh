@@ -268,10 +268,19 @@ for i in $(seq 50); do
 	[ $((S1 + 56)) -ne "$S2" ] || { fail "AWG 3: S1+56 == S2"; bad=1; }
 	[ $((S2 + 28)) -ne "$S3" ] || { fail "AWG 3: S2+28 == S3"; bad=1; }
 	[ "$S4" -le 27 ] || { fail "AWG 3: S4 > 27"; bad=1; }
-	for v in H1 H2 H3 H4; do [[ ${!v} =~ ^[0-9]+$ ]] && [ "${!v}" -ge 5 ] || { fail "AWG 3: $v не одно число: ${!v}"; bad=1; }; done
-	[ "$(printf '%s\n' "$H1" "$H2" "$H3" "$H4" | sort -u | wc -l)" -eq 4 ] || { fail "AWG 3: H совпадают"; bad=1; }
+	[ "$H1 $H2 $H3 $H4" = "1 2 3 4" ] || { fail "AWG 3: H не 1/2/3/4: $H1 $H2 $H3 $H4"; bad=1; }
 done
-[ "$bad" -eq 0 ] && ok "50 наборов параметров AWG 3.1: S1–S4 ≥ 12, S3 ≠ S2+28, H1–H4 — разные числа"
+[ "$bad" -eq 0 ] && ok "50 наборов параметров AWG 3.1: S1–S4 ≥ 12, S3 ≠ S2+28, H1–H4 = 1/2/3/4"
+# Диапазоны H на 3.x (прежние установки): предупреждение с rotate-keys; rotate-keys даёт 1/2/3/4.
+out=$( (H1=100-200; H2=300-400; H3=500-600; H4=700-800; warn_h_ranges) 2>&1 )
+grep -q 'rotate-keys' <<< "$out" && [ -z "$( (warn_h_ranges) 2>&1 )" ] \
+	&& [ -z "$( (AWG_PROTO=2; H1=100-200; warn_h_ranges) 2>&1 )" ] \
+	&& ok "H: диапазоны на AWG 3.1 — предупреждение о rotate-keys, на 1/2/3/4 и 2.0 — нет" || fail "H: предупреждение: $out"
+( H1=100-200; H2=300-400; H3=500-600; H4=700-800; gen_params; [ "$H1 $H2 $H3 $H4" = "1 2 3 4" ] ) \
+	&& ok "H: новые параметры (rotate-keys) заменяют диапазоны на 1/2/3/4" || fail "H: rotate-keys"
+out=$( (HPK=''; awg_check_h) 2>&1 ); rc=$?
+[ "$rc" -ne 0 ] && grep -q 'без HeaderProtectionKey' <<< "$out" && ( HPK=k; awg_check_h ) \
+	&& ok "H: 1/2/3/4 без ключа защиты заголовков — ошибка" || fail "H: 1/2/3/4 без ключа: $out"
 
 AWG_PROTO=1
 gen_params
