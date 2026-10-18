@@ -69,9 +69,31 @@ grep -qx 'MaxAuthTries 3' "$SSHD_DROPIN" && grep -qx 'LoginGraceTime 20' "$SSHD_
 SSH_PORT=52222; setup_fail2ban
 grep -qx 'bantime.increment = true' "$F2B_JAIL" && grep -qx 'maxretry = 3' "$F2B_JAIL" \
 	&& ok "fail2ban: усиленные лимиты" || fail "fail2ban: лимиты"
+# OpenSSH до 9.8 выводит prohibit-password старым именем; перекрытая настройка — ошибка с файлом.
+sshd() { [ "$1" = -T ] && printf '%s\n' 'passwordauthentication no' 'kbdinteractiveauthentication no' 'permitrootlogin without-password'; return 0; }
+( ssh_validate_effective ) && ok "SSH: PermitRootLogin without-password (OpenSSH 9.6) принят" || fail "SSH: without-password отклонён"
+mkdir -p "$T/sshd.d"; SSHD_CONFIG="$T/sshd_config"; : > "$SSHD_CONFIG"
+printf 'PermitRootLogin yes\n' > "$T/sshd.d/05-hoster.conf"
+sshd() { [ "$1" = -T ] && printf '%s\n' 'passwordauthentication no' 'kbdinteractiveauthentication no' 'permitrootlogin yes'; return 0; }
+out=$( (SSHD_DROPIN="$T/sshd.d/10-truba.conf"; ssh_validate_effective) 2>&1 )
+grep -q "итоговое PermitRootLogin yes" <<< "$out" && grep -q "05-hoster.conf" <<< "$out" \
+	&& ok "SSH: перекрытый PermitRootLogin — ошибка с файлом" || fail "SSH: перекрытый PermitRootLogin: $out"
+sshd() { [ "$1" = -T ] && printf '%s\n' 'passwordauthentication yes' 'kbdinteractiveauthentication no' 'permitrootlogin prohibit-password'; return 0; }
+out=$( (ssh_validate_effective) 2>&1 )
+grep -q "итоговое PasswordAuthentication yes" <<< "$out" && ok "SSH: вход по паролю — ошибка" || fail "SSH: пароль: $out"
+SSHD_CONFIG=/etc/ssh/sshd_config
 unset -f sshd ssh_restart systemctl
 # Возвращаем функцию скрипта после подмены.
 eval "$saved_ssh_restart"
+# Настоящий sshd: наш файл применяется, и его итог проходит проверку (контейнер одноразовый).
+apt-get install -y -qq openssh-server >/dev/null 2>&1
+(
+	ssh-keygen -A >/dev/null 2>&1; mkdir -p /run/sshd
+	SSHD_DROPIN=/etc/ssh/sshd_config.d/10-truba.conf
+	ssh_restart() { :; }
+	ssh_apply 52222 && ok "SSH: настоящий sshd $(sshd -V 2>&1 | head -1 | cut -d, -f1) принимает настройки Трубы"
+) || fail "SSH: настоящий sshd: $(sshd -T 2>&1 | grep -E '^(permitrootlogin|passwordauthentication|kbdinteractive)')"
+rm -f /etc/ssh/sshd_config.d/10-truba.conf
 
 # Запись файлов: права явные и у нового файла, и у прежнего; глобальный umask не меняется.
 umask 022

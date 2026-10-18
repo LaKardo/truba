@@ -25,6 +25,7 @@ AWG_IF=awg0
 AWG_CONF="$AWG_DIR/$AWG_IF.conf"
 OUT_DIR=/root/truba
 ROUTER_CONF="$OUT_DIR/router.conf"
+SSHD_CONFIG=/etc/ssh/sshd_config
 SSHD_DROPIN=/etc/ssh/sshd_config.d/10-truba.conf
 F2B_JAIL=/etc/fail2ban/jail.d/truba.local
 PIPE_UNIT=/etc/systemd/system/truba-pipe.service
@@ -1245,12 +1246,33 @@ ssh_restart() {
 	fi
 }
 
+# Файлы конфигурации sshd, где задан параметр key, через пробел. sshd берёт первое значение,
+# поэтому файл в sshd_config.d раньше Трубы по имени перекрывает её настройку.
+sshd_option_files() {
+	local f out=''
+	for f in "$SSHD_CONFIG" "${SSHD_DROPIN%/*}"/*.conf; do
+		[ -f "$f" ] || continue
+		grep -qiE "^[[:space:]]*$1[[:space:]]" "$f" && out+="${out:+ }$f"
+	done
+	echo "${out:-?}"
+}
+
+# Значение key в выводе sshd -T должно подходить под шаблон want, иначе — выход с итоговым
+# значением и файлами, где параметр задан.
+sshd_expect() {
+	local effective=$1 key=$2 want=$3 name=$4 got
+	got=$(awk -v k="${key,,}" '$1 == k { print $2; exit }' <<< "$effective")
+	[[ $got =~ ^($want)$ ]] && return 0
+	die "sshd: итоговое $name ${got:-не задано} вместо нужного Трубе — задано в: $(sshd_option_files "$name"). Уберите строку из файла раньше $SSHD_DROPIN или переименуйте его"
+}
+
 ssh_validate_effective() {
 	local effective
 	effective=$(sshd -T) || die "не удалось прочитать эффективную конфигурацию sshd"
-	grep -qx 'passwordauthentication no' <<< "$effective" || die "sshd фактически разрешает вход по паролю"
-	grep -qx 'kbdinteractiveauthentication no' <<< "$effective" || die "sshd фактически разрешает keyboard-interactive"
-	grep -qx 'permitrootlogin prohibit-password' <<< "$effective" || die "sshd не применил PermitRootLogin prohibit-password"
+	sshd_expect "$effective" passwordauthentication no PasswordAuthentication
+	sshd_expect "$effective" kbdinteractiveauthentication no KbdInteractiveAuthentication
+	# OpenSSH до 9.8 (Ubuntu 24.04 — 9.6) выводит prohibit-password старым именем without-password.
+	sshd_expect "$effective" permitrootlogin 'prohibit-password|without-password' PermitRootLogin
 }
 
 ssh_apply() {
