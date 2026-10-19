@@ -66,16 +66,16 @@ const POLICY_ITEMS = () => [ [ 'rules', _('By rules') ], [ 'tunnel', _('All via 
 const POLICY_SHORT = () => ({ tunnel: _('all via tunnel'), direct: _('all direct') });
 const SOURCE = () => ({ dhcp: _('DHCP'), neigh: _('neighbour'), config: _('settings') });
 
-function Row({ d, now, sel, onSel }) {
+function Row({ d, now, sel, onSel, index }) {
 	const { html } = app.lib;
-	const pol = common.devicePolicy(d.mac);
+	const pol = common.devicePolicy(d.mac, index);
 	const r = common.devRate(d), [ tun, dir ] = common.devShare(d, now);
 	const day = d.day ? d.day.reduce((a, b) => a + b, 0) : null;
-	const sid = common.deviceSection(d.mac);
+	const sid = common.deviceSection(d.mac, index);
 	return html`<button type="button" class=${'dev' + (sel ? ' sel' : '')} data-ip=${d.ip || undefined} data-mac=${d.mac || undefined}
 		aria-pressed=${String(!!sel)} onClick=${() => onSel(key(d))}>
 		<span class="n">
-			<b>${nameOf(d)}${app.pending('truba', sid) ? html` <${kit.Dot} level="warn" label=${_('changed, not applied yet')} />` : ''}</b>
+			<b>${common.deviceName(d, index)}${app.pending('truba', sid) ? html` <${kit.Dot} level="warn" label=${_('changed, not applied yet')} />` : ''}</b>
 			<span class="mu">${(d.ip || _('offline')) + (d.zone ? ' · ' + d.zone : '')}</span>
 			${(pol != 'rules') ? html`<span class=${'pol ' + pol}>${POLICY_SHORT()[pol]}</span>` : ''}
 		</span>
@@ -115,9 +115,11 @@ function AddMac({ onDone }) {
 
 function List({ devices, now, sel, onSel }) {
 	const { html, useState } = app.lib;
+	const index = common.deviceIndex();
+	const nameOf = (d) => common.deviceName(d, index);
 	const [ q, setQ ] = useState(''), [ f, setF ] = useState('all'), [ adding, setAdding ] = useState(false);
 	const active = (d) => common.devActive(d, now);
-	const ruled = (d) => common.devicePolicy(d.mac) != 'rules';
+	const ruled = (d) => common.devicePolicy(d.mac, index) != 'rules';
 	const qq = q.trim().toLowerCase();
 	const shown = devices
 		.filter((d) => (f == 'all') || (f == 'active' ? active(d) : ruled(d)))
@@ -151,7 +153,7 @@ function List({ devices, now, sel, onSel }) {
 			]} />
 		</div>
 		${shown.length
-			? html`<div class="devs">${shown.map((d) => html`<${Row} key=${key(d)} d=${d} now=${now} sel=${key(d) == sel} onSel=${onSel} />`)}</div>`
+			? html`<div class="devs">${shown.map((d) => html`<${Row} key=${key(d)} d=${d} now=${now} sel=${key(d) == sel} onSel=${onSel} index=${index} />`)}</div>`
 			: html`<${kit.Empty} text=${devices.length ? _('No devices match the filter.') : _('No devices with traffic in the last 24 hours yet.')} />`}
 	</${kit.Card}>`;
 }
@@ -249,11 +251,11 @@ function Panel({ d, now, onClose }) {
 }
 
 function Page({ store, view }) {
-	const { html, useState } = app.lib;
+	const { html, useState, useMemo } = app.lib;
 	const { devices, offline } = app.use(store);
-	app.use(app.changes);   // строки и панель читают UCI браузера — перерисовка после app.set
+	const changes = app.use(app.changes);
 	const [ sel, setSel ] = useState(null);
-	const list = withPending(devices?.devices || []);
+	const list = useMemo(() => withPending(devices?.devices || []), [ devices, changes ]);
 	const now = devices?.now || Math.floor(Date.now() / 1000);
 	const cur = sel ? list.find((d) => key(d) == sel) : null;
 	return html`
@@ -272,7 +274,7 @@ return view.extend({
 	...app.actions,
 
 	load: function() {
-		return Promise.all([ app.load(), common.loadSchema() ]).then(() =>
+		return Promise.all([ app.load(true), common.loadSchema() ]).then(() =>
 			Promise.all([ common.callDevices(), uci.load('truba') ]));
 	},
 

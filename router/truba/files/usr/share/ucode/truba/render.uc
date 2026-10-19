@@ -216,7 +216,7 @@ function dns_elems(list, timeout) {
 // gs_* — IP из прежней таблицы: строки или { ip, expires } (S.set_elements).
 // Заполняет ctx.set_sizes — число подсетей geoip по Действиям: из ядра огромный набор читать дорого,
 // и ctx.gi — сами подсети: копия правил (ADR 0006) строится из того же ctx без нового чтения.
-export function nft_full(cfg, plan, ctx) {
+export function geoip_data(plan, ctx) {
 	let gi = ctx.gi;
 	if (!gi) {
 		gi = ctx.gi = { block: [], tunnel: [], direct: [] };
@@ -226,6 +226,11 @@ export function nft_full(cfg, plan, ctx) {
 					push(gi[a], cidr);
 	}
 	ctx.set_sizes = { block: length(gi.block), tunnel: length(gi.tunnel), direct: length(gi.direct) };
+	return gi;
+};
+
+export function nft_full(cfg, plan, ctx) {
+	let gi = ctx.external_geoip ? { block: [], tunnel: [], direct: [] } : geoip_data(plan, ctx);
 
 	let iface = q(cfg.iface);
 	let dflt = (plan.mode_default == 'tunnel') ? C.MARK_TUNNEL : C.MARK_DIRECT;

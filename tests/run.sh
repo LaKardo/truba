@@ -19,16 +19,13 @@ export MSYS_NO_PATHCONV=1
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 # Роутер — последняя ImmortalWrt 25.12.x: тег плавающий намеренно, проверки идут на той же
 # ветке выпусков, что ставят на Роутер (в CI образ обновляется с недельным кэшем).
-IMG=immortalwrt/rootfs:x86-64-openwrt-25.12
+# shellcheck source=tests/images.env
+. "$ROOT/tests/images.env"
 # Образ Роутера с зависимостями Трубы. Имя — по базовому образу и списку пакетов: другой
 # список или другая база — другой образ, а не старый из локального кэша.
 # Русские каталоги LuCI и межсетевого экрана — для проверки ui: ни один не подменяет строки Трубы.
-TEST_PKGS="mosdns ucode-mod-socket curl ip-full wireguard-tools luci-theme-argon miniupnpd-nftables luci-i18n-base-ru luci-i18n-firewall-ru"
 TEST_IMG=truba-test:$(printf '%s %s' "$IMG" "$TEST_PKGS" | sha256sum | cut -c1-12)
-# Браузер — по дайджесту: образ не меняется сам.
-BROWSER_IMG=zenika/alpine-chrome@sha256:ee10e24217aa27443e6b58da628f3b09ea9b814459915b8b62fe15a555f9692a
-VPS_IMG=ubuntu:24.04
-NODE_IMG=node:22-alpine
+VPS_TEST_IMG=truba-vps-test:$(printf '%s %s' "$VPS_IMG" "$VPS_TEST_PKGS" | sha256sum | cut -c1-12)
 ROUTER_PARTS=(router-net router-dns router-lists router-life router-tunnel router-stats)
 ALL=(units dat vps luci ui "${ROUTER_PARTS[@]}")
 # Имена контейнеров этого запуска: два запуска рядом друг другу не мешают.
@@ -130,7 +127,14 @@ t_dat() {
 }
 
 t_vps() {
-	docker run --rm --cap-add NET_ADMIN -v "$REPO:/repo:ro" "$VPS_IMG" bash /repo/tests/vps/test.sh
+	if ! img_cached "$VPS_TEST_IMG"; then
+		docker rm -f "$RUN_ID-vps-base" >/dev/null 2>&1 || true
+		docker run --name "$RUN_ID-vps-base" -e DEBIAN_FRONTEND=noninteractive "$VPS_IMG" sh -c "apt-get update -qq && apt-get install -y -qq $VPS_TEST_PKGS"
+		docker commit "$RUN_ID-vps-base" "$VPS_TEST_IMG" >/dev/null
+		docker rm "$RUN_ID-vps-base" >/dev/null
+		img_save "$VPS_TEST_IMG"
+	fi
+	docker run --rm --cap-add NET_ADMIN -v "$REPO:/repo:ro" "$VPS_TEST_IMG" bash /repo/tests/vps/test.sh
 }
 
 # Node есть на машине (и на раннере CI) — без контейнера.
@@ -163,9 +167,12 @@ t_ui() {
 	len=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPPrefixLen}}{{end}}' "$name")
 	gw=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.Gateway}}{{end}}' "$name")
 	if docker exec -e STAND_ADDR="$ip/$len" -e STAND_GW="$gw" "$name" sh /repo/tests/luci/stand.sh; then
-		# root и --no-sandbox (в скрипте): каталог снимков смонтирован с хоста.
-		docker run --rm -u 0 -e NODE_PATH=/usr/src/app/node_modules --entrypoint node \
-			-v "$REPO:/repo:ro" -v "$(hostpath "$out"):/out" "$BROWSER_IMG" /repo/tests/luci/browser.js "http://$ip" /out || rc=1
+		# Снимки пишутся в слой контейнера: bind временного каталога Windows
+		# может стать read-only в Docker Desktop. Забираем и при провале теста.
+		docker run --name "$RUN_ID-browser" -u 0 -e NODE_PATH=/usr/src/app/node_modules --entrypoint sh \
+			-v "$REPO:/repo:ro" "$BROWSER_IMG" -c 'mkdir -p /out && node /repo/tests/luci/browser.js "$1" /out' sh "http://$ip" || rc=1
+		docker cp "$RUN_ID-browser:/out/." "$(hostpath "$out")/" || rc=1
+		docker rm -f "$RUN_ID-browser" >/dev/null || rc=1
 	else
 		rc=1
 	fi

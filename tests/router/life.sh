@@ -12,6 +12,7 @@ check "после повторного uci-defaults правил по-прежн
 truba reset-rules all >/dev/null; truba reset-rules selective >/dev/null
 
 section "последняя удачная копия правил (ADR 0006)"
+[ -s /etc/truba/good/meta.json ] || logread -e 'последняя удачная копия'
 check "копия на флеше: правила, конфиг mosdns, описание" eval '[ -s /etc/truba/good/truba.nft ] && [ -s /etc/truba/good/mosdns.json ] && [ -s /etc/truba/good/meta.json ]'
 check "копия: без накопленных счётчиков и без IP из DNS" eval '! grep -q "packets [1-9]" /etc/truba/good/truba.nft && ! sed -n "/set gs_direct4/,/}/p" /etc/truba/good/truba.nft | grep -q elements'
 check "копия: mosdns без API, со своими списками доменов" eval '! grep -q "\"api\"" /etc/truba/good/mosdns.json && grep -q /etc/truba/good/geosite/category-ads.txt /etc/truba/good/mosdns.json && [ -s /etc/truba/good/geosite/category-ads.txt ]'
@@ -21,6 +22,17 @@ INODE="$(ino /etc/truba/good/truba.nft)"
 uci set truba.watchdog.handshake_max='200'; uci commit truba
 reload "правила не меняются"
 check "копия не переписывается, пока правила те же (флеш)" eval '[ -n "$INODE" ] && [ "$(ino /etc/truba/good/truba.nft)" = "$INODE" ]'
+GEO_FILE="$(find /etc/truba/good -name 'geoip-*.nft' | head -1)"
+GEO_INODE="$(ino "$GEO_FILE")"
+uci set truba.good_test=device
+uci set truba.good_test.mac='02:aa:bb:cc:dd:ee'
+uci set truba.good_test.policy='direct'
+uci commit truba
+reload "копия: новая Политика устройства"
+check "копия: Политика не переписывает geoip" eval '[ -n "$GEO_INODE" ] && [ "$(ino "$GEO_FILE")" = "$GEO_INODE" ] && grep -q "02:aa:bb:cc:dd:ee" /etc/truba/good/truba.nft'
+check "копия: include geoip проходит проверку nft" nft -c -f /etc/truba/good/truba.nft
+uci delete truba.good_test; uci commit truba
+reload "копия: убрать тестовую Политику"
 
 # Обёртка nft отказывается загружать новую таблицу Трубы, пока есть /tmp/nft-fail, — как при
 # ошибке в правилах или нехватке памяти ядра. Остальное, в том числе загрузку последней

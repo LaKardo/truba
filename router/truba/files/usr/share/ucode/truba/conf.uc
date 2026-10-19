@@ -376,15 +376,35 @@ export function zone_devices(zones, ub) {
 export function dev_zones(ub) {
 	let c = cursor();
 	c.load('firewall');
-	let zones = [];
+	let zones = [], nets = {}, devices = {};
 	c.foreach('firewall', 'zone', (z) => {
-		if (z.name)
-			push(zones, z.name);
+		if (!z.name)
+			return;
+		push(zones, z.name);
+		nets[z.name] = U.to_list(z.network);
+		devices[z.name] = U.to_list(z.device);
 	});
 	let out = {};
+	// Загружаем firewall один раз и запрашиваем состояние каждого network только один раз.
+	let own = (ub == null) ? connect() : null;
+	let netdev = {};
 	for (let z in zones)
-		for (let d in zone_devices([ z ], ub))
+		for (let n in nets[z]) {
+			if (n in netdev)
+				continue;
+			let st = (ub ?? own)?.call('network.interface.' + n, 'status', {});
+			netdev[n] = st?.l3_device ?? st?.device;
+		}
+	for (let z in zones) {
+		for (let d in devices[z])
 			out[d] ??= z;
+		for (let n in nets[z]) {
+			let d = netdev[n];
+			if (d)
+				out[d] ??= z;
+		}
+	}
+	own?.disconnect();
 	return out;
 };
 

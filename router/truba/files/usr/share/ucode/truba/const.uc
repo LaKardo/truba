@@ -53,6 +53,9 @@ export const STAMP_FILE  = DATA_DIR + '/stamp';
 export const CATS_FILE   = DATA_DIR + '/categories.json';
 export const HEALTH_FILE = RUN_DIR + '/health.json';
 export const APPLIED_FILE = RUN_DIR + '/applied.json';
+export const COUNTERS_FILE = RUN_DIR + '/counters.json';
+export const DNS_NAMES_FILE = RUN_DIR + '/dnsnames.json';
+export const SET_SIZES_FILE = RUN_DIR + '/set-sizes.json';
 export const NAT_FILE    = RUN_DIR + '/nat.json';
 export const TT_FILE     = RUN_DIR + '/tunnel-test.json';
 // Перезапуск dnsmasq ради адресов зон (dns.dns_heal): после какого процесса и для каких адресов.

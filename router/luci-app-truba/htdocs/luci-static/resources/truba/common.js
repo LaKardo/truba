@@ -3,7 +3,7 @@
 'require rpc';
 'require uci';
 
-const callStatusRaw = rpc.declare({ object: 'truba', method: 'status', expect: { '': {} } });
+const callStatusRaw = rpc.declare({ object: 'truba', method: 'status', params: [ 'cached', 'part' ], expect: { '': {} } });
 const callLists = rpc.declare({ object: 'truba', method: 'lists', expect: { '': {} } });
 const callCategories = rpc.declare({ object: 'truba', method: 'categories', expect: { '': {} } });
 const callSets = rpc.declare({ object: 'truba', method: 'sets', expect: { '': {} } });
@@ -20,6 +20,7 @@ const callLog = rpc.declare({ object: 'truba', method: 'log', params: [ 'lines' 
 const callSchema = rpc.declare({ object: 'truba', method: 'schema', expect: { '': {} } });
 // Устройства с трафиком и Политиками; куда устройство ходит сейчас (ADR 0018).
 const callDevices = rpc.declare({ object: 'truba', method: 'devices', expect: { '': {} } });
+const callDevicesLite = rpc.declare({ object: 'truba', method: 'devices', params: [ 'lite' ], expect: { '': {} } });
 const callConnections = rpc.declare({ object: 'truba', method: 'connections', params: [ 'ip' ], expect: { '': {} } });
 
 const ACTION_LABELS = {
@@ -178,8 +179,8 @@ function setResult(s) {
 
 // Состояние службы. Ошибку ubus (нет прав, нет объекта truba) rpc LuCI отдаёт пустым объектом, а у ответа
 // службы service есть всегда: пустой — ошибка, и страница показывает «нет связи», а не «служба остановлена».
-function callStatus() {
-	return callStatusRaw().then((st) => {
+function callStatus(part = '') {
+	return callStatusRaw(true, part).then((st) => {
 		if (!st || !('service' in st))
 			throw new Error('truba.status: no answer');
 		return st;
@@ -568,11 +569,22 @@ function savedRuleActions(mode) {
 // и чип по Действию (actOf — Действие Категории); сразу — не больше CAT_LIMIT: около 1 700 строк по четыре
 // кнопки телефон рисовал бы долго, всё — по «Показать все». total — сколько подошло.
 const CAT_LIMIT = 100;
+// Ответ categories неизменяемый; новый ответ даёт новые объекты. Старый индекс
+// освобождается вместе с ними, не удерживая прежние Наборы правил в памяти.
+const catSearch = new WeakMap();
+
+function categorySearch(c) {
+	let text = catSearch.get(c);
+	if (text === undefined) {
+		text = [ c.set + ':' + c.tag, ...(c.subset_of || []) ].join(' ').toLowerCase();
+		catSearch.set(c, text);
+	}
+	return text;
+}
 
 function catRows(list, actOf, q, f, full) {
 	const qq = String(q || '').trim().toLowerCase();
-	const hay = (c) => [ c.set + ':' + c.tag, ...(c.subset_of || []) ].join(' ').toLowerCase();
-	const hit = list.filter((c) => (!qq || hay(c).includes(qq)) &&
+	const hit = list.filter((c) => (!qq || categorySearch(c).includes(qq)) &&
 		(f == 'all' || (f == 'explicit' ? actOf(c) != 'mode' : actOf(c) == f)));
 	return { rows: full ? hit : hit.slice(0, CAT_LIMIT), total: hit.length };
 }
@@ -631,37 +643,50 @@ function devActive(d, now) {
 
 // Секции device с этим MAC — без учёта регистра: в настройках MAC бывает записан заглавными, а секций
 // с одним MAC — несколько. Действует первая, как у службы (conf.uc, device_sections).
-function deviceSections(mac) {
+function deviceIndex() {
+	const index = new Map();
+	for (const s of uci.sections('truba', 'device')) {
+		const mac = String(s.mac || '').toLowerCase();
+		if (!index.has(mac)) index.set(mac, []);
+		index.get(mac).push(s['.name']);
+	}
+	return index;
+}
+
+function deviceSections(mac, index) {
 	if (!mac)
 		return [];
 	const m = String(mac).toLowerCase();
+	if (index) return index.get(m) || [];
 	return uci.sections('truba', 'device').filter((s) => String(s.mac || '').toLowerCase() == m).map((s) => s['.name']);
 }
 
-function deviceSection(mac) {
-	return deviceSections(mac)[0] || null;
+function deviceSection(mac, index) {
+	return deviceSections(mac, index)[0] || null;
 }
 
 // Имя устройства: из его секции в настройках браузера (с несохранённым переименованием), иначе от службы,
 // иначе адрес. Одно на всех вкладках: строки «Устройств», «Обзор», отображения UPnP и пробросы.
-function deviceName(d) {
-	const sid = deviceSection(d?.mac);
+function deviceName(d, index) {
+	const sid = deviceSection(d?.mac, index);
 	return (sid && uci.get('truba', sid, 'name')) || d?.name || d?.ip || d?.mac || '';
 }
 
 // Имена устройств по IP — для строк, где устройство известно только по адресу (UPnP, пробросы).
 function namesByIp(devices) {
 	const m = new Map();
-	for (let d of devices || [])
-		if (d.ip && deviceName(d) != d.ip)
-			m.set(d.ip, deviceName(d));
+	for (let d of devices || []) {
+		const name = deviceName(d);
+		if (d.ip && name != d.ip)
+			m.set(d.ip, name);
+	}
 	return m;
 }
 
 // Политика устройства так, как её поймёт служба (truba.conf, device_sections), — по настройкам
 // браузера, с несохранёнными изменениями. Незнакомая — «по правилам», а не умолчание схемы.
-function devicePolicy(mac) {
-	const sid = deviceSection(mac);
+function devicePolicy(mac, index) {
+	const sid = deviceSection(mac, index);
 	if (!sid || !get('device', 'enabled', sid))
 		return 'rules';
 	const p = uci.get('truba', sid, 'policy') ?? schemaOpt('device', 'policy')?.def;
@@ -798,8 +823,8 @@ function tabUrl(tab) {
 
 return baseclass.extend({
 	callStatus, callLists, callCategories, callSets, callCheck, callUpdateLists, callRollbackLists, callRates, callLog,
-	loadSchema, schema, get, fieldError, handshakeLevel, callDevices, callConnections,
-	devRate, devShare, devActive, deviceSections, deviceSection, deviceName, devicePolicy, normMac, connLabel,
+	loadSchema, schema, get, fieldError, handshakeLevel, callDevices, callDevicesLite, callConnections,
+	devRate, devShare, devActive, deviceIndex, deviceSections, deviceSection, deviceName, devicePolicy, normMac, connLabel,
 	ruleKey, ruleOf, ruleSections, ruleActions, ruleAction, savedRuleActions, catRows, catsDue, listsDue, listsKick, listsSummary, checkErrorText,
 	runNatTest, runTunnelTest, parseLog, logShown, upstreamError, dnsStats, natSummary, upnpState, upnpRows,
 	forwardRows, fwEnabled, portError, forwardErrors, zoneOfIp, forwardValues, natPick,

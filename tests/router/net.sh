@@ -396,6 +396,16 @@ check "устройство — в dv_direct_up и dv_direct_down" eval 'in_set 
 check "напрямую не считается Туннелем" test "$(bytes c_tunnel_up)" = "$TUN_UP"
 uci del_list firewall.@zone[1].device='ul0'; uci commit firewall; /etc/init.d/firewall reload >/dev/null 2>&1
 check "status: трафик Туннеля — из счётчика" test "$(truba status | jsonfilter -e '@.traffic.tunnel.up')" = "$(bytes c_tunnel_up)"
+# Даже свежий, но заведомо старый снимок stats не должен подменять точный CLI/API.
+ucode -L '/usr/share/ucode/*.uc' -e '
+import * as C from "truba.const";
+import * as U from "truba.util";
+let a = U.read_json(C.APPLIED_FILE, null);
+U.write_json(C.COUNTERS_FILE, { m: int(U.now_ms()), generation: a.nft_gen,
+ since: a.counters_since, raw: { c_tunnel_up: { bytes: 0, packets: 0 } } });
+'
+check "status без cached: свежий снимок stats не скрывает трафик" test "$(truba status | jsonfilter -e '@.traffic.tunnel.up')" = "$(bytes c_tunnel_up)"
+check "rpcd status без cached: актуальный счётчик" test "$(ubus call truba status | jsonfilter -e '@.traffic.tunnel.up')" = "$(bytes c_tunnel_up)"
 
 section "набор устройств полон"
 # 1024 чужих адреса: новый элемент в набор не помещается, и update прерывает правило (ADR 0018).
@@ -410,6 +420,7 @@ nft flush set inet truba dv_tunnel_up
 SINCE="$(applied '@.counters_since')"; TUN_UP="$(bytes c_tunnel_up)"
 
 section "Политика устройства"
+POLICY_GEN="$(applied '@.nft_gen')"
 uci -q batch >/dev/null <<-'EOF'
 	add truba device
 	set truba.@device[-1].name='ps5'
@@ -419,6 +430,7 @@ uci -q batch >/dev/null <<-'EOF'
 EOF
 reload "Политика устройства"
 check "MAC — в dev_tunnel" in_set dev_tunnel aa:bb:cc:dd:ee:ff
+check "Политика меняет набор без пересоздания таблицы" test "$(applied '@.nft_gen')" = "$POLICY_GEN"
 dp() { ubus call truba devices | jsonfilter -e "@.devices[@.mac='aa:bb:cc:dd:ee:ff'].$1" 2>/dev/null; }
 check "rpcd devices: устройство с Политикой не в сети — без адреса, из настроек" \
 	eval '[ "$(dp policy)" = tunnel ] && [ "$(dp source)" = config ] && [ -z "$(dp ip)" ]'

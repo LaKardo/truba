@@ -186,7 +186,7 @@ return view.extend({
 
 	load: function() {
 		return Promise.all([ app.load(), common.loadSchema() ]).then(() => Promise.all([
-			common.callStatus().catch(() => null), common.callDevices().catch(() => null), uci.load('truba'), uci.load('firewall'), uci.load('network') ]));
+			common.callStatus().catch(() => null), common.callDevicesLite(true).catch(() => null), uci.load('truba'), uci.load('firewall'), uci.load('network') ]));
 	},
 
 	// Устройства — один раз при открытии: имена в строках и список для выбора; опрос — только status.

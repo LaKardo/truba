@@ -149,7 +149,7 @@ export function route_dev(table, ip) {
 };
 
 // Для rpcd (truba.devices): { now, devices }.
-export function list() {
+export function list(lite) {
 	let ub = connect();
 	let zones = F.dev_zones(ub);
 	ub?.disconnect();
@@ -167,7 +167,12 @@ export function list() {
 		return zones[dev];
 	};
 	let now = time();
-	return { now, devices: merge(U.read_json(C.DEVICES_FILE, null), leases(), neighbours(), F.device_sections(), zone_of, now) };
+	let devices = merge(U.read_json(C.DEVICES_FILE, null), leases(), neighbours(), F.device_sections(), zone_of, now);
+	// Обзору нужна только последняя минута для долей Действий, а не час мини-графика.
+	if (lite)
+		for (let d in devices)
+			d.minutes = length(d.minutes) ? [ d.minutes[length(d.minutes) - 1] ] : [];
+	return { now, devices };
 };
 
 // ---- Куда устройство ходит сейчас (truba.connections) ----

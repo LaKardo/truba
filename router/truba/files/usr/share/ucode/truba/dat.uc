@@ -180,37 +180,42 @@ function fname(tag) {
 // Вложенность Категорий geosite: A ⊂ B, если каждая запись A есть в B и B больше.
 // Категории с одинаковым содержимым не помечаются вложенными друг в друга.
 function compute_subsets(cats) {
-	let lookup = {};
-	let setof = (c) => {
-		if (!lookup[c.tag]) {
-			let o = {};
-			for (let e in c.entries)
-				o[e] = true;
-			lookup[c.tag] = o;
+	// Одна запись хранится ключом один раз, а не в отдельном множестве каждой Категории.
+	let index = {};
+	for (let i, c in cats)
+		for (let e in c.entries) {
+			index[e] ??= {};
+			index[e][i] = true;
 		}
-		return lookup[c.tag];
-	};
 
 	for (let a in cats) {
 		a.subset_of = [];
 		if (a.count == 0)
 			continue;
-		for (let b in cats) {
-			if (a === b || b.count <= a.count)
-				continue;
-			let sb = setof(b);
-			if (!sb[a.entries[0]])
+		// Начинаем с самой редкой записи: большинство Категорий сразу не кандидаты.
+		let rare = a.entries[0];
+		for (let e in a.entries)
+			if (length(index[e]) < length(index[rare]))
+				rare = e;
+		let matches = {};
+		for (let i, present in index[rare]) {
+			let b = cats[int(i)];
+			if (b.count <= a.count)
 				continue;
 			let all = true;
 			for (let e in a.entries) {
-				if (!sb[e]) {
+				if (!index[e][i]) {
 					all = false;
 					break;
 				}
 			}
 			if (all)
-				push(a.subset_of, b.tag);
+				matches[b.tag] = true;
 		}
+		// Порядок исходных Категорий сохраняется независимо от порядка ключей объекта.
+		for (let b in cats)
+			if (matches[b.tag])
+				push(a.subset_of, b.tag);
 	}
 }
 

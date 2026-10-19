@@ -30,6 +30,8 @@ function block(s) {
 let dump = block(entry('www.example.com', 2000, true));
 T.check('DNS-имена: CNAME и A с указателем → исходный домен', DN.parse(dump, 1000)['198.51.100.7'] == 'www.example.com');
 T.check('DNS-имена: истёкший ответ не берётся из lazy-кэша', !length(keys(DN.parse(dump, 2000))));
+let cached = DN.parse(dump, 1000, null, true)['198.51.100.7'];
+T.check('DNS-имена: кэш сохраняет исходное истечение ответа', cached.domain == 'www.example.com' && cached.until == 2000);
 T.check('DNS-имена: только нужные IP', !length(keys(DN.parse(dump, 1000, { '192.0.2.1': true }))));
 let shared = entry('z.example.com', 3000, false) + entry('a.example.com', 3000, false);
 T.check('DNS-имена: общий IP — стабильный выбор независимо от порядка',

@@ -68,6 +68,7 @@ jobs:
 
   matrix:
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     outputs:
       versions: ${{ steps.v.outputs.versions }}
     steps:
@@ -86,6 +87,7 @@ jobs:
     # Тесты не ждём: тот же код проверен на PR. Без них фид не опубликует deploy.
     needs: [ matrix ]
     runs-on: ubuntu-24.04
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -159,7 +161,7 @@ jobs:
         if: steps.sdk-cache.outputs.cache-hit != 'true'
         env:
           SDK_URL: ${{ steps.sdk.outputs.url }}
-        run: wget -q --tries=3 "$SDK_URL"
+        run: wget -q --tries=3 --timeout=60 "$SDK_URL"
 
       - name: Проверить и распаковать SDK
         env:
@@ -177,6 +179,25 @@ jobs:
         with:
           path: ${{ steps.sdk.outputs.file }}
           key: sdk-${{ matrix.version }}-${{ steps.sdk.outputs.sha256 }}
+
+      - name: Кэш исходников и компилятора SDK
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: |
+            sdk/dl
+            sdk/.ccache
+          key: sdk-inputs-${{ steps.sdk.outputs.sha256 }}-${{ hashFiles('router/awg/SOURCES') }}-${{ github.sha }}
+          restore-keys: |
+            sdk-inputs-${{ steps.sdk.outputs.sha256 }}-${{ hashFiles('router/awg/SOURCES') }}-
+
+      - name: Кэш фидов SDK
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: |
+            sdk/feeds/base
+            sdk/feeds/luci
+            sdk/feeds/packages
+          key: sdk-feeds-${{ steps.sdk.outputs.sha256 }}-${{ steps.plan.outputs.reuse_awg }}
 
       - name: Фиды
         env:
@@ -242,6 +263,7 @@ jobs:
             for p in $pkgs; do echo "CONFIG_PACKAGE_$p=m"; done
             echo 'CONFIG_PACKAGE_luci-i18n-truba-ru=m'
             echo 'CONFIG_SIGNED_PACKAGES=y'
+            echo 'CONFIG_CCACHE=y'
           } > .config
           # Предупреждения kconfig SDK (прошивки других плат, bool→tristate) безвредны.
           make defconfig >/dev/null 2>&1
@@ -342,6 +364,7 @@ jobs:
     # Ручной запуск с publish=false — проверка сборки без публикации (например, на ветке).
     if: ${{ github.event_name != 'workflow_dispatch' || inputs.publish }}
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     # Единственное задание с записью: публикует фид в ветку gh-pages.
     permissions:
       contents: write

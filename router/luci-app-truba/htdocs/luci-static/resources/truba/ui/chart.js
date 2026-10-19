@@ -65,7 +65,7 @@ function usePlot(make, data, deps) {
 	useEffect(() => {
 		if (plot.current)
 			plot.current.setData(data);
-	});
+	}, [ data ]);
 	return box;
 }
 

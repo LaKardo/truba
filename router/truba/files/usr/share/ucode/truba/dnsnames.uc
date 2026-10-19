@@ -120,7 +120,7 @@ function addresses(s) {
 
 // Уже распакованный поток: блоки с восьмибайтовой big-endian длиной, CacheDumpBlock.
 // Поле 4 — срок самого DNS-ответа, а не lazy-кэша: истёкшие имена не показываем.
-export function parse(s, now, wanted) {
+export function parse(s, now, wanted, with_expiry) {
 	let out = {}, expiry = {}, p = 0;
 	if (type(s) != 'string' || length(s) > MAX_DUMP)
 		return out;
@@ -152,15 +152,39 @@ export function parse(s, now, wanted) {
 		}
 	}
 	catch (e) { return {}; }
+	if (with_expiry)
+		for (let ip, domain in out)
+			out[ip] = { domain, until: expiry[ip] };
 	return out;
 };
 
 // Только активный локальный API из применённого плана. Старый файл после остановки
 // mosdns не используем. Лимиты времени и распаковки защищают rpcd и память Роутера.
 export function lookup(ips) {
-	let api = U.read_json(C.APPLIED_FILE, null)?.dns_api;
+	let applied = U.read_json(C.APPLIED_FILE, null), api = applied?.dns_api;
 	if (!length(ips) || type(api) != 'string' || !match(api, /^127\.0\.0\.1:[0-9]+$/))
 		return {};
+	let pid = trim(U.run('pidof mosdns').out);
+	if (!length(pid))
+		return {};
+	let wanted = {};
+	for (let ip in ips)
+		wanted[ip] = true;
+	let cached = U.read_json(C.DNS_NAMES_FILE, null);
+	let now = time(), m = int(U.now_ms()), out = {};
+	let valid = cached?.pid == pid && cached?.api == api && cached?.applied == applied.time &&
+		type(cached.m) == 'int' && m >= cached.m && m - cached.m < 30000;
+	if (valid) {
+		let covered = true;
+		for (let ip in ips) {
+			covered &&= !!cached.wanted?.[ip];
+			let entry = cached.names?.[ip];
+			if (entry?.until > now)
+				out[ip] = entry.domain;
+		}
+		if (covered)
+			return out;
+	}
 	let f = popen('set -o pipefail; curl -fsS --noproxy ' + U.shq('*') + ' --connect-timeout 1 --max-time 2 ' +
 		U.shq('http://' + api + '/plugins/cache/dump') + ' 2>/dev/null | gzip -dc 2>/dev/null | head -c ' + (MAX_DUMP + 1), 'r');
 	if (!f)
@@ -168,8 +192,13 @@ export function lookup(ips) {
 	let data = '', chunk;
 	while (length(data) <= MAX_DUMP && length(chunk = f.read(65536) ?? ''))
 		data += chunk;
-	let rc = f.close(), wanted = {};
-	for (let ip in ips)
-		wanted[ip] = true;
-	return rc == 0 ? parse(data, time(), wanted) : {};
+	let rc = f.close();
+	if (rc != 0)
+		return {};
+	let fresh = parse(data, time(), wanted, true);
+	out = {};
+	for (let ip, entry in fresh)
+		out[ip] = entry.domain;
+	U.write_json(C.DNS_NAMES_FILE, { m, pid, api, applied: applied.time, wanted, names: fresh });
+	return out;
 };

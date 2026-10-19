@@ -20,6 +20,14 @@ export function record(line, sum) {
 const lib = fileURLToPath(new URL('../../router/luci-app-truba/htdocs/luci-static/resources/truba/lib/', import.meta.url));
 const versions = join(lib, 'VERSIONS');
 
+// Официальная minified IIFE uPlot оборачивается экспортом в ES-модуль. Сумма
+// VERSIONS относится к готовому модулю; отдельный минификатор не нужен.
+export function moduleBody(file, path, body) {
+	if (file === 'uplot.js' && path.endsWith('/uPlot.iife.min.js'))
+		return Buffer.concat([ body, Buffer.from('\nexport default uPlot;\n') ]);
+	return body;
+}
+
 async function main() {
 	const out = [];
 	for (const line of readFileSync(versions, 'utf8').split('\n')) {
@@ -32,7 +40,7 @@ async function main() {
 		const res = await fetch(url);
 		if (!res.ok)
 			throw new Error(`${url}: HTTP ${res.status}`);
-		const body = Buffer.from(await res.arrayBuffer());
+		const body = moduleBody(file, path, Buffer.from(await res.arrayBuffer()));
 		const rec = record(line, createHash('sha256').update(body).digest('hex'));
 		writeFileSync(join(lib, file), body);
 		out.push(rec);

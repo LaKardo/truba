@@ -25,12 +25,29 @@ function del_rule_prio(prio) {
 			break;
 }
 
+function rule_present(lines, prio, text) {
+	let found = [];
+	for (let line in lines) {
+		let normalized = replace(trim(line), /[[:space:]]+/g, ' ');
+		if (index(normalized, prio + ':') == 0)
+			push(found, normalized);
+	}
+	return length(found) == 1 && found[0] == prio + ': from all ' + text;
+}
+
 export function ensure_rules(dev) {
-	del_rule_prio(C.PRIO_RULE_MARK);
-	del_rule_prio(C.PRIO_RULE_OIF);
-	system([ 'ip', '-4', 'rule', 'add', 'fwmark', sprintf('0x%x/0x%x', C.MARK_TUNNEL, C.MARK_MASK),
-	         'lookup', T, 'priority', '' + C.PRIO_RULE_MARK ]);
-	system([ 'ip', '-4', 'rule', 'add', 'oif', dev, 'lookup', T, 'priority', '' + C.PRIO_RULE_OIF ]);
+	let r = U.run('ip -4 rule show');
+	let lines = r.code == 0 ? split(r.out, '\n') : [];
+	let mark = 'fwmark ' + sprintf('0x%x/0x%x', C.MARK_TUNNEL, C.MARK_MASK) + ' lookup ' + T;
+	let oif = 'oif ' + dev + ' lookup ' + T;
+	if (!rule_present(lines, C.PRIO_RULE_MARK, mark)) {
+		del_rule_prio(C.PRIO_RULE_MARK);
+		system([ 'ip', '-4', 'rule', 'add', ...split(mark, ' '), 'priority', '' + C.PRIO_RULE_MARK ]);
+	}
+	if (!rule_present(lines, C.PRIO_RULE_OIF, oif)) {
+		del_rule_prio(C.PRIO_RULE_OIF);
+		system([ 'ip', '-4', 'rule', 'add', ...split(oif, ' '), 'priority', '' + C.PRIO_RULE_OIF ]);
+	}
 };
 
 export function remove_rules() {

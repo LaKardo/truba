@@ -304,10 +304,13 @@ apt_get() { apt-get -o DPkg::Lock::Timeout="$APT_WAIT" "$@"; }
 
 # DPkg::Lock::Timeout на блокировку списков пакетов не действует: apt-get update ждём сами.
 apt_update() {
+	# В одном запуске индексы достаточно обновить один раз до изменения источников.
+	[ "${APT_UPDATED:-0}" = 0 ] || return 0
 	local err i
 	for ((i = 0; i < APT_WAIT; i += 10)); do
 		if err=$(LC_ALL=C apt-get update -qq 2>&1 >/dev/null); then
 			[ -z "$err" ] || printf '%s\n' "$err" >&2
+			APT_UPDATED=1
 			return 0
 		fi
 		case $err in
@@ -552,6 +555,7 @@ install_packages() {
 			apt_get install -y -qq software-properties-common >/dev/null
 		fi
 		add-apt-repository -y -n ppa:amnezia/ppa >/dev/null
+		APT_UPDATED=0
 	fi
 	ppa_key_check
 	apt_update
@@ -1255,8 +1259,9 @@ sshd_ports() {
 # В Ubuntu 24.04 SSH слушает сокет systemd, его порты генератор берёт из sshd_config. Если
 # сокет выключен (sshd запущен как служба), его не трогаем: restart запустил бы и выключенный.
 ssh_restart() {
-	systemctl daemon-reload
 	if systemctl is-enabled ssh.socket >/dev/null 2>&1; then
+		# Только socket activation использует генератор портов из sshd_config.
+		systemctl daemon-reload
 		systemctl restart ssh.socket
 	fi
 	if systemctl is-enabled ssh.service >/dev/null 2>&1 || ! systemctl is-enabled ssh.socket >/dev/null 2>&1; then

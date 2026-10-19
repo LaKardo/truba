@@ -1,5 +1,6 @@
 # Закреплённые копии библиотек интерфейса (ADR 0017): файл пакет@версия путь-в-пакете sha256.
 # Скачивает и пересчитывает суммы tests/luci/vendor.mjs; static.mjs сверяет файлы с ними.
+# uplot.js: официальный minified IIFE плюс ES-экспорт (vendor.mjs); сумма готового файла.
 preact-htm.js htm@3.1.1 preact/standalone.module.js 72284e8e9079c87817145df1110f74e8a2aa040b2fc384922e18dfcb46fc1fd7
-uplot.js uplot@1.6.32 dist/uPlot.esm.js 5dd9b3281aa64b461b42d9945f6adb2649d346502b12281a9ae0d46599a80eba
+uplot.js uplot@1.6.32 dist/uPlot.iife.min.js 8301d1a4fcc08355d4ff7e8c87cc4a4e13cc4da93ba50a20816005488c0c5f6e
 uplot.css uplot@1.6.32 dist/uPlot.min.css df630c6a8d6f8eeaff264b50f73ce5b114f646ffd9a0bb74f049b0a00135fa04

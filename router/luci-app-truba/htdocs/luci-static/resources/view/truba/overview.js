@@ -86,7 +86,7 @@ function fetchHistory(span) {
 // Устройства (ADR 0018) — число активных на схеме и карточка «Устройства»; если служба не ответила,
 // остальной «Обзор» работает без них.
 function fetchDevices() {
-	return common.callDevices().catch(() => null);
+	return common.callDevicesLite(true).catch(() => null);
 }
 
 // Последняя точка, если она свежая: значит, история пишется. null — процесс stats не работает.
@@ -236,7 +236,7 @@ const SERIES = () => [
 
 // Скорость за 10 минут, час или сутки и объёмы по Действиям с начала счёта.
 function SpeedCard({ st, view }) {
-	const { html } = app.lib;
+	const { html, useMemo } = app.lib;
 	const { span } = app.use(view);
 	const onSpan = (s) => {
 		try { localStorage.setItem(SPAN_KEY, String(s)); } catch (e) { }
@@ -247,9 +247,11 @@ function SpeedCard({ st, view }) {
 	};
 	const now = hist.now ?? Date.now() / 1000;
 	const h = ring(span);
-	const pts = chart.gaps(h.points.filter((p) => p[0] > now - span), h.step);
-	const series = SERIES();
-	const data = [ pts.map((p) => p[0]), ...series.map((s) => pts.map((p) => p[s.i] ?? null)) ];
+	const series = useMemo(SERIES, []);
+	const data = useMemo(() => {
+		const pts = chart.gaps(h.points.filter((p) => p[0] > now - span), h.step);
+		return [ pts.map((p) => p[0]), ...series.map((s) => pts.map((p) => p[s.i] ?? null)) ];
+	}, [ h.points, h.step, now, span, series ]);
 	// Истории нет — пояснение поверх приглушённого графика: старые точки ещё видны, но не мешают читать.
 	const rec = latest() != null;
 	const tr = st.traffic || {}, since = st.applied?.counters_since;
@@ -370,7 +372,7 @@ return view.extend({
 
 	load: function() {
 		// Сроки истории — из схемы службы: без них fetchHistory не знает, сколько точек просить.
-		return Promise.all([ app.load(), common.loadSchema() ]).then(([ , s ]) => {
+		return Promise.all([ app.load(true), common.loadSchema() ]).then(([ , s ]) => {
 			setHistory(s.consts.history);
 			return Promise.all([ common.callStatus().catch(() => null), uci.load('network'), uci.load('truba'), uci.load('firewall'),
 				fetchHistory(savedSpan()), fetchDevices() ]);

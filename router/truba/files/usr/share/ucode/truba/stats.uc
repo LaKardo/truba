@@ -158,7 +158,9 @@ export function run() {
 	let tick = () => {
 		let m = int(U.now_ms()), t = time();
 		let applied = U.read_json(C.APPLIED_FILE, null);
-		save(hist, add(hist, snapshot(S.counters_raw(), applied?.counters_since, m, t)));
+		let raw = S.counters_raw();
+		save(hist, add(hist, snapshot(raw, applied?.counters_since, m, t)));
+		U.write_json(C.COUNTERS_FILE, { m, generation: applied?.nft_gen, since: applied?.counters_since, raw });
 		// По устройствам (ADR 0018): поколение — nft_gen (момент перезагрузки таблицы), наборы при нём начаты заново.
 		DV.add(dev, DV.snapshot(S.dev_counters(), applied?.nft_gen ?? applied?.time, m, t));
 		DV.save(dev);

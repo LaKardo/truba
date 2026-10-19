@@ -281,10 +281,11 @@ function Categories({ cats, focus }) {
 }
 
 function Page({ store, timing, view }) {
-	const { html, useState } = app.lib;
+	const { html, useState, useMemo } = app.lib;
 	const { cats, offline } = app.use(store);
-	app.use(app.changes);   // карточки читают UCI браузера — перерисовка после app.set
+	const changes = app.use(app.changes);   // объект меняется при каждой правке, даже если число правок прежнее
 	const [ focus, setFocus ] = useState(null);
+	const categories = useMemo(() => html`<${Categories} cats=${cats} focus=${focus} />`, [ cats, focus, changes ]);
 	const onCat = (set, tag) => setFocus((f) => ({ key: set + ':' + tag, n: (f?.n || 0) + 1 }));
 	return html`
 		<${kit.PageHead} title=${_('Rules')} offline=${offline}
@@ -293,7 +294,7 @@ function Page({ store, timing, view }) {
 			<${kit.Card} cls="w3 where" title=${_('Where it goes')} aside=${_('for all devices')}><${kit.Check} full onCat=${onCat} /></${kit.Card}>
 			<${ModeCard} />
 			<${RuleSets} store=${store} timing=${timing} />
-			<${Categories} cats=${cats} focus=${focus} />
+			${categories}
 		</div>
 		<${kit.ChangesBar} view=${view} />
 		<${kit.Toast} />`;
@@ -304,7 +305,7 @@ return view.extend({
 
 	load: function() {
 		return Promise.all([ app.load(), common.loadSchema() ]).then(() => Promise.all([
-			common.callCategories(), common.callLists(), common.callStatus().catch(() => null), common.callSets().catch(() => null),
+			common.callCategories(), common.callLists(), common.callStatus('rules').catch(() => null), common.callSets().catch(() => null),
 			uci.load('truba'), uci.load('firewall') ]));
 	},
 
@@ -317,7 +318,7 @@ return view.extend({
 		app.poll(store, () => {
 			const st = store.get(), now = Date.now(), patch = {}, calls = [];
 			if (tick++ % 2)
-				calls.push(common.callStatus().then((s) => { patch.status = s; }));
+				calls.push(common.callStatus('rules').then((s) => { patch.status = s; }));
 			if (timing.kick || common.listsDue(now, timing.polledAt, timing.kickedAt, st.lists)) {
 				timing.polledAt = now;
 				// Категории — следом за lists, когда Наборы правил распаковываются, ещё не скачаны или сменились.

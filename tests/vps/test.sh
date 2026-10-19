@@ -13,7 +13,9 @@ fail() { echo "FAIL  $*"; if [ -n "${T:-}" ]; then echo x >> "$T/fails"; else FA
 SCRIPT=${1:-/repo/vps/install-vps.sh}
 
 export DEBIAN_FRONTEND=noninteractive LANG=C.UTF-8 LC_ALL=C.UTF-8
-apt-get update -qq >/dev/null && apt-get install -y -qq shellcheck nftables iproute2 openssh-client >/dev/null
+if ! command -v shellcheck >/dev/null || ! command -v nft >/dev/null; then
+	apt-get update -qq >/dev/null && apt-get install -y -qq shellcheck nftables iproute2 openssh-client >/dev/null
+fi
 
 if shellcheck -s bash "$SCRIPT"; then ok "shellcheck"; else fail "shellcheck"; fi
 if bash -n "$SCRIPT"; then ok "bash -n"; else fail "bash -n"; fi
@@ -86,7 +88,7 @@ unset -f sshd ssh_restart systemctl
 # Возвращаем функцию скрипта после подмены.
 eval "$saved_ssh_restart"
 # Настоящий sshd: наш файл применяется, и его итог проходит проверку (контейнер одноразовый).
-apt-get install -y -qq openssh-server >/dev/null 2>&1
+command -v sshd >/dev/null || apt-get install -y -qq openssh-server >/dev/null 2>&1
 (
 	ssh-keygen -A >/dev/null 2>&1; mkdir -p /run/sshd
 	SSHD_DROPIN=/etc/ssh/sshd_config.d/10-truba.conf
@@ -191,9 +193,10 @@ grep -q 'заголовков ядра 6.8.0-146-generic нет в архиве'
 	&& ok "пакеты: заголовков ядра нет в архиве — понятный выход до установки" || fail "пакеты: без заголовков: $out"$'\n'"$(cat "$LOG")"
 unset -f apt-get apt-mark add-apt-repository modprobe uname dpkg-query apt-cache ppa_key_check
 eval "$(sed -n '/^ppa_key_check()/,/^}/p' "$SCRIPT")"
-apt-get install -y -qq gnupg iputils-ping >/dev/null 2>&1
+if ! command -v gpg >/dev/null || ! command -v ping >/dev/null; then
+	apt-get install -y -qq gnupg iputils-ping >/dev/null 2>&1
+fi
 # Ключ PPA: полный отпечаток встроенного в Signed-By ключа сверяется с закреплённым.
-apt-get install -y -qq gnupg >/dev/null 2>&1
 (
 	PPA_SOURCES_DIR="$T/sources"; mkdir -p "$PPA_SOURCES_DIR"; export GNUPGHOME="$T/gnupg"; mkdir -m 700 -p "$GNUPGHOME"
 	gpg --batch --quiet --passphrase '' --quick-gen-key 'truba-test <t@example.invalid>' ed25519 sign never 2>/dev/null
@@ -762,10 +765,12 @@ write_pipe_unit; [ "$(stat -c %a "$PIPE_UNIT")" = 644 ] && ok "юнит truba-pi
 systemctl() { echo "$*" >> "$T/sysd"; [ "$1" != is-enabled ]; }
 ssh_restart
 ! grep -q 'restart ssh.socket' "$T/sysd" && grep -q 'restart ssh.service' "$T/sysd" && ok "SSH: выключенный сокет не запускается" || fail "SSH: сокет: $(cat "$T/sysd")"
+! grep -q daemon-reload "$T/sysd" && ok "SSH: без сокета daemon-reload не нужен" || fail "SSH: лишний daemon-reload"
 : > "$T/sysd"
 systemctl() { echo "$*" >> "$T/sysd"; }
 ssh_restart
 grep -q 'restart ssh.socket' "$T/sysd" && ok "SSH: включённый сокет перезапускается" || fail "SSH: включённый сокет: $(cat "$T/sysd")"
+grep -q daemon-reload "$T/sysd" && ok "SSH: генератор сокета перечитывает порты" || fail "SSH: нет daemon-reload для сокета"
 unset -f systemctl
 
 # Порт SSH. Смена порта у подтверждённой установки снова идёт через окно с подтверждением,
@@ -840,7 +845,7 @@ out=$(bash "$T/err.sh" "$SCRIPT" 2>&1)
 # DNS для Роутера (ADR 0013): unbound на адресе Трубы в Туннеле отвечает только Роутеру,
 # стартует раньше Туннеля и наружу не слушает. Конфиг — в каталоге пакета, вместе с его
 # собственными файлами; пересылка по TLS проверяется по конфигу: интернет проверкам не нужен.
-if apt-get install -y -qq unbound bind9-dnsutils ca-certificates >/dev/null 2>&1; then
+if { command -v unbound >/dev/null && command -v dig >/dev/null; } || apt-get install -y -qq unbound bind9-dnsutils ca-certificates >/dev/null 2>&1; then
 	UNBOUND_CONF=/etc/unbound/unbound.conf.d/truba.conf
 	write_unbound_conf
 	# Ключ корневой зоны пакет кладёт при запуске службы (ExecStartPre) — так же и здесь.

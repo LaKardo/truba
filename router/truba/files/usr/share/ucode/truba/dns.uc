@@ -386,7 +386,7 @@ export function apply(cfg, plan, hosts, gkey, lan_if) {
 		U.warn_log(sprintf('порт %s занят другой программой: mosdns без API, счётчиков кэша на «Обзоре» не будет', cfg.dns.api));
 		cfg.dns.api = null;
 	}
-	U.write_atomic(C.MOSDNS_CONF, sprintf('%J', mosdns(cfg, plan, hosts)));
+	U.write_if_changed(C.MOSDNS_CONF, sprintf('%J', mosdns(cfg, plan, hosts)));
 	// Дампы прежних поколений кэша mosdns больше не прочитает.
 	prune_cache_dumps(cache_dump(cfg, plan));
 	// Метка поколения меняется вместе с данными (списки, Режим, Действия Категорий):

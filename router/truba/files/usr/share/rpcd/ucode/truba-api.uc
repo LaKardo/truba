@@ -49,8 +49,9 @@ function result(path) {
 
 const methods = {
 	status: {
-		call: function() {
-			return S.status();
+		args: { cached: false, part: '' },
+		call: function(req) {
+			return S.status(req?.args?.cached == true, req?.args?.part);
 		}
 	},
 
@@ -82,8 +83,9 @@ const methods = {
 
 	// Устройства: трафик из истории (её пишет процесс truba stats), имена, зоны и Политики.
 	devices: {
-		call: function() {
-			return DV.list();
+		args: { lite: false },
+		call: function(req) {
+			return DV.list(req?.args?.lite == true);
 		}
 	},
 

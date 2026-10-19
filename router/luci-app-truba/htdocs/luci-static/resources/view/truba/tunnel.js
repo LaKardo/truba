@@ -266,7 +266,7 @@ return view.extend({
 	...app.actions,
 
 	load: function() {
-		return Promise.all([ app.load(), common.loadSchema() ]).then(() => Promise.all([
+		return Promise.all([ app.load(true), common.loadSchema() ]).then(() => Promise.all([
 			common.callStatus().catch(() => null), uci.load('truba'), uci.load('network'), uci.load('firewall') ]));
 	},
 

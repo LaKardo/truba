@@ -40,7 +40,9 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/docker-images
-          key: images-${{ matrix.part }}-${{ hashFiles('tests/run.sh') }}-${{ steps.week.outputs.week }}
+          # Образ зависит от списка пакетов и версий, а не от сценариев тестов.
+          # Для router-* один и тот же TEST_IMG не сохраняется отдельной копией на часть.
+          key: images-${{ startsWith(matrix.part, 'router-') && 'router' || matrix.part }}-${{ hashFiles('tests/images.env') }}-${{ steps.week.outputs.week }}
       - name: Проверки (${{ matrix.part }})
         env:
           UI_OUT: ${{ github.workspace }}/ui-screens

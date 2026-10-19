@@ -94,9 +94,29 @@ export function write_json(path, obj) {
 export function move_file(src, dst) {
 	if (rename(src, dst))
 		return true;
-	let data = readfile(src);
-	if (data == null || !write_atomic(dst, data))
+	let before = stat(src), input = open(src, 'r');
+	if (!input)
 		return false;
+	let tmp = dst + '.tmp', output = open(tmp, 'w', 0644);
+	if (!output) {
+		input.close();
+		return false;
+	}
+	let ok = true, chunk, copied = 0;
+	while (length(chunk = input.read(65536) ?? ''))
+		if (output.write(chunk) != length(chunk)) {
+			ok = false;
+			break;
+		}
+		else
+			copied += length(chunk);
+	ok &&= before != null && copied == before.size;
+	input.close();
+	ok = output.close() && ok;
+	if (!ok || !rename(tmp, dst)) {
+		unlink(tmp);
+		return false;
+	}
 	unlink(src);
 	return true;
 };

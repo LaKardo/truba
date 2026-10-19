@@ -3,7 +3,7 @@
 // командная строка загружает только его.
 'use strict';
 
-import { readfile, stat } from 'fs';
+import { readfile, stat, popen } from 'fs';
 import { cursor } from 'uci';
 import { connect } from 'ubus';
 import * as socket from 'socket';
@@ -52,13 +52,21 @@ export function counters_raw() {
 // наборе — 0 на его месте; null — набора нет (таблицы нет или она загружена до наборов).
 // Каждый набор читается отдельно: пакет list set в nft 1.1.6 не гарантирует все наборы.
 export function dev_counters() {
+	// Отдельные nft-вызовы обязательны для 1.1.6, но shell и канал вывода — общие.
+	let cmd = '';
+	for (let name in C.DEV_SETS)
+		cmd += 'nft -j list set inet ' + C.NFT_TABLE + ' ' + name + ' || exit 1; echo "@@set-end"; ';
+	let stream = popen(cmd + '2>/dev/null', 'r');
+	if (!stream)
+		return null;
+	let chunks = split(stream.read('all') ?? '', '@@set-end\n');
+	let rc = stream.close();
+	if (rc != 0 || length(chunks) != length(C.DEV_SETS) + 1)
+		return null;
 	let out = {};
 	for (let k, name in C.DEV_SETS) {
-		let r = U.run('nft -j list set inet ' + C.NFT_TABLE + ' ' + name);
-		if (r.code != 0)
-			return null;
 		try {
-			for (let o in json(r.out)?.nftables ?? []) {
+			for (let o in json(chunks[k])?.nftables ?? []) {
 				for (let e in o?.set?.elem ?? []) {
 					let el = (type(e) == 'object') ? e.elem : null;
 					if (type(el?.val) != 'string' || !U.is_ipv4(el.val))
@@ -213,12 +221,29 @@ function awg_peer(dev) {
 
 // Состояние для «Обзора»: его опрашивают раз в 5 с, поэтому здесь только то, что
 // «Обзор» показывает, одно соединение ubus и без лишних процессов. Версии списков — lists().
-export function status() {
+export function status(allow_cached, part) {
 	let ub = connect();
 	let cfg = F.load();
-	let tinfo = F.tunnel_info(cfg.iface, ub);
 	let applied = U.read_json(C.APPLIED_FILE, null);
-	let raw = counters_raw();
+	if (part == 'dns' || part == 'rules') {
+		let res = { service: applied != null, applied, routing: cfg.routing, mode: cfg.mode };
+		if (part == 'dns') {
+			res.mosdns = running(ub, 'truba', 'mosdns');
+			res.dns_cache = (cfg.routing && applied?.dns_api) ? dns_cache(applied.dns_api, cfg) : null;
+		}
+		else
+			res.lists = { next: N.cron_next() };
+		ub?.disconnect();
+		return res;
+	}
+	let tinfo = F.tunnel_info(cfg.iface, ub);
+	// Stats уже снимает эти счётчики каждые 5 с. Старый снимок или другое поколение
+	// таблицы не используем: после apply и остановки stats читаем ядро напрямую.
+	let cached = allow_cached ? U.read_json(C.COUNTERS_FILE, null) : null;
+	let age = int(U.now_ms()) - (cached?.m ?? 0);
+	let raw = (applied != null && cached != null && age >= 0 && age <= C.HISTORY.fine.step * 2000 &&
+		cached.generation == applied.nft_gen && cached.since == applied.counters_since && type(cached.raw) == 'object')
+		? cached.raw : counters_raw();
 	let svc = ub?.call('service', 'list', { name: 'truba' });
 	let res = {
 		routing: cfg.routing,
@@ -286,8 +311,22 @@ export function lists() {
 // подставляется как есть. «invalid msg» — повреждённые запросы устройств, которые dnsmasq пересылает как
 // есть: это шум, а не ошибка Трубы.
 export function log(n) {
+	n = int(n ?? 200);
+	if (n < 10 || n > 2000)
+		n = 200;
 	let iface = F.check_value('main', 'iface', cursor().get('truba', 'main', 'iface'));
-	return { log: U.run(sprintf("logread -e '%s\\|mosdns\\|%s' | grep -v 'invalid msg' | tail -n %d", C.LOG_TAG, iface, n)).out };
+	let stream = popen('logread -e ' + U.shq(C.LOG_TAG + '\\|mosdns\\|' + iface), 'r');
+	if (!stream)
+		return { log: '' };
+	let ring = [], count = 0, line;
+	while (length(line = stream.read('line') ?? ''))
+		if (index(line, 'invalid msg') < 0)
+			ring[count++ % n] = line;
+	stream.close();
+	let out = '';
+	for (let i = (count > n ? count - n : 0); i < count; i++)
+		out += ring[i % n];
+	return { log: out };
 };
 
 // Размеры наборов для «Обзора»: geoip — подсетей по Действиям (посчитаны при применении),
@@ -296,9 +335,15 @@ export function sets() {
 	let applied = U.read_json(C.APPLIED_FILE, null);
 	if (!applied?.routing)
 		return { routing: false };
+	let now = int(U.now_ms()), cached = U.read_json(C.SET_SIZES_FILE, null);
+	if (cached?.generation == applied.nft_gen && type(cached.dns) == 'object' &&
+		now - (cached.m ?? 0) >= 0 && now - cached.m < 30000)
+		return { routing: true, geoip: applied.geoip_sizes ?? null, dns: cached.dns };
+	let dns = { tunnel: length(set_elements('gs_tunnel4')), direct: length(set_elements('gs_direct4')) };
+	U.write_json(C.SET_SIZES_FILE, { m: now, generation: applied.nft_gen, dns });
 	return {
 		routing: true,
 		geoip: applied.geoip_sizes ?? null,
-		dns: { tunnel: length(set_elements('gs_tunnel4')), direct: length(set_elements('gs_direct4')) },
+		dns,
 	};
 };

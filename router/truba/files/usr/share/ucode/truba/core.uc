@@ -93,15 +93,45 @@ function unpack_lists(warnings) {
 // Последняя удачная копия (ADR 0006): правила nftables без счётчиков и без IP из DNS (их
 // снова наберёт mosdns), конфиг mosdns без API (его порт к следующей загрузке может быть
 // занят) и списки доменов, на которые он ссылается. На флеш пишется только то, что изменилось.
+function refill(name, elems) {
+	let s = 'flush set inet ' + C.NFT_TABLE + ' ' + name + '\n';
+	if (length(elems))
+		s += 'add element inet ' + C.NFT_TABLE + ' ' + name + ' { ' + join(', ', elems) + ' }\n';
+	return s;
+}
+
 function save_good(cfg, plan, ctx, hosts, res) {
 	U.mkdirp(C.GOOD_GEOSITE);
 	let meta = U.read_json(C.GOOD_META, {});
 	let gctx = { ...ctx, counters: null, gs_tunnel4: [], gs_direct4: [] };
+	// Большой geoip-файл отделён от цепочек и Политик. Сначала записывается новый
+	// файл, затем атомарно меняется ссылающийся на него truba.nft: обрыв между
+	// записями оставляет прежнюю копию пригодной для загрузки.
+	let geo_file = plan ? C.GOOD_DIR + '/geoip-' + res.geoip_key + '.nft' : null;
+	if (geo_file && !stat(geo_file)) {
+		let gi = R.geoip_data(plan, ctx), data = '';
+		for (let action in [ 'block', 'tunnel', 'direct' ])
+			data += refill('gi_' + action + '4', gi[action]);
+		if (!U.write_atomic(geo_file, data))
+			die('не записана копия geoip');
+	}
+	if (plan)
+		gctx.external_geoip = true;
 	// При неизменной структуре таблицы её удачная копия уже соответствует настройкам.
 	// Не разбирать повторно крупные geoip-наборы только ради одинакового файла.
 	let changed = false;
-	if (!plan || meta.nft_key != res.nft_key || !stat(C.GOOD_NFT))
-		changed = U.write_if_changed(C.GOOD_NFT, plan ? R.nft_full(cfg, plan, gctx) : R.nft_minimal(cfg, gctx));
+	if (!plan || meta.nft_key != res.nft_key || meta.members_key != res.members_key || meta.geoip_key != res.geoip_key || meta.split_geoip != true || !stat(C.GOOD_NFT)) {
+		let data = plan ? R.nft_full(cfg, plan, gctx) + 'include ' + sprintf('%J', geo_file) + '\n' : R.nft_minimal(cfg, gctx);
+		if (readfile(C.GOOD_NFT) != data) {
+			if (!U.write_atomic(C.GOOD_NFT, data))
+				die('не записана копия правил');
+			changed = true;
+		}
+	}
+	// Старый geoip больше не нужен только после успешной записи ссылки.
+	for (let f in lsdir(C.GOOD_DIR) ?? [])
+		if (match(f, /^geoip-[a-fA-F0-9]+\.nft$/) && C.GOOD_DIR + '/' + f != geo_file)
+			unlink(C.GOOD_DIR + '/' + f);
 	let keep = {};
 
 	if (plan) {
@@ -133,12 +163,12 @@ function save_good(cfg, plan, ctx, hosts, res) {
 		}
 	}
 
-	if (changed || meta.time == null || meta.nft_key != res.nft_key ||
+	if (changed || meta.time == null || meta.nft_key != res.nft_key || meta.members_key != res.members_key || meta.geoip_key != res.geoip_key ||
 	    meta.dns_hijack != res.dns_hijack || sprintf('%J', meta.zones) != sprintf('%J', res.zones))
 		U.write_json(C.GOOD_META, { time: time(), routing: res.routing, mode: res.mode, port: cfg.dns.port,
 		                            vps: res.vps, endpoint: res.endpoint, gkey: res.gkey, nft_key: res.nft_key, geoip_sizes: res.geoip_sizes,
-		                            missing: res.missing, geosite_order: res.geosite_order,
-		                            dns_hijack: res.dns_hijack, zones: res.zones });
+		                            missing: res.missing, geosite_order: res.geosite_order, members_key: res.members_key, geoip_key: res.geoip_key,
+		                            dns_hijack: res.dns_hijack, zones: res.zones, split_geoip: true });
 }
 
 // Загрузить последнюю удачную копию: метаданные копии или null (копии нет, nft её не принял).
@@ -156,30 +186,19 @@ function load_good() {
 	return meta;
 }
 
-// Отпечаток структуры таблицы inet truba (FNV-1a 32 бита): зависит от входных данных,
-// влияющих на состав правил, наборов gi_*/dev_* и адресов в bypass4/local4.
-// При неизменном отпечатке таблица не перезагружается целиком (обновляются только
-// bypass4/local4), что сохраняет наборы dv_* и экономит парсинг 35k+ подсетей geoip.
-function nft_table_key(cfg, plan, ctx, gkey, vps, dat_hash) {
+// Отпечаток структуры таблицы inet truba (FNV-1a 32 бита). Элементы наборов имеют
+// отдельные отпечатки: изменение Политики или Набора правил сохраняет dv_* и счётчики.
+function nft_table_key(cfg, ctx, vps) {
 	let parts = [
 		cfg.routing,
 		cfg.mode,
 		cfg.iface,
 		vps,
-		join(',', sort(ctx.lan_if)),
 		ctx.socket_mark,
 		cfg.dns_hijack,
 		cfg.dns.set_timeout,
-		join(',', sort(ctx.dev_tunnel)),
-		join(',', sort(ctx.dev_direct)),
 	];
-	if (cfg.routing) {
-		push(parts, gkey);
-		push(parts, dat_hash);
-		push(parts, plan.geoip);
-		// При смене gkey наборы gs_* сбрасываются в apply_config (ctx.gs_* = []),
-		// и таблица должна перезагрузиться, чтобы обнулить их в ядре.
-	}
+	// Элементы geoip, geosite и Политик устройств обновляются отдельно.
 	return U.fnv1a(sprintf('%J', parts));
 }
 
@@ -199,17 +218,10 @@ function set_loaded(name) {
 	return system('nft list set inet ' + C.NFT_TABLE + ' ' + name + ' >/dev/null 2>&1') == 0;
 }
 
-function refill(name, elems) {
-	let s = 'flush set inet ' + C.NFT_TABLE + ' ' + name + '\n';
-	if (length(elems))
-		s += 'add element inet ' + C.NFT_TABLE + ' ' + name + ' { ' + join(', ', elems) + ' }\n';
-	return s;
-}
-
 // Обновить только наборы локальных подсетей — bypass4 и local4 (смена адресов интерфейсов).
 // Новая подсеть, пока её нет в local4, получает подмену источника DNS — это безвредно: dnsmasq ей и так ответил бы.
 // b4, l4 — готовые списки подсетей (необязательно: по умолчанию — прочитать из конфига).
-export function refresh_bypass(b4, l4, known) {
+export function refresh_bypass(b4, l4, known, members, cfg, clear_dns, geoip) {
 	let prev = known ?? U.read_json(C.APPLIED_FILE, {});
 	if (!prev.routing || (known == null && !set_loaded('bypass4')))
 		return false;
@@ -220,12 +232,23 @@ export function refresh_bypass(b4, l4, known) {
 			s += refill('local4', l4);
 	}
 	else {
-		let cfg = F.load();
+		cfg ??= F.load();
 		let tinfo = F.tunnel_info(cfg.iface);
-		s = refill('bypass4', bypass4(vps_ip(tinfo, prev), tinfo));
+		let vps = (prev.endpoint == tinfo.endpoint && U.is_ipv4(prev.vps)) ? prev.vps : vps_ip(tinfo, prev);
+		s = refill('bypass4', bypass4(vps, tinfo));
 		if (set_loaded('local4'))
 			s += refill('local4', F.local_subnets());
 	}
+	if (members) {
+		s += refill('lan_if', map(members.lan_if, d => sprintf('%J', d)));
+		s += refill('dev_tunnel', members.dev_tunnel);
+		s += refill('dev_direct', members.dev_direct);
+	}
+	if (clear_dns)
+		s += refill('gs_tunnel4', []) + refill('gs_direct4', []);
+	if (geoip)
+		for (let action in [ 'block', 'tunnel', 'direct' ])
+			s += refill('gi_' + action + '4', geoip[action]);
 	let tmp = C.RUN_DIR + '/bypass.nft';
 	if (!U.write_atomic(tmp, s))
 		return false;
@@ -288,17 +311,27 @@ function apply_config(res, prev) {
 			ctx.local4 = F.local_subnets();
 
 		// Отпечаток структуры таблицы: если не изменился, не перезагружать таблицу целиком.
-		let nft_key = nft_table_key(cfg, plan, ctx, gkey, vps, dat.hash);
-		let skip_reload = (prev.routing && prev.nft_key == nft_key && table_loaded() && prev.gkey == gkey);
+		let nft_key = nft_table_key(cfg, ctx, vps);
+		res.members_key = U.fnv1a(sprintf('%J', [ sort(ctx.lan_if), sort(ctx.dev_tunnel), sort(ctx.dev_direct) ]));
+		res.geoip_key = U.fnv1a(sprintf('%J', [ split(dat.hash ?? '-', ':')[0], plan.geoip ]));
+		let skip_reload = (prev.routing && prev.nft_key == nft_key && table_loaded());
 
 		if (skip_reload) {
+			if (prev.geoip_key != res.geoip_key) {
+				ctx.gi = { block: [], tunnel: [], direct: [] };
+				for (let action in [ 'block', 'tunnel', 'direct' ])
+					for (let tag in plan.geoip[action])
+						push(ctx.gi[action], ...D.geoip_cidrs(tag));
+			}
 			// Таблица не изменилась: обновить только bypass4 и local4.
-			if (!refresh_bypass(ctx.bypass4, ctx.local4 ?? [], res))
+			if (!refresh_bypass(ctx.bypass4, ctx.local4 ?? [], res, ctx, null, prev.gkey != gkey, ctx.gi))
 				die('nft: не обновлены локальные подсети');
 			res.gkey = gkey;
 			res.nft_key = nft_key;
 			res.nft_gen = prev.nft_gen ?? prev.time;
-			res.geoip_sizes = prev.geoip_sizes;
+			if (prev.gkey != gkey)
+				unlink(C.SET_SIZES_FILE);
+			res.geoip_sizes = ctx.gi ? { block: length(ctx.gi.block), tunnel: length(ctx.gi.tunnel), direct: length(ctx.gi.direct) } : prev.geoip_sizes;
 			res.loaded = true;
 			text = null;
 		}
@@ -467,7 +500,7 @@ export function hotplug(ev) {
 			N.set_rp_filter(ev.device);
 		N.routes(cfg);
 	}
-	refresh_bypass();
+	refresh_bypass(null, null, null, null, cfg);
 };
 
 // ---- Наборы правил ----

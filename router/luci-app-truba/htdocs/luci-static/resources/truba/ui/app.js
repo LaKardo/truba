@@ -25,24 +25,26 @@ function text(path) {
 const lib = {};
 let styles = [];
 let loading = null;
+let chartsLoading = null;
 
-function load() {
+function load(charts = false) {
 	if (!loading)
 		loading = Promise.all([
 			import(url('truba/lib/preact-htm.js')),
-			import(url('truba/lib/uplot.js')),
 			text('truba/lib/uplot.css'),
 			text('truba/ui/style.css')
-		]).then(([ p, u, uplotCss, css ]) => {
+		]).then(([ p, uplotCss, css ]) => {
 			Object.assign(lib, {
 				h: p.h, html: p.html, render: p.render,
 				useState: p.useState, useEffect: p.useEffect, useLayoutEffect: p.useLayoutEffect,
-				useRef: p.useRef, useMemo: p.useMemo, useCallback: p.useCallback,
-				uPlot: u.default
+				useRef: p.useRef, useMemo: p.useMemo, useCallback: p.useCallback
 			});
 			styles = [ uplotCss, css ];
 		});
-	return loading;
+	if (!charts)
+		return loading;
+	chartsLoading ||= import(url('truba/lib/uplot.js')).then((u) => { lib.uPlot = u.default; });
+	return Promise.all([ loading, chartsLoading ]);
 }
 
 // ---- Светлый или тёмный режим ----
@@ -130,14 +132,18 @@ const scheme = store({ scheme: 'light' });
 // оповещения: иначе страница перерисовывалась бы на каждом шаге опроса. Шаг без вызовов — и не ответ
 // Роутера: «нет связи» он не снимает, только задаёт offline, пока его ещё нет.
 function pollStore(s, fetchFn, interval) {
-	poll.add(() => fetchFn().then(
-		(patch) => {
-			if (Object.keys(patch || {}).length)
-				s.set(Object.assign({}, patch, { offline: false }));
-			else if (s.get().offline === undefined)
-				s.set({ offline: false });
-		},
-		() => s.set({ offline: true })), interval);
+	poll.add(() => {
+		if (typeof document !== 'undefined' && document.hidden)
+			return Promise.resolve();
+		return fetchFn().then(
+			(patch) => {
+				if (Object.keys(patch || {}).length)
+					s.set(Object.assign({}, patch, { offline: false }));
+				else if (s.get().offline === undefined)
+					s.set({ offline: false });
+			},
+			() => { if (s.get().offline !== true) s.set({ offline: true }); });
+	}, interval);
 }
 
 // ---- Изменения UCI ----
@@ -260,6 +266,10 @@ function every(fn, ms) {
 	const run = () => {
 		if (!alive)
 			return;
+		if (typeof document !== 'undefined' && document.hidden) {
+			timer = setTimeout(run, ms);
+			return;
+		}
 		Promise.resolve().then(fn).catch(() => {}).then(() => {
 			if (alive)
 				timer = setTimeout(run, ms);

@@ -84,12 +84,12 @@ return view.extend({
 	...app.actions,
 
 	load: function() {
-		return Promise.all([ app.load(), common.loadSchema() ]).then(() => Promise.all([ common.callStatus().catch(() => null), uci.load('truba') ]));
+		return Promise.all([ app.load(), common.loadSchema() ]).then(() => Promise.all([ common.callStatus('dns').catch(() => null), uci.load('truba') ]));
 	},
 
 	render: function(data) {
 		const store = app.store({ status: data[0], offline: data[0] == null });
-		app.poll(store, () => common.callStatus().then((s) => ({ status: s })), POLL);
+		app.poll(store, () => common.callStatus('dns').then((s) => ({ status: s })), POLL);
 		return app.mount(this, Page, { store });
 	}
 });
