@@ -26,6 +26,8 @@ set +e
 
 STATE_DIR=$(mktemp -d)
 NFT_FILE="$STATE_DIR/pipe.nft"
+PIPE_VARS_SH="$STATE_DIR/pipe-vars.sh"
+PIPE_VARS_NFT="$STATE_DIR/run/pipe-vars.nft"
 T=$(mktemp -d)   # файлы самих проверок
 
 # Ключи с опциями тоже разрешают вход; одного похожего префикса недостаточно.
@@ -36,14 +38,36 @@ echo 'ssh-ed25519 not-a-key' > "$T/authorized_keys"
 ! have_key_login "$T/authorized_keys" && ok "SSH: повреждённый ключ не принимается" || fail "SSH: повреждённый ключ"
 valid_ipv4 203.0.113.10 && ! valid_ipv4 256.1.2.3 && ! valid_ipv4 '1.2.3.4 text' && ! valid_ipv4 $'1.2.3.4\n5.6.7.8' \
 	&& ok "IPv4: проверка октетов и лишнего текста" || fail "IPv4: проверка"
-curl() { case "${*: -1}" in *ipify*) echo '<html>error</html>' ;; *) echo ' 203.0.113.10 ' ;; esac; }
-[ "$(external_ipv4)" = 203.0.113.10 ] && ok "IPv4: неверный ответ — следующий сервис" || fail "IPv4: резервный сервис"
-unset -f curl
+# Публичный IP — по самому адресу на интерфейсе, без запросов к сторонним сервисам: частные,
+# CGNAT, link-local и служебные диапазоны — за NAT провайдера.
+pub_ok=1
+for a in 203.0.113.10 100.63.255.255 100.128.0.1 172.15.0.1 172.32.0.1 192.167.0.1 192.169.0.1 1.2.3.4 223.255.255.255; do
+	public_ipv4 "$a" || { pub_ok=0; echo "  публичный отклонён: $a"; }
+done
+for a in 10.0.0.1 172.16.0.1 172.31.255.255 192.168.1.1 100.64.0.1 100.127.255.255 169.254.1.1 127.0.0.1 0.0.0.0 224.0.0.1 240.0.0.1 255.255.255.255 '' 1.2.3; do
+	! public_ipv4 "$a" || { pub_ok=0; echo "  частный принят: $a"; }
+done
+[ "$pub_ok" = 1 ] && ok "IPv4: публичные и частные диапазоны" || fail "IPv4: диапазоны"
+ip() { case "$*" in *addr*) printf '2: eth0    inet 10.0.0.5/24 brd 10.0.0.255 scope global eth0\n2: eth0    inet 203.0.113.10/32 scope global eth0\n' ;; *) echo 'default via 10.0.0.1 dev eth0' ;; esac; }
+[ "$(wan_public_ip eth0)" = 203.0.113.10 ] && [ "$(wan_default_if)" = eth0 ] && ok "IPv4: первый публичный адрес WAN, частный пропускается" || fail "wan_public_ip: $(wan_public_ip eth0)"
+ip() { printf '2: eth0    inet 10.0.0.5/24 brd 10.0.0.255 scope global eth0\n'; }
+! wan_public_ip eth0 >/dev/null && ok "IPv4: только частный адрес — за NAT" || fail "wan_public_ip: частный принят"
+unset -f ip
+# Порты: ss не видит сокетов WireGuard и AmneziaWG — их порты берутся у awg и wg.
 ss() { echo 'LISTEN'; }
 out=$( (check_port_available t 55555) 2>&1 )
 grep -q 'уже занят' <<< "$out" && ok "порты: занятый TCP отклонён" || fail "порты: занятый TCP"
 check_port_available u 51820 51820 && ok "порты: свой UDP при повторном запуске" || fail "порты: свой UDP"
-unset -f ss
+ss() { :; }
+awg() { printf 'awg0\t51820\nawg1\t51830\n'; }
+wg() { printf 'wg0\t51840\n'; }
+[ "$(tunnel_ports | xargs)" = "51820 51830 51840" ] && [ "$(tunnel_ports awg0 | xargs)" = "51830 51840" ] \
+	&& ok "порты: туннели awg и wg, свой интерфейс исключается" || fail "tunnel_ports: $(tunnel_ports | xargs)"
+out=$( (check_port_available u 51830) 2>&1 )
+grep -q 'другим туннелем' <<< "$out" && ok "порты: UDP другого туннеля отклонён" || fail "порты: чужой туннель: $out"
+check_port_available u 51820 && check_port_available t 51830 && ok "порты: свой туннель и TCP на порту туннеля допустимы" || fail "порты: свой туннель"
+port_busy 51840 && ! port_busy 51841 && ok "pick_port: порт туннеля считается занятым" || fail "port_busy: туннели"
+unset -f ss awg wg
 
 # Служебные конфиги пишутся отдельно от пользовательских и без лишних перезапусков.
 UNATTENDED_CONF="$T/52truba"; JOURNAL_CONF="$T/journal.conf"
@@ -168,16 +192,17 @@ unset -f uname dpkg-query apt-cache
 LOG="$T/install"
 apt-get() { echo "apt-get $*" >> "$LOG"; }
 apt-mark() { echo "apt-mark $*" >> "$LOG"; }
-add-apt-repository() { echo "add-apt-repository $*" >> "$LOG"; }
+ppa_add() { echo "ppa_add" >> "$LOG"; }
 modprobe() { :; }
 ppa_key_check() { :; }
 uname() { echo 6.8.0-146-generic; }
 dpkg-query() { case "$*" in *linux-image-*) echo 'ii  linux-image-generic' ;; *) return 1 ;; esac; }
 apt-cache() { printf '%s:\n  Candidate: 1\n' "$2"; }
 UNBOUND_CONF="$T/unbound/truba.conf"
+PPA_SOURCES_DIR="$T/no-sources"
 sources_before=$(cat /etc/apt/sources.list.d/ubuntu.sources)
 out=$( (install_packages) 2>&1 ); rc=$?
-want="add-apt-repository -y -n ppa:amnezia/ppa
+want="ppa_add
 apt-get update -qq
 apt-get -o DPkg::Lock::Timeout=600 install -y -qq nftables fail2ban unattended-upgrades curl unbound linux-headers-6.8.0-146-generic linux-headers-generic
 apt-mark auto linux-headers-6.8.0-146-generic
@@ -191,8 +216,9 @@ apt-cache() { case "$2" in linux-headers-6.8.0-*) printf '%s:\n  Candidate: (non
 out=$( (install_packages) 2>&1 )
 grep -q 'заголовков ядра 6.8.0-146-generic нет в архиве' <<< "$out" && ! grep -q install "$LOG" \
 	&& ok "пакеты: заголовков ядра нет в архиве — понятный выход до установки" || fail "пакеты: без заголовков: $out"$'\n'"$(cat "$LOG")"
-unset -f apt-get apt-mark add-apt-repository modprobe uname dpkg-query apt-cache ppa_key_check
-eval "$(sed -n '/^ppa_key_check()/,/^}/p' "$SCRIPT")"
+unset -f apt-get apt-mark ppa_add modprobe uname dpkg-query apt-cache ppa_key_check
+PPA_SOURCES_DIR=/etc/apt/sources.list.d
+eval "$(sed -n '/^ppa_key_check()/,/^}/p; /^ppa_add()/,/^}/p' "$SCRIPT")"
 if ! command -v gpg >/dev/null || ! command -v ping >/dev/null; then
 	apt-get install -y -qq gnupg iputils-ping >/dev/null 2>&1
 fi
@@ -212,6 +238,20 @@ fi
 	PPA_FPR=$fpr; ( ppa_key_check ) && ok "ключ PPA: Signed-By с путём к файлу" || fail "ключ PPA: путь"
 	rm -f "$PPA_SOURCES_DIR"/*
 	out=$( (ppa_key_check) 2>&1 ); grep -q 'не подключён' <<< "$out" && ok "ключ PPA: источника нет — отказ" || fail "ключ PPA: без источника: $out"
+	# Источник подключается без software-properties-common: ключ с сервера ключей по закреплённому
+	# отпечатку встраивается в deb822-файл, и его проверяет тот же ppa_key_check.
+	curl() { gpg --armor --export "$fpr"; }
+	apt-get() { echo "apt-get $*" >> "$T/ppa-apt"; }
+	src > /dev/null; want=$(cat "$PPA_SOURCES_DIR/amnezia-ubuntu-ppa-noble.sources"); rm -f "$PPA_SOURCES_DIR"/*
+	PPA_FPR=$fpr; ( ppa_add ) && [ "$(cat "$PPA_SOURCES_DIR/amnezia-ubuntu-ppa-noble.sources")" = "$want" ] && ( ppa_key_check ) \
+		&& [ ! -e "$T/ppa-apt" ] && ok "ключ PPA: источник deb822 с ключом с сервера, без add-apt-repository" \
+		|| fail "ppa_add: $(diff <(echo "$want") "$PPA_SOURCES_DIR/amnezia-ubuntu-ppa-noble.sources" 2>&1 | head -5)"
+	rm -f "$PPA_SOURCES_DIR"/*
+	PPA_FPR=75C9DD72C799870E310542E24166F2C257290828
+	out=$( (ppa_add) 2>&1 ); grep -q 'с сервера ключей не тот' <<< "$out" && [ ! -e "$PPA_SOURCES_DIR/amnezia-ubuntu-ppa-noble.sources" ] \
+		&& ok "ключ PPA: чужой ключ с сервера — источник не пишется" || fail "ppa_add чужой: $out"
+	curl() { return 22; }
+	out=$( (ppa_add) 2>&1 ); grep -q 'не удалось получить ключ' <<< "$out" && ok "ключ PPA: сервер ключей недоступен — понятный отказ" || fail "ppa_add без сервера: $out"
 )
 # Протокол AWG по пробному интерфейсу; без модуля — выход, а не молчаливый AWG 1.x.
 ip() { [ "$1 $2" != "link add" ]; }
@@ -429,6 +469,27 @@ grep -q 'udp dport 68 return' "$NFT_FILE" && ok "DHCP-клиент VPS не ух
 grep -q 'udp sport 547 udp dport 546 accept' "$NFT_FILE" && ok "ответы DHCPv6 доходят до VPS" || fail "DHCPv6"
 grep -q 'udp sport 51820 ip dscp != cs0 ip dscp set cs0' "$NFT_FILE" && ok "DSCP пакетов Туннеля обнуляется" || fail "DSCP Туннеля"
 grep -q 'tcp flags syn / syn,rst' "$NFT_FILE" && ok "MSS: SYN и SYN-ACK без RST" || fail "MSS: флаги"
+# WAN и публичный IP — не в правилах, а в файле define, который пишет скрипт службы при каждом
+# её запуске: после переименования интерфейса (ens3 → enp0s3) проброс не теряется.
+grep -q "^include \"$PIPE_VARS_NFT\"" "$NFT_FILE" && ! grep -q 'eth0\|203.0.113.10' "$NFT_FILE" \
+	&& [ "$(cat "$PIPE_VARS_NFT")" = $'define WAN = "eth0"\ndefine PUB = 203.0.113.10' ] \
+	&& ok "правила: WAN и PUB — из файла define, в pipe.nft их нет" || fail "правила: define: $(cat "$PIPE_VARS_NFT")"
+[ "$NFT_CHANGED" = 1 ] && write_nft && [ "$NFT_CHANGED" = 0 ] && ok "правила: повторная запись — без изменений (NFT_CHANGED=0)" || fail "NFT_CHANGED: $NFT_CHANGED"
+(
+	write_pipe_vars_sh
+	[ "$(stat -c %a "$PIPE_VARS_SH")" = 755 ] && bash -n "$PIPE_VARS_SH" && ok "pipe-vars.sh: исполняемый, синтаксис" || fail "pipe-vars.sh: $(bash -n "$PIPE_VARS_SH" 2>&1)"
+	# Маршрут по умолчанию через интерфейс с публичным адресом — он и берётся; без него — значения установки.
+	ip() { case "$*" in *addr*) printf '2: ens7    inet 198.51.100.7/24 scope global ens7\n' ;; *) echo 'default via 198.51.100.1 dev ens7' ;; esac; }
+	rm -f "$PIPE_VARS_NFT"; bash -c "$(declare -f ip); $(cat "$PIPE_VARS_SH")"
+	[ "$(cat "$PIPE_VARS_NFT")" = $'define WAN = "ens7"\ndefine PUB = 198.51.100.7' ] && ok "pipe-vars.sh: WAN и IP по текущему маршруту" || fail "pipe-vars.sh маршрут: $(cat "$PIPE_VARS_NFT")"
+	ip() { case "$*" in *addr*) printf '2: ens7    inet 10.9.9.9/24 scope global ens7\n' ;; *) echo 'default via 10.9.9.1 dev ens7' ;; esac; }
+	rm -f "$PIPE_VARS_NFT"; bash -c "$(declare -f ip); $(cat "$PIPE_VARS_SH")"
+	[ "$(cat "$PIPE_VARS_NFT")" = $'define WAN = "eth0"\ndefine PUB = 203.0.113.10' ] && ok "pipe-vars.sh: без публичного IP на маршруте — значения установки" || fail "pipe-vars.sh запас: $(cat "$PIPE_VARS_NFT")"
+	ip() { :; }
+	rm -f "$PIPE_VARS_NFT"; bash -c "$(declare -f ip); $(cat "$PIPE_VARS_SH")"
+	[ "$(cat "$PIPE_VARS_NFT")" = $'define WAN = "eth0"\ndefine PUB = 203.0.113.10' ] && ok "pipe-vars.sh: без маршрута — значения установки" || fail "pipe-vars.sh без маршрута: $(cat "$PIPE_VARS_NFT")"
+)
+write_nft
 
 # udp_tos SPORT TOS — UDP-пакет на 127.0.0.1:9 с порта SPORT и байтом TOS (IP_TOS, hex).
 # TOS — числом: строку setsockopt передал бы как байты.
@@ -817,13 +878,53 @@ AWG_DROPIN="$T/awg-dropin/10-truba.conf"
 grep -qx 'Requires=truba-pipe.service' "$AWG_DROPIN" && ok "Туннель (пакетный юнит): не поднимается без правил Трубы" || fail "drop-in awg-quick"
 : > "$T/sysd"; AWG_CONF_CHANGED=0; setup_awg_service
 ! grep -q '^restart' "$T/sysd" && ok "Туннель: конфиг тот же — без перезапуска" || fail "Туннель перезапущен зря: $(cat "$T/sysd")"
+# Изменённый конфиг применяется на ходу (syncconf и MTU), сессия с Роутером не рвётся; перезапуск —
+# только если применить не удалось или Туннель не работает.
+awg() { echo "awg $1 $2" >> "$T/awgsync"; cat "$3" > "$T/synced"; }
+awg-quick() { echo "stripped $*"; }
+mkdir -p "$T/sysnet/awg0"; echo 1380 > "$T/sysnet/awg0/mtu"
+: > "$T/sysd"; : > "$T/awgsync"; AWG_CONF_CHANGED=1; SYS_NET="$T/sysnet" setup_awg_service
+[ "$(cat "$T/awgsync")" = 'awg syncconf awg0' ] && [ "$(cat "$T/synced")" = 'stripped strip awg0' ] && ! grep -q '^restart' "$T/sysd" \
+	&& ok "Туннель: конфиг изменился — syncconf на ходу, без перезапуска" || fail "Туннель: syncconf: $(cat "$T/awgsync" "$T/sysd")"
+ip() { echo "ip $*" >> "$T/awgsync"; }
+echo 1300 > "$T/sysnet/awg0/mtu"
+: > "$T/sysd"; : > "$T/awgsync"; AWG_CONF_CHANGED=1; SYS_NET="$T/sysnet" setup_awg_service
+grep -qx 'ip link set dev awg0 mtu 1380' "$T/awgsync" && ! grep -q '^restart' "$T/sysd" \
+	&& ok "Туннель: MTU меняется на ходу (ip link)" || fail "Туннель: MTU на ходу: $(cat "$T/awgsync" "$T/sysd")"
+unset -f ip
+awg() { return 1; }
 : > "$T/sysd"; AWG_CONF_CHANGED=1; setup_awg_service
-grep -qx 'restart awg-quick@awg0' "$T/sysd" && ok "Туннель: конфиг изменился — перезапуск" || fail "Туннель: без перезапуска: $(cat "$T/sysd")"
+grep -qx 'restart awg-quick@awg0' "$T/sysd" && ok "Туннель: syncconf не прошёл — перезапуск" || fail "Туннель: без перезапуска: $(cat "$T/sysd")"
 : > "$T/sysd"; AWG_CONF_CHANGED=0; ACTIVE=0 setup_awg_service
 grep -qx 'restart awg-quick@awg0' "$T/sysd" && ok "Туннель: не работает — перезапуск" || fail "Туннель не поднят: $(cat "$T/sysd")"
-# Юнит пишется с правами 644, даже если прежний был 600.
+unset -f awg awg-quick
+# Юнит пишется с правами 644, даже если прежний был 600. Правила грузит служба: при первой
+# установке — start, при изменении — reload (счётчик фрагментов не обнуляется), без изменений — ничего.
 PIPE_UNIT="$STATE_DIR/truba-pipe.service"; touch "$PIPE_UNIT"; chmod 600 "$PIPE_UNIT"
-write_pipe_unit; [ "$(stat -c %a "$PIPE_UNIT")" = 644 ] && ok "юнит truba-pipe читаем всеми" || fail "права юнита: $(stat -c %a "$PIPE_UNIT")"
+nft() { echo "nft $*" >> "$T/sysd"; }
+: > "$T/sysd"; NFT_CHANGED=1; ACTIVE=0 write_pipe_unit
+[ "$(stat -c %a "$PIPE_UNIT")" = 644 ] && ok "юнит truba-pipe читаем всеми" || fail "права юнита: $(stat -c %a "$PIPE_UNIT")"
+grep -qx 'ExecReload=/usr/sbin/nft -f '"$NFT_FILE" "$PIPE_UNIT" && grep -qx "ExecStartPre=$PIPE_VARS_SH" "$PIPE_UNIT" \
+	&& ok "юнит truba-pipe: ExecStartPre определяет WAN, ExecReload перечитывает правила" || fail "юнит truba-pipe: $(grep Exec "$PIPE_UNIT")"
+grep -qx 'daemon-reload' "$T/sysd" && grep -qx 'restart truba-pipe.service' "$T/sysd" && ! grep -q '^reload' "$T/sysd" \
+	&& ok "truba-pipe: не работает — start" || fail "truba-pipe start: $(cat "$T/sysd")"
+: > "$T/sysd"; NFT_CHANGED=1; write_pipe_unit
+grep -qx 'reload truba-pipe.service' "$T/sysd" && ! grep -q '^restart' "$T/sysd" && ! grep -q daemon-reload "$T/sysd" \
+	&& ok "truba-pipe: правила изменились — reload, без daemon-reload" || fail "truba-pipe reload: $(cat "$T/sysd")"
+: > "$T/sysd"; NFT_CHANGED=0; write_pipe_unit
+! grep -qE '^(reload|restart)' "$T/sysd" && ok "truba-pipe: правила те же — без перезагрузки" || fail "truba-pipe зря: $(cat "$T/sysd")"
+nft() { return 1; }
+: > "$T/sysd"; NFT_CHANGED=0; write_pipe_unit
+grep -qx 'restart truba-pipe.service' "$T/sysd" && ok "truba-pipe: таблиц в ядре нет — start заново" || fail "truba-pipe без таблиц: $(cat "$T/sysd")"
+unset -f nft
+# Общий порядок для служб: daemon-reload при изменённом юните, enable, перезапуск при изменённом
+# конфиге или неработающей службе, иначе ничего; с reload=1 — reload вместо перезапуска.
+ua() { : > "$T/sysd"; unit_apply "$@"; tr '\n' ';' < "$T/sysd"; }
+[ "$(ua svc 0 0)" = 'enable svc;is-active -q svc;' ] && [ "$(ua svc 1 0)" = 'daemon-reload;enable svc;is-active -q svc;' ] \
+	&& [ "$(ua svc 0 1)" = 'enable svc;is-active -q svc;restart svc;' ] && [ "$(ua svc 0 1 1)" = 'enable svc;is-active -q svc;reload svc;' ] \
+	&& [ "$(ACTIVE=0 ua svc 0 0 1)" = 'enable svc;is-active -q svc;restart svc;' ] \
+	&& ok "unit_apply: daemon-reload, enable, перезапуск или reload только по надобности" || fail "unit_apply: $(ua svc 0 1 1)"
+unset -f ua
 # SSH: сокет systemd перезапускается, только если он включён.
 : > "$T/sysd"
 systemctl() { echo "$*" >> "$T/sysd"; [ "$1" != is-enabled ]; }
@@ -964,30 +1065,33 @@ fi
 
 # Адрес пересылки у поставщика — ближний по ping из пары (замер с Трубы 2026-10-26: 8.8.8.8 — 22 мс,
 # 8.8.4.4 — 0,6). Прежний выбор остаётся, пока другой не ближе на 5 мс; без ответа ping — не меняется.
+# Четыре адреса пингуются одновременно.
 (
 	rtt() { echo "rtt min/avg/max/mdev = $1/$1/$1/0.000 ms"; }
-	ping() { case "${@: -1}" in 8.8.8.8) rtt 22.097 ;; 8.8.4.4) rtt 0.555 ;; 1.1.1.1) rtt 3.2 ;; 1.0.0.1) rtt 0.9 ;; esac; }
-	out=$(pick_near '' 8.8.8.8 8.8.4.4)
+	out=$(pick_near '' 8.8.8.8 8.8.4.4 22.097 0.555)
 	[ "$out" = '8.8.4.4 22.097 0.555' ] && ok "unbound: из пары — ближний адрес" || fail "pick_near ближний: $out"
-	out=$(pick_near '' 1.1.1.1 1.0.0.1)
+	out=$(pick_near '' 1.1.1.1 1.0.0.1 3.2 0.9)
 	[ "$out" = '1.1.1.1 3.2 0.9' ] && ok "unbound: другой ближе меньше чем на 5 мс — адрес прежний" || fail "pick_near разброс: $out"
-	out=$(pick_near 8.8.4.4 8.8.8.8 8.8.4.4)
+	out=$(pick_near 8.8.4.4 8.8.8.8 8.8.4.4 22.097 0.555)
 	[ "$out" = '8.8.4.4 22.097 0.555' ] && ok "unbound: прежний ближний адрес остаётся" || fail "pick_near прежний: $out"
-	ping() { case "${@: -1}" in 8.8.8.8) rtt 0.6 ;; 8.8.4.4) rtt 22 ;; esac; }
-	out=$(pick_near 8.8.4.4 8.8.8.8 8.8.4.4)
+	out=$(pick_near 8.8.4.4 8.8.8.8 8.8.4.4 0.6 22)
 	[ "$out" = '8.8.8.8 0.6 22' ] && ok "unbound: другой адрес стал ближе — переход" || fail "pick_near переход: $out"
-	ping() { case "${@: -1}" in 8.8.8.8) rtt 22 ;; *) return 1 ;; esac; }
-	out=$(pick_near '' 8.8.8.8 8.8.4.4)
+	out=$(pick_near '' 8.8.8.8 8.8.4.4 22 '')
 	[ "$out" = '8.8.8.8 22 -' ] && ok "unbound: адрес без ответа на ping не выбирается" || fail "pick_near без ответа: $out"
-	ping() { return 1; }
-	out=$(set -Eeuo pipefail; pick_near 8.8.4.4 8.8.8.8 8.8.4.4)
+	out=$(set -Eeuo pipefail; pick_near 8.8.4.4 8.8.8.8 8.8.4.4 '' '')
 	[ "$out" = '8.8.4.4 - -' ] && ok "unbound: ping закрыт — выбор прежний, без ошибки под set -e" || fail "pick_near ping закрыт: $out"
 	ping() { case "${@: -1}" in 8.8.8.8) rtt 22.097 ;; 8.8.4.4) rtt 0.555 ;; 1.1.1.1) rtt 0.555 ;; 1.0.0.1) rtt 0.597 ;; esac; }
 	UNBOUND_CONF="$T/unbound-near.conf"; DNS_CF=''; DNS_GOOGLE=''
 	out=$(pick_forwarders; write_unbound_conf; grep -E '^    forward-addr:' "$UNBOUND_CONF" | xargs)
-	grep -q 'пересылка на 1.1.1.1 и 8.8.4.4' <<< "$out" \
+	grep -q 'пересылка на 1.1.1.1 и 8.8.4.4 (ping, мс: 1.1.1.1 0.555, 1.0.0.1 0.597, 8.8.8.8 22.097, 8.8.4.4 0.555)' <<< "$out" \
 		&& grep -q 'forward-addr: 1.1.1.1@853#cloudflare-dns.com forward-addr: 8.8.4.4@853#dns.google$' <<< "$out" \
 		&& ok "unbound: конфиг — с выбранными адресами, имена серверов прежние" || fail "pick_forwarders: $out"
+	ping() { sleep 1; rtt 1; }
+	t0=$(date +%s%N); pick_forwarders >/dev/null; dt=$(( ($(date +%s%N) - t0) / 1000000 ))
+	[ "$dt" -lt 3000 ] && ok "unbound: четыре замера идут одновременно ($dt мс)" || fail "pick_forwarders по очереди: $dt мс"
+	ping() { return 1; }
+	out=$(set -Eeuo pipefail; DNS_CF=1.0.0.1 DNS_GOOGLE=8.8.4.4; pick_forwarders; echo "$DNS_CF $DNS_GOOGLE")
+	grep -q '^1.0.0.1 8.8.4.4$' <<< "$out" && ok "unbound: ping закрыт — прежние адреса, без ошибки под set -e" || fail "pick_forwarders без ping: $out"
 	state_value_ok DNS_GOOGLE 8.8.4.4 && state_value_ok DNS_CF 1.0.0.1 && ! state_value_ok DNS_GOOGLE 1.1.1.1 \
 		&& ! state_value_ok DNS_CF 9.9.9.9 && ok "pipe.env: адрес DNS — только из пары своего поставщика" || fail "state_value_ok DNS_*"
 	STATE="$T/near-pipe.env"; DNS_GOOGLE=8.8.4.4; save_state
@@ -1075,7 +1179,7 @@ case "$( (main diag 3) 2>&1 )" in *"от 5 до 600"*) ok "параметры: d
 # Транзакция: снимок файлов до изменений, откат возвращает их, а созданные — удаляет.
 (
 	TXN_DIR="$T/txn"; OWNED="$T/owned.env"; AWG_DROPIN="$T/awg-dropin2/10-truba.conf"
-	SSHD_DROPIN="$T/txn-sshd.conf"; NFT_FILE="$T/txn.nft"; PIPE_UNIT="$T/txn-pipe.service"
+	SSHD_DROPIN="$T/txn-sshd.conf"; NFT_FILE="$T/txn.nft"; PIPE_UNIT="$T/txn-pipe.service"; PIPE_VARS_SH="$T/txn-vars.sh"
 	AWG_CONF="$T/txn-awg0.conf"; ROUTER_CONF="$T/txn-router.conf"; STATE="$T/txn-pipe.env"
 	systemctl() {
 		echo "$*" >> "$T/txn-sysd"
@@ -1088,12 +1192,12 @@ case "$( (main diag 3) 2>&1 )" in *"от 5 до 600"*) ok "параметры: d
 	nft() { echo "$*" >> "$T/txn-nft"; }
 	ssh_restart() { echo restart >> "$T/txn-ssh"; }
 	ufw() { echo "$*" >> "$T/txn-ufw"; }
-	echo 'Port 50022' > "$SSHD_DROPIN"; echo old > "$AWG_CONF"; rm -f "$PIPE_UNIT" "$NFT_FILE"
+	echo 'Port 50022' > "$SSHD_DROPIN"; echo old > "$AWG_CONF"; rm -f "$PIPE_UNIT" "$NFT_FILE" "$PIPE_VARS_SH"
 	PIPE_WAS=0 txn_begin
 	echo 'Port 50022' > "$SSHD_DROPIN.new"; echo 'Port 51022' > "$SSHD_DROPIN"; echo new > "$AWG_CONF"
-	echo unit > "$PIPE_UNIT"; echo rules > "$NFT_FILE"; touch "$TXN_DIR/ufw-off"
+	echo unit > "$PIPE_UNIT"; echo rules > "$NFT_FILE"; echo vars > "$PIPE_VARS_SH"; touch "$TXN_DIR/ufw-off"
 	txn_restore
-	[ "$(cat "$SSHD_DROPIN")" = 'Port 50022' ] && [ "$(cat "$AWG_CONF")" = old ] && [ ! -e "$PIPE_UNIT" ] && [ ! -e "$NFT_FILE" ] \
+	[ "$(cat "$SSHD_DROPIN")" = 'Port 50022' ] && [ "$(cat "$AWG_CONF")" = old ] && [ ! -e "$PIPE_UNIT" ] && [ ! -e "$NFT_FILE" ] && [ ! -e "$PIPE_VARS_SH" ] \
 		&& [ ! -e "$TXN_DIR" ] && grep -q 'delete table inet truba_filter' "$T/txn-nft" && grep -qx 'disable truba-pipe.service' "$T/txn-sysd" \
 		&& grep -q 'enable' "$T/txn-ufw" && [ -s "$T/txn-ssh" ] \
 		&& ok "откат: прежние SSH и конфиги, новые файлы удалены, правила сняты, ufw включён" \

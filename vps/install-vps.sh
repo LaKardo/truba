@@ -20,6 +20,11 @@ set -Eeuo pipefail
 STATE_DIR=/etc/truba
 STATE="$STATE_DIR/pipe.env"
 NFT_FILE="$STATE_DIR/pipe.nft"
+# WAN и публичный IP для правил определяет при каждом запуске службы отдельный скрипт: после
+# обновления имя интерфейса может смениться (ens3 → enp0s3), и запечённые при установке значения
+# оставили бы Трубу без проброса. Итог — в файле define для pipe.nft.
+PIPE_VARS_SH="$STATE_DIR/pipe-vars.sh"
+PIPE_VARS_NFT=/run/truba/pipe-vars.nft
 AWG_DIR=/etc/amnezia/amneziawg
 AWG_IF=awg0
 AWG_CONF="$AWG_DIR/$AWG_IF.conf"
@@ -49,11 +54,13 @@ ROLLBACK_UNIT=truba-rollback
 
 VPS_TUN=10.77.77.1
 RTR_TUN=10.77.77.2
-# MTU Туннеля — не больше MTU_MAX и такой, чтобы пакет Туннеля с обёрткой помещался в сеть
-# VPS целиком: IPv4 20 + UDP 8 + заголовок и тег AWG 32 + S4 до 27 + добавка AWG 3.1 до 15 = 102
-# байта. Иначе VPS режет полноразмерные пакеты на два фрагмента: у части провайдеров сеть VPS —
-# 1400, а не 1500. Добавка ограничена окном, которое модуль узнаёт и по принятым пакетам, поэтому
-# на неё тоже оставлен запас.
+# MTU Туннеля — такой, чтобы пакет Туннеля с обёрткой помещался в сеть VPS целиком: IPv4 20 +
+# UDP 8 + заголовок и тег AWG 32 + S4 до 27 + добавка AWG 3.1 до 15 = 102 байта. Иначе VPS режет
+# полноразмерные пакеты на два фрагмента: у части провайдеров сеть VPS — 1400, а не 1500. Добавка
+# ограничена окном, которое модуль узнаёт и по принятым пакетам, поэтому на неё тоже оставлен запас.
+# Сверху — MTU_MAX: при сети 1500 расчёт даёт 1398, но путь от дома до VPS отсюда не виден, а у
+# PPPoE дома MTU 1492. С 1380 пакет Туннеля (1380 + 102 = 1482) проходит и его, не дожидаясь
+# mtu-check; 18 байт запаса стоят около 1 % полезной нагрузки.
 MTU_MAX=1380
 # Меньше — слишком мелкие пакеты: пути уже 1280 + 102 байт почти не встречаются.
 MTU_MIN=1280
@@ -177,7 +184,20 @@ tunnel_mtu() {
 	if [ -n "${TUN_MTU:-}" ]; then echo "$TUN_MTU"; else auto_mtu; fi
 }
 
-port_busy() { ss -Hlntu "( sport = :$1 )" 2>/dev/null | grep -q .; }
+# UDP-порты туннелей WireGuard и AmneziaWG, кроме интерфейса skip: у их сокетов нет inode, и ss
+# их не показывает.
+tunnel_ports() {
+	local tool
+	for tool in awg wg; do
+		command -v "$tool" >/dev/null || continue
+		"$tool" show all listen-port 2>/dev/null || true
+	done | awk -v skip="${1:-}" 'NF == 2 && $1 != skip && $2 ~ /^[0-9]+$/ { print $2 }'
+}
+
+port_busy() {
+	ss -Hlntu "( sport = :$1 )" 2>/dev/null | grep -q . && return 0
+	[[ " $(tunnel_ports | xargs) " == *" $1 "* ]]
+}
 
 pick_port() {
 	local p
@@ -353,27 +373,48 @@ valid_ipv4() {
 	done
 }
 
-external_ipv4() {
-	local url addr
-	for url in https://api.ipify.org https://ifconfig.me/ip https://icanhazip.com; do
-		addr=$(curl -4 -fsS --connect-timeout 5 --max-time 10 "$url" 2>/dev/null) || continue
-		# Убираем только обрамляющие пробелы, не склеивая некорректный ответ.
-		addr=$(printf '%s' "$addr" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
-		if valid_ipv4 "$addr"; then printf '%s\n' "$addr"; return 0; fi
-	done
-	return 1
+# Глобальный ли адрес IPv4: не частный (RFC 1918), не CGNAT провайдера (100.64/10), не link-local,
+# loopback, «этот узел», multicast и зарезервированный диапазон.
+public_ipv4() {
+	local a b
+	valid_ipv4 "$1" || return 1
+	IFS=. read -r a b _ <<< "$1"
+	a=$((10#$a)); b=$((10#$b))
+	case $a in
+		0|10|127) return 1 ;;
+		100) [ "$b" -lt 64 ] || [ "$b" -gt 127 ] ;;
+		169) [ "$b" -ne 254 ] ;;
+		172) [ "$b" -lt 16 ] || [ "$b" -gt 31 ] ;;
+		192) [ "$b" -ne 168 ] ;;
+		*) [ "$a" -lt 224 ] ;;
+	esac
 }
 
 # TCP и UDP — разные пространства портов; свой работающий порт разрешён при повторной установке.
+# Для UDP учитываются и порты туннелей (tunnel_ports), кроме своего интерфейса.
 check_port_available() {
 	local proto=$1 port=$2 previous=${3:-}
 	[ "$port" != "$previous" ] || return 0
 	if ss -Hln"$proto" "( sport = :$port )" | grep -q .; then
 		die "порт $proto/$port уже занят другой службой"
 	fi
+	if [ "$proto" = u ] && [[ " $(tunnel_ports "$AWG_IF" | xargs) " == *" $port "* ]]; then
+		die "порт udp/$port уже занят другим туннелем WireGuard или AmneziaWG"
+	fi
 }
 
-wan_ips() { ip -4 -o addr show dev "$WAN_IF" scope global | awk '{ sub(/\/.*/, "", $4); print $4 }'; }
+wan_default_if() { ip -4 route show default | awk '{for(i=1;i<NF;i++) if($i=="dev"){print $(i+1); exit}}'; }
+
+wan_ips() { ip -4 -o addr show dev "$1" scope global | awk '{ sub(/\/.*/, "", $4); print $4 }'; }
+
+# Первый публичный IPv4 интерфейса; код 1 — его нет.
+wan_public_ip() {
+	local a
+	while read -r a; do
+		if public_ipv4 "$a"; then echo "$a"; return 0; fi
+	done < <(wan_ips "$1")
+	return 1
+}
 
 preflight() {
 	# shellcheck disable=SC1091
@@ -388,21 +429,13 @@ preflight() {
 
 	have_key_login /root/.ssh/authorized_keys || die "в /root/.ssh/authorized_keys нет ключа: после переноса SSH вход по паролю будет закрыт. Добавьте ключ и запустите снова"
 
-	WAN_IF=$(ip -4 route show default | awk '{for(i=1;i<NF;i++) if($i=="dev"){print $(i+1); exit}}')
+	WAN_IF=$(wan_default_if)
 	[ -n "$WAN_IF" ] || die "не найден интерфейс маршрута по умолчанию"
-	# Внешний IP сообщают сервисы в интернете; в минимальном образе curl может не быть.
-	if ! command -v curl >/dev/null; then
-		apt_update
-		apt_get install -y -qq curl >/dev/null
-	fi
-	local ext_ip local_ips
-	ext_ip=$(external_ipv4) || die "не удалось узнать корректный внешний IPv4"
-	[ -n "$ext_ip" ] || die "не удалось узнать внешний IP"
-	local_ips=$(wan_ips | xargs)
-	if [[ " $local_ips " != *" $ext_ip "* ]]; then
-		die "публичный IP ($ext_ip) не назначен на $WAN_IF (там: ${local_ips:-нет IPv4}): VPS за NAT провайдера. Схема «труба 1:1» требует IP прямо на интерфейсе"
-	fi
-	PUB_IP=$ext_ip
+	# Правила Трубы работают по адресу на интерфейсе (ip daddr PUB), поэтому схеме нужен публичный
+	# IPv4 прямо на WAN: частный или CGNAT-адрес там — VPS за NAT провайдера. Проверяется по
+	# самому адресу, без запросов к сторонним сервисам.
+	PUB_IP=$(wan_public_ip "$WAN_IF") \
+		|| die "на $WAN_IF нет публичного IPv4 (там: $(wan_ips "$WAN_IF" | xargs || true)): VPS за NAT провайдера. Схема «труба 1:1» требует публичный IP прямо на интерфейсе"
 }
 
 # ---------- пакеты ----------
@@ -515,21 +548,29 @@ cmd_repair_module() {
 	[ "$fails" -eq 0 ] || die "не всё удалось исправить (ошибок: $fails)"
 }
 
-# Ключ PPA add-apt-repository берёт с Launchpad и встраивает в Signed-By файла источника.
-# Сверяем полный отпечаток с закреплённым: подменённый ключ дал бы чужой модуль ядра.
+# Ключ PPA берётся с сервера ключей Ubuntu по закреплённому отпечатку и встраивается в Signed-By
+# файла источника. Отпечаток сверяется и до записи, и у уже подключённого источника: подменённый
+# ключ дал бы чужой модуль ядра.
 PPA_FPR=75C9DD72C799870E310542E24166F2C257290828
 PPA_SOURCES_DIR=/etc/apt/sources.list.d
+PPA_SOURCES_FILE=amnezia-ubuntu-ppa-noble.sources
+PPA_KEY_URL="https://keyserver.ubuntu.com/pks/lookup?op=get&options=mr&search=0x$PPA_FPR"
+
+# Отпечатки основных ключей из ключа или связки на stdin.
+key_fprs() {
+	gpg --show-keys --with-colons 2>/dev/null | awk -F: '$1 == "pub" { want = 1; next } want && $1 == "fpr" { print $10; want = 0 }'
+}
 
 # Отпечатки основных ключей в Signed-By файла .sources (встроенный ключ или путь к нему).
 ppa_key_fprs() {
 	local f=$1 signed
 	signed=$(awk '/^Signed-By:/ { sub(/^Signed-By:[[:space:]]*/, ""); print; exit }' "$f")
 	if [ -n "$signed" ] && [ -f "$signed" ]; then
-		gpg --show-keys --with-colons "$signed" 2>/dev/null
+		key_fprs < "$signed"
 	else
 		awk '/^Signed-By:/ { on = 1; next } on && /^[^ ]/ { exit } on' "$f" \
-			| sed 's/^ //; s/^\.$//' | gpg --show-keys --with-colons 2>/dev/null
-	fi | awk -F: '$1 == "pub" { want = 1; next } want && $1 == "fpr" { print $10; want = 0 }'
+			| sed 's/^ //; s/^\.$//' | key_fprs
+	fi
 }
 
 ppa_key_check() {
@@ -548,17 +589,35 @@ ppa_key_check() {
 	[ "$n" -gt 0 ] || die "источник PPA amnezia не подключён"
 }
 
+# Источник PPA в формате deb822 — тот же файл, что создал бы add-apt-repository, но без
+# software-properties-common: он тянет стек python на десятки секунд установки. Нужны только
+# curl и gpg; в минимальном образе их может не быть.
+ppa_add() {
+	local key fprs
+	if ! command -v curl >/dev/null || ! command -v gpg >/dev/null; then
+		apt_update
+		apt_get install -y -qq curl gpg >/dev/null
+	fi
+	key=$(curl -fsS --connect-timeout 10 --max-time 60 "$PPA_KEY_URL") \
+		|| die "не удалось получить ключ PPA amnezia с keyserver.ubuntu.com"
+	fprs=$(printf '%s\n' "$key" | key_fprs)
+	[ "$fprs" = "$PPA_FPR" ] || die "ключ PPA amnezia с сервера ключей не тот (${fprs:-не ключ}), ожидается $PPA_FPR"
+	put_file 644 "$PPA_SOURCES_DIR/$PPA_SOURCES_FILE" <<-EOF
+		Types: deb
+		URIs: https://ppa.launchpadcontent.net/amnezia/ppa/ubuntu/
+		Suites: noble
+		Components: main
+		Signed-By:
+		$(printf '%s\n' "$key" | sed 's/^$/./; s/^/ /')
+	EOF
+}
+
 install_packages() {
 	say "Установка пакетов"
 	export DEBIAN_FRONTEND=noninteractive
-	# PPA — до apt-get update, чтобы списки пакетов обновились один раз. add-apt-repository
-	# есть почти в любом образе Ubuntu; где его нет, он ставится первым.
-	if ! grep -rqs 'amnezia/ppa' /etc/apt/sources.list.d/; then
-		if ! command -v add-apt-repository >/dev/null; then
-			apt_update
-			apt_get install -y -qq software-properties-common >/dev/null
-		fi
-		add-apt-repository -y -n ppa:amnezia/ppa >/dev/null
+	# PPA — до apt-get update, чтобы списки пакетов обновились один раз.
+	if ! grep -rqs 'amnezia/ppa' "$PPA_SOURCES_DIR/"; then
+		ppa_add
 		APT_UPDATED=0
 	fi
 	ppa_key_check
@@ -942,18 +1001,41 @@ snat_ports_off_awg() {
 	fi
 }
 
+# Строки define для pipe.nft: WAN и публичный IP. Вызывается и установщиком, и скриптом службы.
+pipe_vars_nft() { printf 'define WAN = "%s"\ndefine PUB = %s\n' "$1" "$2"; }
+
+# Скрипт для ExecStartPre службы truba-pipe: WAN и публичный IP — по текущему маршруту по
+# умолчанию, запасной вариант — значения этой установки. Проверки адреса — те же функции, что у
+# preflight: их текст встраивается в скрипт.
+write_pipe_vars_sh() {
+	put_file 755 "$PIPE_VARS_SH" <<-EOF
+		#!/bin/bash
+		# Труба: WAN и публичный IP для правил — при каждом запуске службы. Сгенерировано install-vps.sh
+		set -u
+		$(declare -f valid_ipv4 public_ipv4 wan_default_if wan_ips wan_public_ip pipe_vars_nft)
+		if ! wan=\$(wan_default_if) || [ -z "\$wan" ] || ! pub=\$(wan_public_ip "\$wan"); then
+			wan='$WAN_IF'; pub='$PUB_IP'
+		fi
+		mkdir -p '${PIPE_VARS_NFT%/*}'
+		pipe_vars_nft "\$wan" "\$pub" > '$PIPE_VARS_NFT'
+	EOF
+}
+
 # extra_ssh — дополнительные порты SSH через пробел, остающиеся за VPS на время проверки нового.
+# NFT_CHANGED=1 — правила стали другими, и службе truba-pipe нужен reload.
 write_nft() {
 	local extra_ssh=${1:-}
 	local ssh_ports="$SSH_PORT" snat_off
 	snat_off=$(snat_ports_off_awg)
 	[ -n "$extra_ssh" ] && ssh_ports="{ $SSH_PORT, ${extra_ssh// /, } }"
+	mkdir -p "${PIPE_VARS_NFT%/*}"
+	pipe_vars_nft "$WAN_IF" "$PUB_IP" > "$PIPE_VARS_NFT"
 	put_file 644 "$NFT_FILE" <<-EOF
 		#!/usr/sbin/nft -f
 		# Труба: всё, кроме служебных портов, — на Роутер. Сгенерировано install-vps.sh
-		define WAN = "$WAN_IF"
+		# WAN и PUB пишет $PIPE_VARS_SH при запуске службы truba-pipe.
+		include "$PIPE_VARS_NFT"
 		define AWG = "$AWG_IF"
-		define PUB = $PUB_IP
 		define RTR = $RTR_TUN
 
 		table ip truba_nat
@@ -1024,9 +1106,27 @@ write_nft() {
 			}
 		}
 	EOF
+	NFT_CHANGED=$FILE_CHANGED
 	nft -c -f "$NFT_FILE" || die "правила nftables не прошли проверку"
 }
 
+# Служба systemd: enable, daemon-reload при изменённом юните (unit_changed) и перезапуск, если
+# изменился её конфиг (conf_changed) или она не работает. Для reload=1 вместо перезапуска —
+# reload (служба умеет перечитать конфиг без остановки).
+unit_apply() {
+	local unit=$1 unit_changed=$2 conf_changed=$3 reload=${4:-0}
+	[ "$unit_changed" = 0 ] || systemctl daemon-reload
+	systemctl enable "$unit" >/dev/null 2>&1
+	if ! systemctl is-active -q "$unit"; then
+		systemctl restart "$unit"
+	elif [ "$conf_changed" = 1 ]; then
+		if [ "$reload" = 1 ]; then systemctl reload "$unit"; else systemctl restart "$unit"; fi
+	fi
+}
+
+# Правила загружаются службой: при первом запуске — ExecStart, при изменении — ExecReload.
+# Неизменные правила не перезагружаются: иначе каждый install пересоздавал бы таблицы и обнулял
+# счётчик фрагментов, на который смотрят diag и mtu-check.
 write_pipe_unit() {
 	put_file 644 "$PIPE_UNIT" <<-EOF
 		[Unit]
@@ -1038,16 +1138,19 @@ write_pipe_unit() {
 		[Service]
 		Type=oneshot
 		RemainAfterExit=yes
+		ExecStartPre=$PIPE_VARS_SH
 		ExecStart=/usr/sbin/nft -f $NFT_FILE
+		ExecReload=$PIPE_VARS_SH
+		ExecReload=/usr/sbin/nft -f $NFT_FILE
 		ExecStop=-/usr/sbin/nft delete table ip truba_nat
 		ExecStop=-/usr/sbin/nft delete table inet truba_filter
 
 		[Install]
 		WantedBy=multi-user.target
 	EOF
-	[ "$FILE_CHANGED" = 0 ] || systemctl daemon-reload
-	# --now: без него служба до первой перезагрузки числится inactive, хотя правила уже загружены.
-	systemctl enable --now truba-pipe.service >/dev/null 2>&1
+	unit_apply truba-pipe.service "$FILE_CHANGED" "${NFT_CHANGED:-1}" 1
+	# Служба числится active, даже если таблицы кто-то снял (nft flush ruleset): тогда — заново.
+	nft list table inet truba_filter >/dev/null 2>&1 || systemctl restart truba-pipe.service
 }
 
 # ---------- sysctl и очередь ----------
@@ -1148,9 +1251,21 @@ write_sysctl() {
 	wan_qdisc 2>/dev/null || warn "не удалось заменить очередь $WAN_IF на fq_codel: заменится после перезагрузки"
 }
 
-# Туннель перезапускается, только если его конфиг изменился или он не работает: после
-# перезапуска Труба не знает адреса Роутера, и Туннель стоит, пока Роутер не сделает новое
-# рукопожатие сам (до ~15 с).
+# Конфиг Туннеля применяется на ходу: awg syncconf меняет ключи, порт и параметры маскировки без
+# пересоздания интерфейса, MTU — ip link. Адрес Трубы в Туннеле постоянен, поэтому пересоздавать
+# интерфейс не нужно. Текущая сессия с Роутером не рвётся, пока параметры совпадают с его стороной;
+# после смены ключей или параметров он переподключится по новому router.conf. Код 1 — не удалось:
+# тогда перезапуск службы.
+awg_apply_live() {
+	local mtu
+	awg syncconf "$AWG_IF" <(awg-quick strip "$AWG_IF") || return 1
+	mtu=$(tunnel_mtu)
+	[ "$(cat "$SYS_NET/$AWG_IF/mtu" 2>/dev/null)" = "$mtu" ] || ip link set dev "$AWG_IF" mtu "$mtu" || return 1
+}
+
+# Туннель запускается, если не работает; изменённый конфиг применяется на ходу (awg_apply_live).
+# После перезапуска Труба не знает адреса Роутера, и Туннель стоит, пока Роутер не сделает новое
+# рукопожатие сам (до ~15 с), поэтому перезапуск — только когда применить на ходу не удалось.
 setup_awg_service() {
 	local unit="awg-quick@$AWG_IF"
 	if ! systemctl cat "awg-quick@.service" >/dev/null 2>&1; then
@@ -1171,7 +1286,6 @@ setup_awg_service() {
 			[Install]
 			WantedBy=multi-user.target
 		EOF
-		[ "$FILE_CHANGED" = 0 ] || systemctl daemon-reload
 	else
 		# Пакетный юнит: без правил Трубы Туннель не поднимается (иначе без фильтра).
 		put_file 644 "$AWG_DROPIN" <<-EOF
@@ -1179,11 +1293,13 @@ setup_awg_service() {
 			After=truba-pipe.service
 			Requires=truba-pipe.service
 		EOF
-		[ "$FILE_CHANGED" = 0 ] || systemctl daemon-reload
 	fi
+	[ "$FILE_CHANGED" = 0 ] || systemctl daemon-reload
 	systemctl enable "$unit" >/dev/null 2>&1
-	if [ "${AWG_CONF_CHANGED:-1}" = 1 ] || ! systemctl is-active -q "$unit"; then
+	if ! systemctl is-active -q "$unit"; then
 		systemctl restart "$unit"
+	elif [ "${AWG_CONF_CHANGED:-1}" = 1 ]; then
+		awg_apply_live || systemctl restart "$unit"
 	fi
 }
 
@@ -1204,23 +1320,29 @@ rtt_min() {
 	{ ping -n -q -c 5 -i 0.2 -W 1 "$1" 2>/dev/null || true; } | awk '/^(rtt|round-trip)/ { split($4, r, "/"); print r[1] }'
 }
 
-# pick_near прежний a b → «адрес RTT_a RTT_b» (RTT — «-», если ответа нет). Без прежнего — a.
+# pick_near прежний a b rtt_a rtt_b → «адрес rtt_a rtt_b» (RTT — «-», если ответа нет). Без прежнего — a.
 pick_near() {
-	local cur=${1:-$2} other rc ro new
-	if [ "$cur" = "$2" ]; then other=$3; else other=$2; fi
-	rc=$(rtt_min "$cur"); ro=$(rtt_min "$other")
+	local cur=${1:-$2} ra=${4:-} rb=${5:-} rc ro new
+	if [ "$cur" = "$2" ]; then rc=$ra; ro=$rb; else rc=$rb; ro=$ra; fi
 	new=$cur
 	if [ -n "$rc" ] && [ -n "$ro" ] && awk -v c="$rc" -v o="$ro" -v d="$DNS_SWITCH_MS" 'BEGIN { exit !(o + d <= c) }'; then
-		new=$other
+		if [ "$cur" = "$2" ]; then new=$3; else new=$2; fi
 	fi
-	if [ "$cur" = "$2" ]; then echo "$new ${rc:--} ${ro:--}"; else echo "$new ${ro:--} ${rc:--}"; fi
+	echo "$new ${ra:--} ${rb:--}"
 }
 
+# Все четыре адреса пингуются разом: по очереди замер занимал 4 с, а при закрытом ICMP — до 20.
 pick_forwarders() {
-	local a b ca cb ga gb
-	read -r a b <<< "$DNS_CF_PAIR"; read -r DNS_CF ca cb <<< "$(pick_near "${DNS_CF:-}" "$a" "$b")"
-	read -r a b <<< "$DNS_GOOGLE_PAIR"; read -r DNS_GOOGLE ga gb <<< "$(pick_near "${DNS_GOOGLE:-}" "$a" "$b")"
-	say "DNS для Роутера: пересылка на $DNS_CF и $DNS_GOOGLE (ping, мс: ${DNS_CF_PAIR% *} $ca, ${DNS_CF_PAIR#* } $cb, ${DNS_GOOGLE_PAIR% *} $ga, ${DNS_GOOGLE_PAIR#* } $gb)"
+	local a b c d ra rb rc rd dir
+	read -r a b <<< "$DNS_CF_PAIR"; read -r c d <<< "$DNS_GOOGLE_PAIR"
+	dir=$(mktemp -d)
+	rtt_min "$a" > "$dir/a" & rtt_min "$b" > "$dir/b" & rtt_min "$c" > "$dir/c" & rtt_min "$d" > "$dir/d" &
+	wait
+	ra=$(cat "$dir/a"); rb=$(cat "$dir/b"); rc=$(cat "$dir/c"); rd=$(cat "$dir/d")
+	rm -rf "$dir"
+	read -r DNS_CF ra rb <<< "$(pick_near "${DNS_CF:-}" "$a" "$b" "$ra" "$rb")"
+	read -r DNS_GOOGLE rc rd <<< "$(pick_near "${DNS_GOOGLE:-}" "$c" "$d" "$rc" "$rd")"
+	say "DNS для Роутера: пересылка на $DNS_CF и $DNS_GOOGLE (ping, мс: $a $ra, $b $rb, $c $rc, $d $rd)"
 }
 
 # unbound на адресе Трубы в Туннеле (ADR 0013). Роутер шлёт ему обычные запросы внутри Туннеля
@@ -1280,10 +1402,7 @@ setup_unbound() {
 	# Пакет может прописать unbound DNS-сервером самого VPS (resolvconf). VPS резолвит как прежде:
 	# этот unbound отвечает только Роутеру.
 	systemctl disable --now unbound-resolvconf.service >/dev/null 2>&1 || true
-	systemctl enable unbound >/dev/null 2>&1
-	if [ "${UNBOUND_CONF_CHANGED:-1}" = 1 ] || ! systemctl is-active -q unbound; then
-		systemctl restart unbound
-	fi
+	unit_apply unbound 0 "${UNBOUND_CONF_CHANGED:-1}"
 	systemctl is-active -q unbound || die "unbound не запустился: journalctl -u unbound"
 }
 
@@ -1412,7 +1531,7 @@ rollback_ssh() {
 
 # Файлы, которые install и rotate-keys меняют вместе: при откате возвращаются все сразу.
 txn_files() {
-	printf '%s\n' "$STATE" "$AWG_CONF" "$ROUTER_CONF" "$SSHD_DROPIN" "$NFT_FILE" "$PIPE_UNIT" "$AWG_DROPIN" \
+	printf '%s\n' "$STATE" "$AWG_CONF" "$ROUTER_CONF" "$SSHD_DROPIN" "$NFT_FILE" "$PIPE_VARS_SH" "$PIPE_UNIT" "$AWG_DROPIN" \
 		/etc/systemd/system/truba-awg.service
 }
 
@@ -1472,6 +1591,8 @@ txn_restore() {
 	systemctl daemon-reload >/dev/null 2>&1 || true
 	( ssh_restart ) || warn "откат: sshd не перезапустился"
 	if [ -e "$TXN_DIR/pipe-active" ] && [ -f "$NFT_FILE" ]; then
+		# Файл define мог остаться от новых правил: прежним он нужен свой.
+		[ ! -x "$PIPE_VARS_SH" ] || "$PIPE_VARS_SH" 2>/dev/null || true
 		nft -f "$NFT_FILE" || warn "откат: прежние правила nftables не загрузились"
 	else
 		nft delete table ip truba_nat 2>/dev/null || true
@@ -1556,10 +1677,7 @@ setup_fail2ban() {
 		bantime = 24h
 		bantime.increment = true
 	EOF
-	systemctl enable fail2ban >/dev/null 2>&1
-	if [ "$FILE_CHANGED" = 1 ] || ! systemctl is-active -q fail2ban; then
-		systemctl restart fail2ban
-	fi
+	unit_apply fail2ban 0 "$FILE_CHANGED"
 }
 
 setup_unattended() {
@@ -1603,7 +1721,7 @@ choose_ssh_port() {
 cmd_install() {
 	need_root
 	load_state
-	# Порт SSH и терминал для его проверки — до любых изменений (preflight может поставить curl).
+	# Порт SSH и терминал для его проверки — до любых изменений.
 	local previous_awg=${AWG_PORT:-} previous_ssh=${SSH_PORT:-}
 	choose_ssh_port
 	if [ "${NO_CONFIRM:-0}" != 1 ] && [ "${SSH_CONFIRMED:-0}" != 1 ]; then
@@ -1649,6 +1767,8 @@ cmd_install() {
 		warn_h_ranges
 		refresh_i1
 	fi
+	# sysctl и очередь WAN — вне транзакции: откат их не возвращает (архитектура, §3). Они не
+	# зависят от портов и ключей и безвредны сами по себе.
 	write_sysctl
 
 	# Отсюда SSH, правила и конфиги Туннеля меняются вместе: при ошибке, обрыве сессии или без
@@ -1657,6 +1777,7 @@ cmd_install() {
 	save_state
 	write_awg_conf
 	write_router_conf
+	write_pipe_vars_sh
 
 	if [ "${SSH_CONFIRMED:-0}" != 1 ]; then
 		# Запасные порты на время проверки: при смене — прежний, при первой установке — те, что
@@ -1671,7 +1792,6 @@ cmd_install() {
 			ssh_apply "${keep_ports[@]}" "$SSH_PORT"
 			write_nft "$keep"
 			ufw_off
-			nft -f "$NFT_FILE"
 			write_pipe_unit
 			confirm_ssh "$keep" || rollback_ssh
 			# Новый порт работает: дальше откат нужен только при ошибке, его сделает сам скрипт.
@@ -1686,7 +1806,6 @@ cmd_install() {
 	ssh_apply "$SSH_PORT"
 	write_nft
 	ufw_off
-	nft -f "$NFT_FILE"
 	write_pipe_unit
 	setup_awg_service
 	txn_commit
@@ -1888,7 +2007,13 @@ cmd_status() {
 		warn_h_ranges
 	fi
 	kernel_module_check || true
-	local over
+	local over wan pub
+	# Правила берут WAN и IP при запуске службы; в pipe.env и router.conf — с момента установки.
+	wan=$(wan_default_if) || wan=''
+	pub=$(wan_public_ip "${wan:-$WAN_IF}" 2>/dev/null) || pub=''
+	if [ -n "$wan" ] && { [ "$wan" != "${WAN_IF:-}" ] || [ "$pub" != "${PUB_IP:-}" ]; }; then
+		warn "WAN сейчас $wan ${pub:-без публичного IP}, при установке — ${WAN_IF:-?} ${PUB_IP:-?}: правила уже на новых значениях, но Endpoint в router.conf прежний. Запустите install снова"
+	fi
 	over=$(sysctl_overrides)
 	[ -z "$over" ] || printf 'sysctl: при загрузке VPS настройки Трубы перебьют строки (уберите их):\n%s\n' "$over"
 	echo
@@ -2072,7 +2197,7 @@ cmd_uninstall() {
 	nft delete table ip truba_nat 2>/dev/null || true
 	nft delete table inet truba_filter 2>/dev/null || true
 	rm -f "$PIPE_UNIT" /etc/systemd/system/truba-awg.service "$AWG_DROPIN" "$F2B_JAIL" "$SYSCTL_FILE" "$MODULES_FILE" "$UNBOUND_CONF"
-	rm -f "$UNATTENDED_CONF" "$JOURNAL_CONF"
+	rm -f "$UNATTENDED_CONF" "$JOURNAL_CONF" "$PIPE_VARS_SH" "$PIPE_VARS_NFT"
 	rmdir "${AWG_DROPIN%/*}" 2>/dev/null || true
 	systemctl restart systemd-journald
 	systemctl daemon-reload
