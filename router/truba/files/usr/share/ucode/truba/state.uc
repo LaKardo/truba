@@ -56,7 +56,8 @@ export function dev_counters() {
 	let cmd = '';
 	for (let name in C.DEV_SETS)
 		cmd += 'nft -j list set inet ' + C.NFT_TABLE + ' ' + name + ' || exit 1; echo "@@set-end"; ';
-	let stream = popen(cmd + '2>/dev/null', 'r');
+	// Скобки — чтобы 2>/dev/null касался всех nft: хвост после «;» был бы отдельной пустой командой.
+	let stream = popen('{ ' + cmd + '} 2>/dev/null', 'r');
 	if (!stream)
 		return null;
 	let chunks = split(stream.read('all') ?? '', '@@set-end\n');

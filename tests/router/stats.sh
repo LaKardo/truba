@@ -47,6 +47,16 @@ D=/var/run/truba/devices.json
 dev_f() { jsonfilter -i $D -e "@.devices['192.168.1.50'].$1" 2>/dev/null; }
 dev_seen() { [ -n "$(dev_f last)" ]; }
 check "devices.json: устройство с трафиком, в RAM" wait_for 15 dev_seen
+# Без таблицы (Труба останавливается) счётчиков устройств нет, а сообщения nft не уходят в
+# stderr процесса stats: procd записал бы их в журнал как daemon.err. В netns lanhost таблицы нет.
+cat > /tmp/devc.uc <<-'EOF'
+	import * as S from 'truba.state';
+	let c = S.dev_counters();
+	print(c == null ? 'null' : type(c), '\n');
+EOF
+devc() { "$@" ucode -L '/usr/share/ucode/*.uc' /tmp/devc.uc 2>/tmp/devc.err; }   # devc [ip netns exec …]
+check "счётчики устройств: объект, stderr пуст" eval '[ "$(devc)" = object ] && [ ! -s /tmp/devc.err ]'
+check "счётчики устройств без таблицы: null, stderr пуст" eval '[ "$(devc ip netns exec lanhost)" = null ] && [ ! -s /tmp/devc.err ]'
 # rpcd devices: устройство из истории — с MAC соседа, зоной его интерфейса и скоростью.
 ubus call truba devices > /tmp/d.json
 dj() { jsonfilter -i /tmp/d.json -e "@.devices[@.ip='192.168.1.50'].$1" 2>/dev/null; }
