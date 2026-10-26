@@ -976,6 +976,14 @@ write_nft() {
 		table inet truba_filter
 		delete table inet truba_filter
 		table inet truba_filter {
+			# Для diag и mtu-check: внешние пакеты Туннеля, пришедшие фрагментами (путь от дома уже MTU
+			# Туннеля). Счёт — до сборки фрагментов (-400): после неё пакет уже целый. Порт есть только
+			# у первого фрагмента, поэтому счётчик — число таких пакетов, а не фрагментов.
+			counter tunnel_frag_in { }
+			chain frag_in {
+				type filter hook prerouting priority -450; policy accept;
+				iifname \$WAN ip daddr \$PUB udp dport $AWG_PORT ip frag-off & 0x2000 != 0 counter name tunnel_frag_in
+			}
 			# Только внешняя оболочка Туннеля. Внутреннему IPv4 нужен conntrack для NAT.
 			chain raw_pre {
 				type filter hook prerouting priority raw; policy accept;
@@ -1735,27 +1743,37 @@ ping_df() { ping -n -q -c 3 -i 0.2 -W 1 -M 'do' -s $(($2 - 28)) "$1" >/dev/null 
 
 # Счётчики фрагментации IPv4 из /proc/net/snmp: FragCreates — фрагментов нарезано при отправке,
 # ReasmReqds — пришло фрагментов на сборку. Внешние пакеты Туннеля идут без запрета фрагментации,
-# поэтому слишком большой пакет не теряется, а режется — и виден здесь.
+# поэтому слишком большой пакет не теряется, а режется — и виден здесь. Счётчики общие для VPS: в них
+# и проброшенный на Роутер трафик, и пакеты из Туннеля, которые Роутер нарезал под его MTU. Пакеты
+# самого Туннеля, пришедшие фрагментами, отдельно считает tunnel_frag_in в правилах Трубы; если
+# правила не загружены, строки tun.frag_in нет.
 ip_frag_counters() {
 	awk '$1 == "Ip:" { if (!n++) { for (i = 2; i <= NF; i++) k[i] = $i } else for (i = 2; i <= NF; i++)
 		if (k[i] ~ /^(FragCreates|ReasmReqds|ReasmFails)$/) print "ip." k[i], $i }' "$PROC/net/snmp" 2>/dev/null || true
+	{ nft list counter inet truba_filter tunnel_frag_in 2>/dev/null || true; } | awk '$1 == "packets" { print "tun.frag_in", $2 }'
 }
 
 # Замер без ping: Роутер за CGNAT или с закрытым ping не отвечает, но фрагменты видны по счётчикам.
-# Счётчики общие для всего VPS: в них попадает и проброшенный на Роутер трафик.
+# Исходящие режутся у Туннеля, только если его MTU больше сети VPS; иначе это проброшенный трафик.
 mtu_passive() {
 	local secs=$1 a b
 	a=$(ip_frag_counters); sleep "$secs"; b=$(ip_frag_counters)
 	diag_delta <(echo "$a") <(echo "$b") | awk -v secs="$secs" -v mtu="$2" -v auto="$3" '
 		{ v[$1] = $2 }
 		END {
-			printf "  за %d с: VPS нарезал при отправке %d фрагментов, пришло на сборку %d\n", secs, v["ip.FragCreates"], v["ip.ReasmReqds"]
+			tf = ("tun.frag_in" in v)
+			printf "  за %d с: VPS нарезал при отправке %d фрагментов, пришло на сборку %d%s\n", secs, v["ip.FragCreates"], v["ip.ReasmReqds"],
+				tf ? sprintf(" (пакетов Туннеля фрагментами — %d)", v["tun.frag_in"]) : ""
 			if (v["ip.FragCreates"] > 0 && mtu > auto)
 				print "!! пакеты к дому не помещаются в сеть VPS: MTU Туннеля " mtu " больше " auto ". Выполните install-vps.sh install и импортируйте router.conf в Роутер заново"
 			else if (v["ip.FragCreates"] > 0)
-				print "!! VPS режет исходящие пакеты, хотя MTU Туннеля в сеть VPS помещается: режется проброшенный на Роутер трафик или MTU интерфейса Туннеля другой (ip link show awg0)"
-			if (v["ip.ReasmReqds"] > 0)
-				print "!! пакеты от дома приходят фрагментами: путь уже MTU Туннеля. Уменьшайте --mtu шагами по 20 (install-vps.sh install --mtu N) и повторяйте mtu-check под нагрузкой"
+				print "==> VPS режет проброшенные на Роутер пакеты крупнее MTU Туннеля (UDP игр, P2P, VPN): пакеты Туннеля в сеть VPS помещаются, настройка не нужна"
+			if (tf && v["tun.frag_in"] > 0)
+				print "!! пакеты Туннеля от дома приходят фрагментами: путь уже MTU Туннеля. Уменьшайте --mtu шагами по 20 (install-vps.sh install --mtu N) и повторяйте mtu-check под нагрузкой"
+			else if (tf && v["ip.ReasmReqds"] > 0)
+				print "==> фрагменты на сборку — не пакеты Туннеля: проброшенный на Роутер трафик или пакеты из Туннеля крупнее его MTU, настройка не нужна"
+			else if (v["ip.ReasmReqds"] > 0)
+				print "!! входящие пакеты приходят фрагментами, а чьи — не различить: в правилах Трубы нет счётчика tunnel_frag_in (install-vps.sh install). Если это пакеты Туннеля, путь уже его MTU: уменьшайте --mtu шагами по 20"
 			if (v["ip.FragCreates"] + v["ip.ReasmReqds"] == 0)
 				print "==> фрагментов нет: при трафике через Туннель пакеты помещаются в путь целиком"
 		}'
@@ -1945,9 +1963,11 @@ ping_summary() {
 }
 
 # Отчёт по разнице счётчиков (stdin) за secs секунд. Только наблюдения и подсказки, ничего не меняет.
+# mtu и auto — MTU Туннеля и предел по сети VPS: исходящие пакеты Туннеля режутся, только если первый больше.
 diag_report() {
-	local secs=$1 tun_ping=$2 ref_ping=$3
-	awk -v secs="$secs" -v wan="$WAN_IF" -v awg="$AWG_IF" -v tp="$tun_ping" -v rp="$ref_ping" -v ref="$DIAG_REF_IP" '
+	local secs=$1 tun_ping=$2 ref_ping=$3 mtu=${4:-} auto=${5:-}
+	awk -v secs="$secs" -v wan="$WAN_IF" -v awg="$AWG_IF" -v tp="$tun_ping" -v rp="$ref_ping" -v ref="$DIAG_REF_IP" \
+		-v mtu="$mtu" -v auto="$auto" '
 		{ v[$1] = $2 }
 		function pct(a, b) { return b > 0 ? 100 * a / b : 0 }
 		function nic(d,   s) {
@@ -1968,7 +1988,9 @@ diag_report() {
 			nic(wan); nic(awg)
 			printf "  очередь WAN: отброшено %d (из них при переполнении %d)\n", v["qdisc.dropped"], v["qdisc.overlimit"]
 			printf "  UDP: ошибки приёма %d, мал буфер приёма %d, мал буфер отправки %d\n", v["udp.InErrors"], v["udp.RcvbufErrors"], v["udp.SndbufErrors"]
-			printf "  фрагменты IPv4: VPS нарезал при отправке %d, пришло на сборку %d (не собралось %d)\n", v["ip.FragCreates"], v["ip.ReasmReqds"], v["ip.ReasmFails"]
+			tf = ("tun.frag_in" in v)
+			printf "  фрагменты IPv4: VPS нарезал при отправке %d, пришло на сборку %d (не собралось %d%s)\n", v["ip.FragCreates"], v["ip.ReasmReqds"], v["ip.ReasmFails"],
+				tf ? sprintf(", пакетов Туннеля фрагментами — %d", v["tun.frag_in"]) : ""
 			printf "  разбор входящих: отброшено %d, не хватило бюджета %d раз\n", v["softnet.dropped"], v["softnet.squeeze"]
 			if ("conntrack.drop" in v)
 				printf "  conntrack: отброшено %d, не вставлено %d, вытеснено %d\n", v["conntrack.drop"], v["conntrack.insert_failed"], v["conntrack.early_drop"]
@@ -1996,9 +2018,14 @@ diag_report() {
 				print "  разбор прерывался по лимиту без потерь — остаток разбирается следующим проходом, настройка не нужна"
 			if (v["udp.RcvbufErrors"] + v["udp.SndbufErrors"] > 0) { n++; print "! UDP теряет пакеты из-за буфера сокета: кандидат — net.core.rmem_max/wmem_max" }
 			if (v["qdisc.overlimit"] > 0) { n++; print "! очередь WAN переполняется (drop_overlimit): пакетов больше, чем она держит" }
-			if (v["ip.FragCreates"] > 0) { n++; print "! VPS режет исходящие пакеты на фрагменты: пакет Туннеля не помещается в сеть VPS — install-vps.sh mtu-check" }
-			if (v["ip.ReasmReqds"] > 0) { n++; print "! входящие пакеты приходят фрагментами: путь от дома уже MTU Туннеля — install-vps.sh mtu-check" }
-			else if (v["qdisc.dropped"] > 0) print "  очередь WAN отбрасывала пакеты при перегрузке — так fq_codel держит задержку низкой, это нормально"
+			if (v["ip.FragCreates"] > 0) {
+				if (mtu > auto) { n++; print "! VPS режет пакеты Туннеля: MTU Туннеля " mtu " больше сети VPS (до " auto ") — install-vps.sh mtu-check" }
+				else print "  VPS режет проброшенные на Роутер пакеты крупнее MTU Туннеля (UDP игр, P2P, VPN): пакеты Туннеля в сеть VPS помещаются, это не потери"
+			}
+			if (tf && v["tun.frag_in"] > 0) { n++; print "! пакеты Туннеля от дома приходят фрагментами: путь от дома уже MTU Туннеля — install-vps.sh mtu-check" }
+			else if (tf && v["ip.ReasmReqds"] > 0) print "  фрагменты на сборку — не пакеты Туннеля: проброшенный на Роутер трафик или пакеты из Туннеля крупнее его MTU, это не потери"
+			else if (v["ip.ReasmReqds"] > 0) { n++; print "! входящие пакеты приходят фрагментами, а чьи — не различить: в правилах Трубы нет счётчика tunnel_frag_in (install-vps.sh install). Путь от дома — install-vps.sh mtu-check" }
+			if (v["qdisc.dropped"] > 0) print "  очередь WAN отбрасывала пакеты при перегрузке — так fq_codel держит задержку низкой, это нормально"
 			if (v["conntrack.drop"] + v["conntrack.insert_failed"] + v["conntrack.early_drop"] > 0) { n++; print "! conntrack отбрасывает соединения: таблица переполнена" }
 			if (v[wan ".rx_errors"] + v[wan ".tx_errors"] + v[awg ".tx_errors"] > 0) { n++; print "! ошибки интерфейсов: dmesg | tail, ip -s link" }
 			if (v[wan ".rx_dropped"] > 0) print "  " wan ": отброшенные при приёме — часто это пакеты неизвестных протоколов, сами по себе не потери"
@@ -2027,7 +2054,8 @@ cmd_diag() {
 	sleep "$secs"
 	wait || true
 	diag_snapshot > "$dir/b"
-	diag_delta "$dir/a" "$dir/b" | diag_report "$secs" "$(ping_summary "$dir/tun")" "$(ping_summary "$dir/ref")"
+	diag_delta "$dir/a" "$dir/b" | diag_report "$secs" "$(ping_summary "$dir/tun")" "$(ping_summary "$dir/ref")" \
+		"$(cat "$SYS_NET/$AWG_IF/mtu" 2>/dev/null || true)" "$(auto_mtu)"
 	rm -rf "$dir"
 }
 
