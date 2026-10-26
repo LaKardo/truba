@@ -924,10 +924,24 @@ write_router_conf() {
 
 # ---------- nftables: труба 1:1 ----------
 
+# Порты SNAT для соединений Роутера с исходным портом Туннеля — бо́льшая часть 1024–65535 без него.
+# Оболочка Туннеля идёт мимо conntrack (raw_pre, raw_out), и SNAT не видит, что порт занят: оставил бы
+# его соединению Роутера, и ответы на него ушли бы в AmneziaWG.
+snat_ports_off_awg() {
+	if [ "$AWG_PORT" -lt 1024 ]; then
+		echo 1024-65535
+	elif [ $((AWG_PORT - 1024)) -ge $((65535 - AWG_PORT)) ]; then
+		echo "1024-$((AWG_PORT - 1))"
+	else
+		echo "$((AWG_PORT + 1))-65535"
+	fi
+}
+
 # extra_ssh — дополнительные порты SSH через пробел, остающиеся за VPS на время проверки нового.
 write_nft() {
 	local extra_ssh=${1:-}
-	local ssh_ports="$SSH_PORT"
+	local ssh_ports="$SSH_PORT" snat_off
+	snat_off=$(snat_ports_off_awg)
 	[ -n "$extra_ssh" ] && ssh_ports="{ $SSH_PORT, ${extra_ssh// /, } }"
 	put_file 644 "$NFT_FILE" <<-EOF
 		#!/usr/sbin/nft -f
@@ -949,6 +963,7 @@ write_nft() {
 			}
 			chain postrouting {
 				type nat hook postrouting priority srcnat; policy accept;
+				oifname \$WAN ip saddr \$RTR udp sport $AWG_PORT snat to \$PUB:$snat_off comment "порт Туннеля занят его оболочкой"
 				oifname \$WAN ip saddr \$RTR snat to \$PUB
 			}
 		}

@@ -421,6 +421,10 @@ fi
 if write_nft; then ok "nft -c: итоговый режим"; else fail "nft итоговый режим"; fi
 grep -q 'tcp dport != 52222 dnat to $RTR' "$NFT_FILE" && ok "итоговый режим: 22 уходит на Роутер" || fail "итоговый режим"
 grep -q 'snat to $PUB' "$NFT_FILE" && ok "SNAT от IP VPS" || fail "SNAT"
+grep -q 'ip saddr $RTR udp sport 51820 snat to $PUB:1024-51819 ' "$NFT_FILE" && ok "SNAT: у порта Туннеля свой диапазон" || fail "SNAT: порт Туннеля"
+r=$(for AWG_PORT in 51820 33279 33280 1024 80 65535; do snat_ports_off_awg; done | tr '\n' ' ')
+[ "$r" = "1024-51819 33280-65535 1024-33279 1025-65535 1024-65535 1024-65534 " ] \
+	&& ok "SNAT: диапазон без порта Туннеля, бо́льшая часть" || fail "SNAT: диапазоны $r"
 grep -q 'udp dport 68 return' "$NFT_FILE" && ok "DHCP-клиент VPS не уходит на Роутер" || fail "DHCP"
 grep -q 'udp sport 547 udp dport 546 accept' "$NFT_FILE" && ok "ответы DHCPv6 доходят до VPS" || fail "DHCPv6"
 grep -q 'udp sport 51820 ip dscp != cs0 ip dscp set cs0' "$NFT_FILE" && ok "DSCP пакетов Туннеля обнуляется" || fail "DSCP Туннеля"
@@ -510,6 +514,32 @@ perl -MSocket -e 'socket(my $s, PF_INET, SOCK_DGRAM, 0) or die; bind($s, sockadd
 raw_count() { nft list counter inet raw_test "$1" | awk '/packets/ {print $2}'; }
 [ "$(raw_count outer_in) $(raw_count outer_out) $(raw_count inner_nat)" = "1 1 1" ] \
 	&& ok "notrack: оболочка в обе стороны, соседний порт сохраняет conntrack" || fail "notrack: $(raw_count outer_in) $(raw_count outer_out) $(raw_count inner_nat)"
+# Соединение Роутера с исходным портом Туннеля: оболочка идёт мимо conntrack, и SNAT, не видя занятого
+# порта, оставил бы его — ответы ушли бы в AmneziaWG. Такому соединению — другой порт, остальным — свой.
+ip addr add 10.77.77.2/32 dev lo
+nft -f - <<-'EOF'
+	table inet snat_test {
+		counter awg_kept { }
+		counter awg_moved { }
+		counter other_kept { }
+		chain post {
+			type filter hook postrouting priority 200; policy accept;
+			ip saddr 203.0.113.10 udp dport 9 udp sport 51820 counter name awg_kept
+			ip saddr 203.0.113.10 udp dport 9 udp sport 1024-51819 udp sport != 40000 counter name awg_moved
+			ip saddr 203.0.113.10 udp dport 9 udp sport 40000 counter name other_kept
+		}
+	}
+EOF
+for p in 51820 40000; do
+	perl -MSocket -e 'socket(my $s, PF_INET, SOCK_DGRAM, 0) or die; bind($s, sockaddr_in($ARGV[0], inet_aton("10.77.77.2"))) or die;
+		send($s, "x", 0, sockaddr_in(9, inet_aton("203.0.113.20"))) or die' "$p"
+done
+snat_count() { nft list counter inet snat_test "$1" | awk '/packets/ {print $2}'; }
+[ "$(snat_count awg_kept) $(snat_count awg_moved) $(snat_count other_kept)" = "0 1 1" ] \
+	&& ok "SNAT: соединение Роутера с порта Туннеля получает другой порт, остальные порт сохраняют" \
+	|| fail "SNAT с порта Туннеля: $(snat_count awg_kept) $(snat_count awg_moved) $(snat_count other_kept)"
+nft delete table inet snat_test
+ip addr del 10.77.77.2/32 dev lo
 nft delete table inet raw_test
 nft delete table ip truba_nat; nft delete table inet truba_filter
 ip addr del 203.0.113.10/32 dev lo
