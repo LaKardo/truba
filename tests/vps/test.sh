@@ -928,6 +928,38 @@ else
 	fail "apt-get install unbound"
 fi
 
+# Адрес пересылки у поставщика — ближний по ping из пары (замер с Трубы 2026-10-26: 8.8.8.8 — 22 мс,
+# 8.8.4.4 — 0,6). Прежний выбор остаётся, пока другой не ближе на 5 мс; без ответа ping — не меняется.
+(
+	rtt() { echo "rtt min/avg/max/mdev = $1/$1/$1/0.000 ms"; }
+	ping() { case "${@: -1}" in 8.8.8.8) rtt 22.097 ;; 8.8.4.4) rtt 0.555 ;; 1.1.1.1) rtt 3.2 ;; 1.0.0.1) rtt 0.9 ;; esac; }
+	out=$(pick_near '' 8.8.8.8 8.8.4.4)
+	[ "$out" = '8.8.4.4 22.097 0.555' ] && ok "unbound: из пары — ближний адрес" || fail "pick_near ближний: $out"
+	out=$(pick_near '' 1.1.1.1 1.0.0.1)
+	[ "$out" = '1.1.1.1 3.2 0.9' ] && ok "unbound: другой ближе меньше чем на 5 мс — адрес прежний" || fail "pick_near разброс: $out"
+	out=$(pick_near 8.8.4.4 8.8.8.8 8.8.4.4)
+	[ "$out" = '8.8.4.4 22.097 0.555' ] && ok "unbound: прежний ближний адрес остаётся" || fail "pick_near прежний: $out"
+	ping() { case "${@: -1}" in 8.8.8.8) rtt 0.6 ;; 8.8.4.4) rtt 22 ;; esac; }
+	out=$(pick_near 8.8.4.4 8.8.8.8 8.8.4.4)
+	[ "$out" = '8.8.8.8 0.6 22' ] && ok "unbound: другой адрес стал ближе — переход" || fail "pick_near переход: $out"
+	ping() { case "${@: -1}" in 8.8.8.8) rtt 22 ;; *) return 1 ;; esac; }
+	out=$(pick_near '' 8.8.8.8 8.8.4.4)
+	[ "$out" = '8.8.8.8 22 -' ] && ok "unbound: адрес без ответа на ping не выбирается" || fail "pick_near без ответа: $out"
+	ping() { return 1; }
+	out=$(set -Eeuo pipefail; pick_near 8.8.4.4 8.8.8.8 8.8.4.4)
+	[ "$out" = '8.8.4.4 - -' ] && ok "unbound: ping закрыт — выбор прежний, без ошибки под set -e" || fail "pick_near ping закрыт: $out"
+	ping() { case "${@: -1}" in 8.8.8.8) rtt 22.097 ;; 8.8.4.4) rtt 0.555 ;; 1.1.1.1) rtt 0.555 ;; 1.0.0.1) rtt 0.597 ;; esac; }
+	UNBOUND_CONF="$T/unbound-near.conf"; DNS_CF=''; DNS_GOOGLE=''
+	out=$(pick_forwarders; write_unbound_conf; grep -E '^    forward-addr:' "$UNBOUND_CONF" | xargs)
+	grep -q 'пересылка на 1.1.1.1 и 8.8.4.4' <<< "$out" \
+		&& grep -q 'forward-addr: 1.1.1.1@853#cloudflare-dns.com forward-addr: 8.8.4.4@853#dns.google$' <<< "$out" \
+		&& ok "unbound: конфиг — с выбранными адресами, имена серверов прежние" || fail "pick_forwarders: $out"
+	state_value_ok DNS_GOOGLE 8.8.4.4 && state_value_ok DNS_CF 1.0.0.1 && ! state_value_ok DNS_GOOGLE 1.1.1.1 \
+		&& ! state_value_ok DNS_CF 9.9.9.9 && ok "pipe.env: адрес DNS — только из пары своего поставщика" || fail "state_value_ok DNS_*"
+	STATE="$T/near-pipe.env"; DNS_GOOGLE=8.8.4.4; save_state
+	( unset DNS_GOOGLE; load_state; [ "$DNS_GOOGLE" = 8.8.4.4 ] ) && ok "pipe.env хранит выбранный адрес DNS" || fail "pipe.env: DNS_GOOGLE"
+)
+
 # status: строки про unbound — из его счётчиков и замеров (вывод снят с настоящей Трубы). Без unbound
 # или без замеров status не падает и под set -e: он печатает и всё остальное.
 unbound-control() {

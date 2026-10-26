@@ -192,7 +192,7 @@ pick_port() {
 }
 
 STATE_KEYS="WAN_IF PUB_IP SSH_PORT AWG_PORT AWG_PROTO VPS_PRIV VPS_PUB RTR_PRIV RTR_PUB PSK JC JMIN JMAX
-S1 S2 S3 S4 H1 H2 H3 H4 I1 I1_SRV HPK RANDOM_TRAILERS SSH_CONFIRMED SSH_FALLBACK TUN_MTU
+S1 S2 S3 S4 H1 H2 H3 H4 I1 I1_SRV HPK RANDOM_TRAILERS SSH_CONFIRMED SSH_FALLBACK TUN_MTU DNS_CF DNS_GOOGLE
 UFW_DISABLED UNBOUND_PREEXISTING RESOLVCONF_ENABLED"
 
 # Допустимо ли значение поля pipe.env. Пустое — у полей, которых может ещё не быть.
@@ -209,6 +209,8 @@ state_value_ok() {
 		TUN_MTU) [[ $v =~ ^[0-9]{4}$ ]] && [ "$v" -ge "$MTU_MIN" ] && [ "$v" -le "$MTU_MAX" ] ;;
 		H1|H2|H3|H4) [[ $v =~ ^[0-9]{1,10}(-[0-9]{1,10})?$ ]] ;;
 		I1|I1_SRV) [[ $v =~ ^[A-Za-z0-9\<\>\ ]+$ ]] ;;
+		DNS_CF) [[ " $DNS_CF_PAIR " == *" $v "* ]] ;;
+		DNS_GOOGLE) [[ " $DNS_GOOGLE_PAIR " == *" $v "* ]] ;;
 		RANDOM_TRAILERS|SSH_CONFIRMED|UFW_DISABLED|UNBOUND_PREEXISTING|RESOLVCONF_ENABLED) [[ $v =~ ^[01]$ ]] ;;
 		*) return 0 ;;
 	esac
@@ -268,6 +270,8 @@ save_state() {
 		SSH_CONFIRMED='${SSH_CONFIRMED:-0}'
 		SSH_FALLBACK='${SSH_FALLBACK:-}'
 		TUN_MTU='${TUN_MTU:-}'
+		DNS_CF='${DNS_CF:-}'
+		DNS_GOOGLE='${DNS_GOOGLE:-}'
 	EOF
 }
 
@@ -566,6 +570,7 @@ install_packages() {
 	metas=$(kernel_headers_metas)
 	[ -n "$metas" ] || warn "не найден метапакет заголовков ядра: после обновления ядра DKMS может не собрать amneziawg — проверяйте install-vps.sh status"
 	# Конфиг unbound — до пакета: служба сразу стартует с ним, а не на 127.0.0.1.
+	pick_forwarders
 	write_unbound_conf
 	# shellcheck disable=SC2086 # списки пакетов
 	apt_get install -y -qq nftables fail2ban unattended-upgrades curl unbound $hdr $metas >/dev/null
@@ -1176,6 +1181,40 @@ setup_awg_service() {
 
 # ---------- DNS для Роутера ----------
 
+# У Cloudflare и Google по два anycast-адреса, и с одного VPS они могут вести в разные точки
+# присутствия: на Трубе 2026-10-26 до 8.8.8.8 было 22 мс, до 8.8.4.4 — 0,6 мс. Новое соединение DoT
+# стоит три поездки, поэтому у каждого поставщика берётся ближний адрес пары (ADR 0013). Прежний
+# выбор остаётся, пока другой адрес не ближе на DNS_SWITCH_MS: иначе повторный install из-за
+# разброса менял бы конфиг и перезапускал unbound, сбрасывая его кэш. Без ответа на ping (ICMP
+# закрыт) выбор не меняется.
+DNS_CF_PAIR="1.1.1.1 1.0.0.1"
+DNS_GOOGLE_PAIR="8.8.8.8 8.8.4.4"
+DNS_SWITCH_MS=5
+
+# Наименьший RTT ping в мс или пусто, если ответа нет.
+rtt_min() {
+	{ ping -n -q -c 5 -i 0.2 -W 1 "$1" 2>/dev/null || true; } | awk '/^(rtt|round-trip)/ { split($4, r, "/"); print r[1] }'
+}
+
+# pick_near прежний a b → «адрес RTT_a RTT_b» (RTT — «-», если ответа нет). Без прежнего — a.
+pick_near() {
+	local cur=${1:-$2} other rc ro new
+	if [ "$cur" = "$2" ]; then other=$3; else other=$2; fi
+	rc=$(rtt_min "$cur"); ro=$(rtt_min "$other")
+	new=$cur
+	if [ -n "$rc" ] && [ -n "$ro" ] && awk -v c="$rc" -v o="$ro" -v d="$DNS_SWITCH_MS" 'BEGIN { exit !(o + d <= c) }'; then
+		new=$other
+	fi
+	if [ "$cur" = "$2" ]; then echo "$new ${rc:--} ${ro:--}"; else echo "$new ${ro:--} ${rc:--}"; fi
+}
+
+pick_forwarders() {
+	local a b ca cb ga gb
+	read -r a b <<< "$DNS_CF_PAIR"; read -r DNS_CF ca cb <<< "$(pick_near "${DNS_CF:-}" "$a" "$b")"
+	read -r a b <<< "$DNS_GOOGLE_PAIR"; read -r DNS_GOOGLE ga gb <<< "$(pick_near "${DNS_GOOGLE:-}" "$a" "$b")"
+	say "DNS для Роутера: пересылка на $DNS_CF и $DNS_GOOGLE (ping, мс: ${DNS_CF_PAIR% *} $ca, ${DNS_CF_PAIR#* } $cb, ${DNS_GOOGLE_PAIR% *} $ga, ${DNS_GOOGLE_PAIR#* } $gb)"
+}
+
 # unbound на адресе Трубы в Туннеле (ADR 0013). Роутер шлёт ему обычные запросы внутри Туннеля
 # (Туннель и так шифрован), а TLS до Cloudflare и Google держит VPS — в 3–4 мс от них. Новое
 # соединение стоит тогда 13–30 мс, а не две поездки через Туннель, как у DoH с Роутера.
@@ -1186,6 +1225,7 @@ setup_awg_service() {
 # Адресов пересылки два, по одному у Cloudflare и Google: промахи делятся на меньшее число
 # соединений, и каждое реже простаивает дольше 10 с. С четырьмя адресами медленных (дольше 65 мс)
 # ответов было вдвое больше. Если один адрес недоступен, unbound уходит на другого поставщика.
+# Адрес каждого поставщика — ближний по ping из его пары (pick_forwarders).
 write_unbound_conf() {
 	put_file 644 "$UNBOUND_CONF" <<-EOF
 		# Труба: DNS для Роутера. Сгенерировано install-vps.sh
@@ -1219,8 +1259,8 @@ write_unbound_conf() {
 		    name: "."
 		    forward-tls-upstream: yes
 		    # По одному адресу у каждого: соединение с ним реже остывает (ADR 0013).
-		    forward-addr: 1.1.1.1@853#cloudflare-dns.com
-		    forward-addr: 8.8.8.8@853#dns.google
+		    forward-addr: ${DNS_CF:-1.1.1.1}@853#cloudflare-dns.com
+		    forward-addr: ${DNS_GOOGLE:-8.8.8.8}@853#dns.google
 	EOF
 	UNBOUND_CONF_CHANGED=$FILE_CHANGED
 }
