@@ -505,6 +505,25 @@ for _ in $(seq 20); do
 	nft list counter inet raw_test outer_in | grep -q 'packets 1 ' && break
 	sleep 0.1
 done
+# Пакет Туннеля, пришедший фрагментами, считается до сборки: первый фрагмент на порт Туннеля — да,
+# на другой порт — нет; целый пакет выше уже прошёл и не посчитан.
+raw_frag() {   # raw_frag порт — первый фрагмент UDP (MF, смещение 0) с truba-raw1 на 203.0.113.10
+	perl -MSocket -e '
+		open(my $f, "<", "/sys/class/net/truba-raw1/ifindex") or die "$!"; my $i = <$f>; close($f);
+		sub htons { unpack("S", pack("n", $_[0])) }
+		socket(my $s, 17, SOCK_RAW, htons(0x0800)) or die "$!";
+		my $ip = pack("CCnnnCCna4a4", 0x45, 0, 36, 2, 0x2000, 64, 17, 0, inet_aton("203.0.113.20"), inet_aton("203.0.113.10"));
+		my $sum = 0; $sum += $_ for unpack("n*", $ip); $sum = ($sum & 65535) + ($sum >> 16); $sum = ($sum & 65535) + ($sum >> 16);
+		substr($ip, 10, 2) = pack("n", (~$sum) & 65535);
+		my $frame = pack("H*", "ffffffffffff0200000000010800") . $ip . pack("nnnn", 40000, $ARGV[0], 1408, 0) . "x" x 8;
+		send($s, $frame, 0, pack("S! S! i! S! C C a8", 17, htons(0x0800), $i, 1, 0, 6, "\xff" x 6)) or die "$!";
+	' "$1"
+}
+frag_count() { nft list counter inet truba_filter tunnel_frag_in | awk '/packets/ {print $2}'; }
+raw_frag 51821; raw_frag 51820
+for _ in $(seq 20); do [ "$(frag_count)" = 1 ] && break; sleep 0.1; done
+[ "$(frag_count)" = 1 ] && [ "$(ip_frag_counters | grep '^tun\.')" = 'tun.frag_in 1' ] \
+	&& ok "фрагменты: пакет Туннеля фрагментами посчитан до сборки, другой порт и целый пакет — нет" || fail "tunnel_frag_in: $(frag_count)"
 WAN_IF=lo
 write_nft && nft -f "$NFT_FILE"
 for p in 51820 51821; do
@@ -687,16 +706,31 @@ case "$( (main install --mtu 1500) 2>&1 )" in *"--mtu: число"*) ok "пар�
 	# Роутер не отвечает на ping — фрагменты по счётчикам ядра за интервал.
 	PROC="$T/fproc"; mkdir -p "$PROC/net"
 	fsnmp() { printf 'Ip: Forwarding ReasmReqds ReasmFails FragCreates\nIp: 1 %s 0 %s\n' "$1" "$2" > "$PROC/net/snmp"; }
+	# Счётчик tunnel_frag_in: без файла — правила Трубы не загружены.
+	nft() { [ "$*" = 'list counter inet truba_filter tunnel_frag_in' ] && [ -e "$T/tfrag" ] \
+		&& printf 'table inet truba_filter {\n\tcounter tunnel_frag_in {\n\t\tpackets %s bytes 0\n\t}\n}\n' "$(cat "$T/tfrag")"; }
+	rm -f "$T/tfrag"
 	sleep() { fsnmp 0 400; }; fsnmp 0 100
 	out=$(mtu_passive 30 1313 1298)
 	grep -q 'нарезал при отправке 300' <<< "$out" && grep -q '1313 больше 1298' <<< "$out" \
 		&& ok "MTU без ping: VPS режет пакеты — MTU Туннеля больше сети VPS" || fail "mtu_passive режет: $out"
 	sleep() { fsnmp 50 100; }; fsnmp 0 100
 	out=$(mtu_passive 30 1298 1298)
-	grep -q 'приходят фрагментами' <<< "$out" && ! grep -q 'нарезал при отправке [1-9]' <<< "$out" \
-		&& ok "MTU без ping: фрагменты от дома — путь уже MTU" || fail "mtu_passive от дома: $out"
+	grep -q 'приходят фрагментами, а чьи — не различить' <<< "$out" && ! grep -q 'нарезал при отправке [1-9]' <<< "$out" \
+		&& ok "MTU без ping: фрагменты от дома без счётчика Туннеля — чьи, не различить" || fail "mtu_passive от дома: $out"
+	echo 7 > "$T/tfrag"
+	sleep() { fsnmp 50 100; echo 32 > "$T/tfrag"; }; fsnmp 0 100
+	out=$(mtu_passive 30 1298 1298)
+	grep -q 'пакетов Туннеля фрагментами — 25' <<< "$out" && grep -q '^!! пакеты Туннеля от дома приходят фрагментами' <<< "$out" \
+		&& ok "MTU без ping: пакеты Туннеля от дома фрагментами — путь уже MTU" || fail "mtu_passive Туннель фрагментами: $out"
+	# Как на Трубе 2026-10-26: режется проброшенный UDP, пакеты Туннеля целые.
+	sleep() { fsnmp 348 518; }; fsnmp 0 100
+	out=$(mtu_passive 30 1298 1298)
+	grep -q '^==> VPS режет проброшенные' <<< "$out" && grep -q '^==> фрагменты на сборку — не пакеты Туннеля' <<< "$out" && ! grep -q '^!!' <<< "$out" \
+		&& ok "MTU без ping: проброшенный трафик режется, Туннель — нет: не тревога" || fail "mtu_passive проброшенный: $out"
 	sleep() { :; }
 	out=$(mtu_passive 30 1298 1298); grep -q 'фрагментов нет' <<< "$out" && ok "MTU без ping: фрагментов нет" || fail "mtu_passive чисто: $out"
+	unset -f nft
 )
 WAN_IF=eth0; write_awg_conf; write_router_conf
 [ "$(grep -c '^S[1-4] = ' "$ROUTER_CONF")" -eq 4 ] && ok "Роутер: S1–S4" || fail "S1-S4"
@@ -928,6 +962,38 @@ else
 	fail "apt-get install unbound"
 fi
 
+# Адрес пересылки у поставщика — ближний по ping из пары (замер с Трубы 2026-10-26: 8.8.8.8 — 22 мс,
+# 8.8.4.4 — 0,6). Прежний выбор остаётся, пока другой не ближе на 5 мс; без ответа ping — не меняется.
+(
+	rtt() { echo "rtt min/avg/max/mdev = $1/$1/$1/0.000 ms"; }
+	ping() { case "${@: -1}" in 8.8.8.8) rtt 22.097 ;; 8.8.4.4) rtt 0.555 ;; 1.1.1.1) rtt 3.2 ;; 1.0.0.1) rtt 0.9 ;; esac; }
+	out=$(pick_near '' 8.8.8.8 8.8.4.4)
+	[ "$out" = '8.8.4.4 22.097 0.555' ] && ok "unbound: из пары — ближний адрес" || fail "pick_near ближний: $out"
+	out=$(pick_near '' 1.1.1.1 1.0.0.1)
+	[ "$out" = '1.1.1.1 3.2 0.9' ] && ok "unbound: другой ближе меньше чем на 5 мс — адрес прежний" || fail "pick_near разброс: $out"
+	out=$(pick_near 8.8.4.4 8.8.8.8 8.8.4.4)
+	[ "$out" = '8.8.4.4 22.097 0.555' ] && ok "unbound: прежний ближний адрес остаётся" || fail "pick_near прежний: $out"
+	ping() { case "${@: -1}" in 8.8.8.8) rtt 0.6 ;; 8.8.4.4) rtt 22 ;; esac; }
+	out=$(pick_near 8.8.4.4 8.8.8.8 8.8.4.4)
+	[ "$out" = '8.8.8.8 0.6 22' ] && ok "unbound: другой адрес стал ближе — переход" || fail "pick_near переход: $out"
+	ping() { case "${@: -1}" in 8.8.8.8) rtt 22 ;; *) return 1 ;; esac; }
+	out=$(pick_near '' 8.8.8.8 8.8.4.4)
+	[ "$out" = '8.8.8.8 22 -' ] && ok "unbound: адрес без ответа на ping не выбирается" || fail "pick_near без ответа: $out"
+	ping() { return 1; }
+	out=$(set -Eeuo pipefail; pick_near 8.8.4.4 8.8.8.8 8.8.4.4)
+	[ "$out" = '8.8.4.4 - -' ] && ok "unbound: ping закрыт — выбор прежний, без ошибки под set -e" || fail "pick_near ping закрыт: $out"
+	ping() { case "${@: -1}" in 8.8.8.8) rtt 22.097 ;; 8.8.4.4) rtt 0.555 ;; 1.1.1.1) rtt 0.555 ;; 1.0.0.1) rtt 0.597 ;; esac; }
+	UNBOUND_CONF="$T/unbound-near.conf"; DNS_CF=''; DNS_GOOGLE=''
+	out=$(pick_forwarders; write_unbound_conf; grep -E '^    forward-addr:' "$UNBOUND_CONF" | xargs)
+	grep -q 'пересылка на 1.1.1.1 и 8.8.4.4' <<< "$out" \
+		&& grep -q 'forward-addr: 1.1.1.1@853#cloudflare-dns.com forward-addr: 8.8.4.4@853#dns.google$' <<< "$out" \
+		&& ok "unbound: конфиг — с выбранными адресами, имена серверов прежние" || fail "pick_forwarders: $out"
+	state_value_ok DNS_GOOGLE 8.8.4.4 && state_value_ok DNS_CF 1.0.0.1 && ! state_value_ok DNS_GOOGLE 1.1.1.1 \
+		&& ! state_value_ok DNS_CF 9.9.9.9 && ok "pipe.env: адрес DNS — только из пары своего поставщика" || fail "state_value_ok DNS_*"
+	STATE="$T/near-pipe.env"; DNS_GOOGLE=8.8.4.4; save_state
+	( unset DNS_GOOGLE; load_state; [ "$DNS_GOOGLE" = 8.8.4.4 ] ) && ok "pipe.env хранит выбранный адрес DNS" || fail "pipe.env: DNS_GOOGLE"
+)
+
 # status: строки про unbound — из его счётчиков и замеров (вывод снят с настоящей Трубы). Без unbound
 # или без замеров status не падает и под set -e: он печатает и всё остальное.
 unbound-control() {
@@ -986,6 +1052,20 @@ unset -f unbound-control
 	out=$(printf '%s\n' cpu.total\ 1000 cpu.steal\ 69 | diag_report 60 '' '')
 	grep -q 'только если под нагрузкой растёт RTT' <<< "$out" && ! grep -q '^! steal' <<< "$out" \
 		&& ok "diag: steal 6,9 % — к сведению, не тревога" || fail "diag steal 6.9: $out"
+	# Фрагменты: чьи. Как на Трубе 2026-10-26 — режется проброшенный на Роутер UDP, пакеты Туннеля целые.
+	out=$(printf '%s\n' ip.FragCreates\ 418 ip.ReasmReqds\ 348 tun.frag_in\ 0 | diag_report 60 '' '' 1298 1298)
+	grep -q 'пакетов Туннеля фрагментами — 0' <<< "$out" && grep -q 'режет проброшенные на Роутер' <<< "$out" \
+		&& grep -q 'не пакеты Туннеля' <<< "$out" && ! grep -q '^!' <<< "$out" && grep -q 'Потерь и упоров не найдено' <<< "$out" \
+		&& ok "diag: режется проброшенный трафик, Туннель целый — не тревога" || fail "diag проброшенные фрагменты: $out"
+	out=$(printf '%s\n' ip.FragCreates\ 300 tun.frag_in\ 0 | diag_report 60 '' '' 1313 1298)
+	grep -q '^! VPS режет пакеты Туннеля: MTU Туннеля 1313 больше сети VPS (до 1298)' <<< "$out" \
+		&& ok "diag: MTU Туннеля больше сети VPS — режется сам Туннель" || fail "diag MTU больше сети: $out"
+	out=$(printf '%s\n' ip.ReasmReqds\ 50 tun.frag_in\ 25 | diag_report 60 '' '' 1298 1298)
+	grep -q '^! пакеты Туннеля от дома приходят фрагментами' <<< "$out" \
+		&& ok "diag: пакеты Туннеля от дома фрагментами — тревога" || fail "diag Туннель фрагментами: $out"
+	out=$(printf '%s\n' ip.ReasmReqds\ 50 qdisc.dropped\ 5 | diag_report 60 '' '' 1298 1298)
+	grep -q '^! входящие пакеты приходят фрагментами, а чьи — не различить' <<< "$out" && grep -q 'очередь WAN отбрасывала' <<< "$out" \
+		&& ok "diag: без счётчика Туннеля — не различить; очередь WAN — и при фрагментах" || fail "diag без счётчика: $out"
 	printf '%s\n' 'PING 10.77.77.2 (10.77.77.2) 56(84) bytes of data.' '' '--- 10.77.77.2 ping statistics ---' \
 		'30 packets transmitted, 29 received, 3.33333% packet loss, time 29040ms' 'rtt min/avg/max/mdev = 30.123/31.456/40.789/1.234 ms' > "$T/pingout"
 	[ "$(ping_summary "$T/pingout")" = '3.33333% 30.123 31.456 40.789' ] && ok "diag: разбор итога ping" || fail "ping_summary: $(ping_summary "$T/pingout")"
