@@ -1576,13 +1576,14 @@ cmd_install() {
 		# Повторный запуск параметры не меняет: иначе старый конфиг Роутера перестал бы подключаться.
 		warn "модуль поддерживает AWG 3.1 (защита заголовков): включится после rotate-keys, затем импортируйте router.conf заново"
 	fi
-	warn_h_ranges
 
 	if [ -z "${VPS_PRIV:-}" ]; then
 		say "Генерация ключей и параметров AmneziaWG (протокол ${AWG_PROTO}.x)"
 		gen_keys
 		gen_params
 	else
+		# H1–H4 есть только у прежней установки.
+		warn_h_ranges
 		refresh_i1
 	fi
 	write_sysctl

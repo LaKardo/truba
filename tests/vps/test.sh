@@ -822,6 +822,23 @@ out=$( (
 	NO_CONFIRM=1 cmd_install
 ) 2>&1 )
 grep -q 'нет ключа' <<< "$out" && ! grep -q 'ПАКЕТЫ' <<< "$out" && ok "install: ключ root — до пакетов" || fail "install: ключ root: $out"
+# Первая установка на AWG 3.1: H1–H4 ещё не заданы, проверка диапазонов H их не читает.
+out=$( (
+	unset VPS_PRIV AWG_PROTO H1 H2 H3 H4
+	STATE="$T/none.env" OPT_AWG_PORT=51820
+	choose_ssh_port() { SSH_PORT=52222; }
+	preflight() { :; }
+	check_port_available() { :; }
+	check_foreign_awg_conf() { :; }
+	record_owned() { :; }
+	install_packages() { :; }
+	detect_awg_proto() { AWG_PROTO_NOW=3; }
+	gen_keys() { :; }
+	i1_resolve() { :; }
+	write_sysctl() { echo "H: $H1 $H2 $H3 $H4"; exit 0; }
+	NO_CONFIRM=1 cmd_install
+) 2>&1 )
+grep -qx 'H: 1 2 3 4' <<< "$out" && ok "install: первая установка на AWG 3.1 — H1–H4 = 1/2/3/4" || fail "install: первая установка на AWG 3.1: $out"
 
 # Команды требуют root с понятным сообщением, в том числе status и show-config.
 for c in cmd_status cmd_show_config cmd_rotate_keys cmd_uninstall; do
