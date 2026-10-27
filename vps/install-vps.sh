@@ -80,12 +80,13 @@ AWG_PADDING=0-15
 # Keepalive Роутера держит открытым NAT его провайдера. Период случайный, чтобы у простаивающего
 # Туннеля не было ровного ритма; верхняя граница — прежние 25 с, так что NAT не закроется раньше.
 AWG_KEEPALIVE=15-25
-# Таймеры AWG 3.1 — случайные из диапазона, чтобы рукопожатия не шли ровно раз в 120 с. Дольше
-# всего Туннель живёт без рукопожатия так: RekeyAfterTime до 125 + keepalive Роутера до 25 +
-# одна повторная попытка 5 = 155 с, меньше порога контроля Туннеля на Роутере (handshake_max,
-# 180 с). RejectAfterTime от 170 — позже этого: старая сессия не закрывается раньше смены ключей.
+# Таймеры AWG 3.1 — случайные из диапазона, чтобы рукопожатия и повторные попытки не шли ровно
+# раз в 120 и 5 с. Дольше всего Туннель живёт без рукопожатия так: RekeyAfterTime до 125 +
+# keepalive Роутера до 25 + одна повторная попытка до 7 = 157 с, меньше порога контроля Туннеля
+# на Роутере (handshake_max, 180 с). RejectAfterTime от 170 — позже этого: старая сессия не
+# закрывается раньше смены ключей.
 AWG_REKEY_AFTER=95-125
-AWG_REKEY_TIMEOUT=5
+AWG_REKEY_TIMEOUT=3-7
 AWG_REJECT_AFTER=170-190
 AWG_KEEPALIVE_TIMEOUT=8-14
 AWG_HANDSHAKE_ATTEMPTS=16-20
@@ -914,8 +915,13 @@ gen_params() {
 		fi
 		H1=${hs[0]}; H2=${hs[1]}; H3=${hs[2]}; H4=${hs[3]}
 		gen_i1
+		# RandomTrailers (AWG 3.1) — случайный хвост у рукопожатий: без него у каждой Трубы они одной
+		# длины (148 + S1 и 92 + S2) и повторяются при каждой смене ключей. Пакеты данных хвост не
+		# получают: модуль берёт для них добавку к пакетам (awg_params_block).
+		RANDOM_TRAILERS=0
+		if [ "$AWG_PROTO" -ge 3 ]; then RANDOM_TRAILERS=1; fi
 	else
-		S3=''; S4=''; I1=''; I1_SRV=''
+		S3=''; S4=''; I1=''; I1_SRV=''; RANDOM_TRAILERS=0
 		local used=" " h v
 		for v in H1 H2 H3 H4; do
 			while :; do h=$(rand_between 5 2147483647); [[ "$used" != *" $h "* ]] && break; done
@@ -957,13 +963,10 @@ awg_params_block() {
 		[ -n "${HPK:-}" ] && echo "HeaderProtectionKey = $HPK"
 		# Оставляем защиту AWG от нагрузки рукопожатиями включённой. Это не влияет на RTT данных.
 		echo "DisableCookies = off"
-		# Запас на случай DPI по размерам пакетов: дорого по трафику, включается отдельной командой.
-		# Добавку модуль берёт вместо RandomTrailers, поэтому с ним её нет.
-		if [ "${RANDOM_TRAILERS:-0}" = 1 ]; then
-			echo "RandomTrailers = on"
-		else
-			echo "ContentPaddingAddition = $AWG_PADDING"
-		fi
+		# Хвост получают рукопожатия, а пакеты данных — добавку: если она задана, модуль берёт её
+		# вместо хвоста (src/send.c). Так мелкие пакеты не растут на сотни байт.
+		[ "${RANDOM_TRAILERS:-0}" = 1 ] && echo "RandomTrailers = on"
+		echo "ContentPaddingAddition = $AWG_PADDING"
 		echo "RekeyAfterTime = $AWG_REKEY_AFTER"
 		echo "RekeyTimeout = $AWG_REKEY_TIMEOUT"
 		echo "RejectAfterTime = $AWG_REJECT_AFTER"
@@ -1826,6 +1829,7 @@ cmd_install() {
 	else
 		# H1–H4 есть только у прежней установки.
 		warn_h_ranges
+		warn_random_trailers
 		refresh_i1
 	fi
 	# sysctl и очередь WAN — вне транзакции: откат их не возвращает (архитектура, §3). Они не
@@ -2027,14 +2031,17 @@ cmd_random_trailers() {
 	save_state
 	write_awg_conf
 	write_router_conf
-	# Добавка к пакетам данных у модуля главнее RandomTrailers: с ним её нет, без него — снова есть.
-	local pad=0
-	[ "$RANDOM_TRAILERS" = 1 ] || pad=$AWG_PADDING
-	awg set "$AWG_IF" random-trailers "$1" content-padding-addition "$pad" \
+	# Добавка к пакетам — та же, что в конфиге: у установок прежних версий с RandomTrailers её не было.
+	awg set "$AWG_IF" random-trailers "$1" content-padding-addition "$AWG_PADDING" \
 		|| warn "Туннель не поднят: настройка применится при его запуске"
 	say "RandomTrailers $1 на Трубе. Сразу импортируйте заново $ROUTER_CONF в Роутер:"
 	echo "  LuCI → Службы → Труба → Туннель → Импорт .conf"
-	echo "  (с RandomTrailers меняется и добавка к пакетам, поэтому одного флага у $AWG_IF мало)"
+}
+
+# RandomTrailers выключен (установка прежней версии или random-trailers off): рукопожатия Туннеля одной длины.
+warn_random_trailers() {
+	[ "${AWG_PROTO:-1}" -ge 3 ] && [ "${RANDOM_TRAILERS:-0}" != 1 ] || return 0
+	warn "RandomTrailers выключен: рукопожатия Туннеля одной длины, и DPI может узнать их по размеру. Включить: install-vps.sh random-trailers on, затем импортируйте router.conf"
 }
 
 # awg show без секретов: ключ защиты заголовков awg выводит открытым, а по выводу status
@@ -2055,7 +2062,7 @@ cmd_status() {
 	echo "MTU Туннеля: $(cat "$SYS_NET/$AWG_IF/mtu" 2>/dev/null || echo ?) ($([ -n "${TUN_MTU:-}" ] && echo "задан вручную; по сети VPS — до $(auto_mtu)" || echo "по сети VPS — не больше $(auto_mtu)"))   очередь ${WAN_IF:-?}: $(wan_qdisc_show)"
 	warn_steam_mtu "$(cat "$SYS_NET/$AWG_IF/mtu" 2>/dev/null || tunnel_mtu)"
 	if [ "${AWG_PROTO:-1}" -ge 3 ]; then
-		local rt="выкл   добавка к пакетам: $AWG_PADDING байт" dc cookies
+		local rt=выкл dc cookies
 		[ "${RANDOM_TRAILERS:-0}" = 1 ] && rt=вкл
 		# Фактическое состояние интерфейса, а не записанное в конфиг.
 		if [ -d "$SYS_NET/$AWG_IF" ]; then
@@ -2069,8 +2076,9 @@ cmd_status() {
 		else
 			cookies='Туннель не поднят'
 		fi
-		echo "Защита заголовков: $([ -n "${HPK:-}" ] && echo вкл || echo выкл)   Cookie-защита: $cookies   RandomTrailers: $rt"
+		echo "Защита заголовков: $([ -n "${HPK:-}" ] && echo вкл || echo выкл)   Cookie-защита: $cookies   RandomTrailers: $rt   добавка к пакетам: $AWG_PADDING байт"
 		warn_h_ranges
+		warn_random_trailers
 	fi
 	kernel_module_check || true
 	local over wan pub

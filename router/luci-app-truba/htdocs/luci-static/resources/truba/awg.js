@@ -131,18 +131,14 @@ function rangeError(v, max) {
 // Заголовки H1–H4 — 32-битные числа.
 const H_MAX = 4294967295;
 
-// Ошибка параметра AWG k (имя без awg_). S1–S4 и добавка к пакетам зависят от ключа
-// защиты заголовков и RandomTrailers — они приходят импортом router.conf.
+// Ошибка параметра AWG k (имя без awg_). S1–S4 зависят от ключа защиты заголовков — он
+// приходит импортом router.conf.
 function paramError(iface, k, v) {
 	v = String(v ?? '');
 	if (v === '' || CPS_PARAMS.includes(k))
 		return null;
-	if (k == 'content_padding_addition') {
-		// Добавку модуль берёт вместо RandomTrailers: с ними она их бы отменила.
-		if (uci.get('network', iface, 'awg_random_trailers') == '1')
-			return _('Leave empty with random trailers: the module would use the padding instead of them');
+	if (k == 'content_padding_addition')
 		return rangeError(v, 65535);
-	}
 	if (/^h\d$/.test(k))
 		return rangeError(v, H_MAX);
 	if (!/^\d+$/.test(v))

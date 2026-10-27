@@ -324,6 +324,14 @@ grep -q 'rotate-keys' <<< "$out" && [ -z "$( (warn_h_ranges) 2>&1 )" ] \
 out=$( (HPK=''; awg_check_h) 2>&1 ); rc=$?
 [ "$rc" -ne 0 ] && grep -q 'без HeaderProtectionKey' <<< "$out" && ( HPK=k; awg_check_h ) \
 	&& ok "H: 1/2/3/4 без ключа защиты заголовков — ошибка" || fail "H: 1/2/3/4 без ключа: $out"
+# RandomTrailers: новые параметры AWG 3.1 его включают, у 2.0 и 1.x его нет. Выключенный на 3.1
+# (прежняя установка или random-trailers off) — предупреждение.
+rt=$(for p in 3 2 1; do AWG_PROTO=$p; RANDOM_TRAILERS=x; gen_params; printf '%s ' "$RANDOM_TRAILERS"; done)
+[ "$rt" = "1 0 0 " ] && ok "RandomTrailers: новые параметры AWG 3.1 — вкл, 2.0 и 1.x — выкл" || fail "RandomTrailers в gen_params: $rt"
+out=$( (RANDOM_TRAILERS=0; warn_random_trailers) 2>&1 )
+grep -q 'random-trailers on' <<< "$out" && [ -z "$( (RANDOM_TRAILERS=1; warn_random_trailers) 2>&1 )" ] \
+	&& [ -z "$( (AWG_PROTO=2; RANDOM_TRAILERS=0; warn_random_trailers) 2>&1 )" ] \
+	&& ok "RandomTrailers: выкл на AWG 3.1 — предупреждение, вкл и на 2.0 — нет" || fail "RandomTrailers: предупреждение: $out"
 
 AWG_PROTO=1
 gen_params
@@ -847,8 +855,8 @@ grep -qxF "I1 = $I1_SRV" "$AWG_CONF" && grep -qxF "I1 = $I1" "$ROUTER_CONF" && [
 	&& ok "I1: у Роутера DNS-запрос, у Трубы — ответ" || fail "I1 в конфигах: $(grep -h '^I1' "$AWG_CONF" "$ROUTER_CONF")"
 ( I1_SRV=''; awg_conf | grep -qxF "I1 = $I1" ) && ok "I1: без ответа (прежняя установка) у Трубы — запрос" || fail "I1 без I1_SRV"
 
-# Конфиги AWG 3.1: ключ защиты заголовков одинаковый, cookie-защита включена у обеих сторон,
-# RandomTrailers — только по команде random-trailers.
+# Конфиги AWG 3.1: ключ защиты заголовков одинаковый, cookie-защита включена у обеих сторон.
+# Сначала RandomTrailers выключен (прежняя установка или random-trailers off).
 AWG_PROTO=3; gen_params; HPK='aHBrLXRlc3Qta2V5LTMyLWJ5dGVzLWxvbmctLS0tLS0='; RANDOM_TRAILERS=0
 write_awg_conf; write_router_conf
 bad=0
@@ -861,17 +869,17 @@ grep -qx 'ContentPaddingAddition = 0-15' "$AWG_CONF" && grep -qx 'ContentPadding
 	&& ok "AWG 3.1: добавка к пакетам 0–15 у обеих сторон" || fail "AWG 3.1: ContentPaddingAddition"
 grep -qx 'PersistentKeepalive = 15-25' "$ROUTER_CONF" && ! grep -q '^PersistentKeepalive' "$AWG_CONF" \
 	&& ok "AWG 3.1: keepalive Роутера — случайный 15–25 с, у Трубы его нет" || fail "AWG 3.1: keepalive: $(grep -h '^PersistentKeepalive' "$AWG_CONF" "$ROUTER_CONF")"
-timers=$'RekeyAfterTime = 95-125\nRekeyTimeout = 5\nRejectAfterTime = 170-190\nKeepaliveTimeout = 8-14\nMaxHandshakeAttempts = 16-20'
+timers=$'RekeyAfterTime = 95-125\nRekeyTimeout = 3-7\nRejectAfterTime = 170-190\nKeepaliveTimeout = 8-14\nMaxHandshakeAttempts = 16-20'
 [ "$(grep -E '^(Rekey|Reject|KeepaliveTimeout|MaxHandshake)' "$AWG_CONF")" = "$timers" ] \
 	&& [ "$(grep -E '^(Rekey|Reject|KeepaliveTimeout|MaxHandshake)' "$ROUTER_CONF")" = "$timers" ] \
 	&& ok "AWG 3.1: случайные таймеры у обеих сторон" || fail "AWG 3.1: таймеры: $(grep -hE '^(Rekey|Reject|Keepalive|Max)' "$AWG_CONF" "$ROUTER_CONF")"
 grep -qx 'RekeyAfterTime = 95-125' "$T/probe" && grep -qx 'MaxHandshakeAttempts = 16-20' "$T/probe" \
 	&& ok "протокол AWG 3.1: проба и с таймерами" || fail "проба AWG 3.1 без таймеров"
-# Добавку модуль берёт вместо RandomTrailers: с ним её нет ни у одной стороны.
+# Хвосты получают рукопожатия, а пакеты данных — добавку: с RandomTrailers она остаётся у обеих сторон.
 RANDOM_TRAILERS=1; write_awg_conf; write_router_conf
 grep -qx 'RandomTrailers = on' "$AWG_CONF" && grep -qx 'RandomTrailers = on' "$ROUTER_CONF" \
-	&& ! grep -q '^ContentPaddingAddition' "$AWG_CONF" "$ROUTER_CONF" \
-	&& ok "AWG 3.1: RandomTrailers у обеих сторон, без добавки к пакетам" || fail "AWG 3.1: RandomTrailers"
+	&& grep -qx 'ContentPaddingAddition = 0-15' "$AWG_CONF" && grep -qx 'ContentPaddingAddition = 0-15' "$ROUTER_CONF" \
+	&& ok "AWG 3.1: RandomTrailers и добавка к пакетам у обеих сторон" || fail "AWG 3.1: RandomTrailers"
 STATE="$STATE_DIR/pipe.env"; save_state
 ( i1=$I1_SRV; unset I1_SRV; load_state; [ "$I1_SRV" = "$i1" ] ) && ok "pipe.env хранит I1 Трубы" || fail "pipe.env: I1_SRV"
 ( unset HPK RANDOM_TRAILERS; load_state; [ "$HPK" = 'aHBrLXRlc3Qta2V5LTMyLWJ5dGVzLWxvbmctLS0tLS0=' ] && [ "$RANDOM_TRAILERS" = 1 ] ) \
@@ -896,13 +904,14 @@ out=$(awg_show_masked)
 	&& ok "status: ключ защиты заголовков скрыт" || fail "status: $out"
 unset -f awg timeout
 [ "$(umask)" = 0022 ] && ok "запись ключей не меняет umask: юниты и конфиги остаются читаемыми" || fail "umask после записи ключей: $(umask)"
-# random-trailers переключает на ходу и RandomTrailers, и добавку к пакетам: модуль берёт её вместо них.
+# random-trailers переключает RandomTrailers на ходу и ставит добавку к пакетам из конфига: у установок
+# прежних версий с RandomTrailers её не было.
 awg() { echo "$*" >> "$T/awgset"; }
 : > "$T/awgset"
 out=$( (cmd_random_trailers off; cmd_random_trailers on) 2>&1 )
-[ "$(cat "$T/awgset")" = $'set awg0 random-trailers off content-padding-addition 0-15\nset awg0 random-trailers on content-padding-addition 0' ] \
+[ "$(cat "$T/awgset")" = $'set awg0 random-trailers off content-padding-addition 0-15\nset awg0 random-trailers on content-padding-addition 0-15' ] \
 	&& grep -q 'Импорт .conf' <<< "$out" \
-	&& ok "random-trailers: на ходу вместе с добавкой к пакетам, на Роутере — импорт router.conf" || fail "random-trailers: $(cat "$T/awgset") $out"
+	&& ok "random-trailers: на ходу, добавка к пакетам остаётся, на Роутере — импорт router.conf" || fail "random-trailers: $(cat "$T/awgset") $out"
 unset -f awg
 
 # Повторный install: Туннель перезапускается, только если его конфиг изменился, а о новом
