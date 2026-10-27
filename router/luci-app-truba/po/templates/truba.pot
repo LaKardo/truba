@@ -22,10 +22,6 @@ msgid "A number or a range «from-to» within 0–%d"
 msgstr ""
 
 #: htdocs/luci-static/resources/truba/awg.js
-msgid "Leave empty with random trailers: the module would use the padding instead of them"
-msgstr ""
-
-#: htdocs/luci-static/resources/truba/awg.js
 msgid "Enter a whole number"
 msgstr ""
 

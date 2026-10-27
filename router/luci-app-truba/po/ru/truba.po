@@ -455,9 +455,6 @@ msgstr "Случайные хвосты (RandomTrailers)"
 msgid "Content padding"
 msgstr "Добавка к пакетам"
 
-msgid "Leave empty with random trailers: the module would use the padding instead of them"
-msgstr "Со случайными хвостами оставьте пустым: модуль взял бы добавку вместо них"
-
 msgid "Checked every hour: until a new release is out, only the checksums are downloaded."
 msgstr "Проверка — каждый час: пока нового выпуска нет, скачиваются только контрольные суммы."
 

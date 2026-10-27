@@ -712,15 +712,16 @@ if (awg) {
 	check([ '575', '1501', 'abc' ].every((v) => txt(awg.mtuError(v))) && [ '', '576', '1500' ].every((v) => awg.mtuError(v) === null), 'awg.mtuError: 576–1500');
 	check(awg.rangeError('15-25', 65535) === null && awg.rangeError('4294967295', 4294967295) === null && txt(awg.rangeError('25-15', 65535)) &&
 		txt(awg.rangeError('65536', 65535)), 'awg.rangeError: число или «от-до» в пределах');
-	// Проверки параметров зависят от ключа защиты заголовков и RandomTrailers в настройках интерфейса.
+	// Проверки S1–S4 зависят от ключа защиты заголовков в настройках интерфейса.
 	net.t1 = { '.type': 'interface' };
 	const PE = (k, v) => awg.paramError('t1', k, v);
 	const s1Plain = PE('s1', '5');
 	net.t1.awg_header_protection_key = 'h';
 	check(s1Plain === null && /at least 12/.test(PE('s1', '5') || '') && PE('s1', '12') === null, 'awg.paramError: S1–S4 не меньше 12 — только с защитой заголовков');
-	const padPlain = PE('content_padding_addition', '10-20');
+	// Хвосты получают рукопожатия, добавку — пакеты данных: вместе они не мешают друг другу.
 	net.t1.awg_random_trailers = '1';
-	check(padPlain === null && txt(PE('content_padding_addition', '10-20')), 'awg.paramError: добавка к пакетам — пусто при RandomTrailers');
+	check(PE('content_padding_addition', '0-15') === null && txt(PE('content_padding_addition', '15-0')),
+		'awg.paramError: добавка к пакетам — диапазон, и с RandomTrailers тоже');
 	check(txt(PE('jc', 'x')) && PE('h1', '100-200') === null && PE('i1', '<r 2>') === null && PE('jc', '') === null,
 		'awg.paramError: Jc — целое, H — число или диапазон, I — без проверки, пусто — верно');
 	// Версия протокола — как её определяет install-vps.sh (awg_proto_supported).
