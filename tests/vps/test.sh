@@ -731,12 +731,12 @@ grep -q "^AllowedIPs = 10.77.77.2/32" "$AWG_CONF" && ok "VPS: пир — тол�
 grep -q "^Endpoint = 203.0.113.10:51820" "$ROUTER_CONF" && ok "Роутер: Endpoint" || fail "Роутер Endpoint"
 grep -q "^PersistentKeepalive = 25" "$ROUTER_CONF" && ok "Роутер: keepalive 25" || fail "keepalive"
 grep -q "^MTU = 1380" "$ROUTER_CONF" && ok "Роутер: MTU 1380 при сети VPS 1500" || fail "MTU"
-# MTU Туннеля — от сети VPS: пакет Туннеля с обёрткой (до 102 байт) помещается в неё целиком.
+# MTU Туннеля — от сети VPS: пакет Туннеля с обёрткой (60 байт и S4) помещается в неё целиком.
 mtu_both() { grep -qx "MTU = $1" "$AWG_CONF" && grep -qx "MTU = $1" "$ROUTER_CONF"; }
 if ip link add trubamtu0 type dummy 2>/dev/null; then
 	WAN_IF=trubamtu0
 	ip link set trubamtu0 mtu 1400; write_awg_conf; write_router_conf
-	mtu_both 1298 && ok "сеть VPS 1400: MTU 1298 у обеих сторон (запас на S4 и добавку)" || fail "сеть 1400: $(grep '^MTU' "$ROUTER_CONF")"
+	mtu_both $((1340 - S4)) && ok "сеть VPS 1400: MTU 1400 − 60 − S4 у обеих сторон" || fail "сеть 1400: $(grep '^MTU' "$ROUTER_CONF")"
 	ip link set trubamtu0 mtu 9000; write_awg_conf; write_router_conf
 	mtu_both 1380 && ok "сеть VPS 9000: MTU не больше 1380" || fail "сеть 9000: $(grep '^MTU' "$ROUTER_CONF")"
 	ip link del trubamtu0
@@ -793,19 +793,47 @@ case "$( (main install --mtu 1500) 2>&1 )" in *"--mtu: число"*) ok "пар�
 	out=$(mtu_passive 30 1298 1298); grep -q 'фрагментов нет' <<< "$out" && ok "MTU без ping: фрагментов нет" || fail "mtu_passive чисто: $out"
 	unset -f nft
 )
+# MTU Туннеля = сеть VPS − 60 − S4: добавку и хвосты модуль ограничивает окном, полноразмерный пакет они не удлиняют.
+(
+	SYS_NET="$T/omtu"; WAN_IF=eth0; TUN_MTU=''; AWG_PROTO=3; mkdir -p "$SYS_NET/eth0"
+	echo 1400 > "$SYS_NET/eth0/mtu"
+	r=$(for S4 in 12 20 27; do auto_mtu; done | tr '\n' ' ')
+	[ "$r" = "1328 1320 1313 " ] && ok "MTU по сети VPS 1400: 1400 − 60 − S4" || fail "MTU по сети 1400: $r"
+	[ "$(AWG_PROTO=1; S4=''; auto_mtu)" = 1340 ] && ok "MTU по сети VPS 1400, AWG 1.x без S4: 1340" || fail "MTU AWG 1.x: $(AWG_PROTO=1; S4=''; auto_mtu)"
+	echo 1500 > "$SYS_NET/eth0/mtu"
+	[ "$(S4=27; auto_mtu)" = 1380 ] && ok "MTU по сети VPS 1500: не больше 1380" || fail "MTU по сети 1500: $(S4=27; auto_mtu)"
+	# S4 — под сеть: на 1400 — 12, чтобы MTU вместил пакеты Steam (1328); на 1500 — случайный до 27.
+	getent() { return 2; }
+	echo 1400 > "$SYS_NET/eth0/mtu"; r=''
+	for _ in 1 2 3 4 5 6 7 8; do gen_params; r+="$S4 "; done
+	[ "$r" = "12 12 12 12 12 12 12 12 " ] && [ "$(auto_mtu)" = 1328 ] && ok "сеть VPS 1400: S4 = 12, MTU 1328" || fail "S4 на сети 1400: $r"
+	echo 1410 > "$SYS_NET/eth0/mtu"; r=ok
+	for _ in 1 2 3 4 5 6 7 8; do gen_params; { [ "$S4" -ge 12 ] && [ "$S4" -le 22 ] && [ "$(auto_mtu)" -ge 1328 ]; } || r=$S4; done
+	[ "$r" = ok ] && ok "сеть VPS 1410: S4 12–22, MTU не меньше 1328" || fail "S4 на сети 1410: $r"
+	echo 1380 > "$SYS_NET/eth0/mtu"; gen_params
+	[ "$S4" = 12 ] && ok "сеть VPS уже 1400: S4 наименьший" || fail "S4 на сети 1380: $S4"
+	echo 1500 > "$SYS_NET/eth0/mtu"; r=ok
+	for _ in 1 2 3 4 5 6 7 8; do gen_params; { [ "$S4" -ge 12 ] && [ "$S4" -le 27 ]; } || r=$S4; done
+	[ "$r" = ok ] && ok "сеть VPS 1500: S4 12–27" || fail "S4 на сети 1500: $r"
+)
 # Пакеты Steam Datagram Relay — 1328 байт: с MTU Туннеля меньше релеи Valve не отвечают (Dota 2 на сети VPS 1400).
 (
-	SYS_NET="$T/smtu"; WAN_IF=eth0; TUN_MTU=''; mkdir -p "$SYS_NET/eth0"
+	SYS_NET="$T/smtu"; WAN_IF=eth0; TUN_MTU=''; AWG_PROTO=3; S4=12; mkdir -p "$SYS_NET/eth0"
 	echo 1500 > "$SYS_NET/eth0/mtu"
 	[ -z "$(warn_steam_mtu 1380 2>&1)$(warn_steam_mtu 1328 2>&1)" ] && ok "MTU для Steam: от 1328 — без предупреждения" || fail "MTU для Steam: лишнее предупреждение"
 	out=$(warn_steam_mtu 1300 2>&1)
 	grep -q 'MTU Туннеля 1300 меньше 1328' <<< "$out" && grep -q 'Dota 2' <<< "$out" && grep -q -- '--mtu auto' <<< "$out" \
 		&& ok "MTU для Steam: сеть VPS позволяет больше — --mtu auto" || fail "MTU для Steam, сеть 1500: $out"
+	# S4 прежней установки велик для сети 1400: rotate-keys подберёт его под сеть.
 	echo 1400 > "$SYS_NET/eth0/mtu"
-	out=$(warn_steam_mtu 1298 2>&1)
-	grep -q 'сеть VPS — 1400 байт' <<< "$out" && ! grep -q -- '--mtu auto' <<< "$out" \
-		&& grep -qF 'ip link set eth0 mtu 1500; ping -c 3 -M do -s 1472 1.1.1.1; ip link set eth0 mtu 1400' <<< "$out" \
-		&& ok "MTU для Steam: сеть VPS 1400 — проверить, не пропускает ли она 1500" || fail "MTU для Steam, сеть 1400: $out"
+	out=$(S4=20; warn_steam_mtu 1320 2>&1)
+	grep -q 'S4 = 20' <<< "$out" && grep -q 'rotate-keys' <<< "$out" && grep -q 'не меньше 1328' <<< "$out" && ! grep -q -- '--mtu auto' <<< "$out" \
+		&& ok "MTU для Steam: S4 велик для сети 1400 — rotate-keys" || fail "MTU для Steam, S4 20 на сети 1400: $out"
+	echo 1390 > "$SYS_NET/eth0/mtu"
+	out=$(warn_steam_mtu 1318 2>&1)
+	grep -q 'сеть VPS — 1390 байт' <<< "$out" && ! grep -q -- '--mtu auto' <<< "$out" && ! grep -q 'rotate-keys' <<< "$out" \
+		&& grep -qF 'ip link set eth0 mtu 1500; ping -c 3 -M do -s 1472 1.1.1.1; ip link set eth0 mtu 1390' <<< "$out" \
+		&& ok "MTU для Steam: сеть VPS уже 1400 — проверить, не пропускает ли она 1500" || fail "MTU для Steam, сеть 1390: $out"
 )
 WAN_IF=eth0; write_awg_conf; write_router_conf
 [ "$(grep -c '^S[1-4] = ' "$ROUTER_CONF")" -eq 4 ] && ok "Роутер: S1–S4" || fail "S1-S4"

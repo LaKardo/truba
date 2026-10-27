@@ -54,20 +54,25 @@ ROLLBACK_UNIT=truba-rollback
 
 VPS_TUN=10.77.77.1
 RTR_TUN=10.77.77.2
-# MTU Туннеля — такой, чтобы пакет Туннеля с обёрткой помещался в сеть VPS целиком: IPv4 20 +
-# UDP 8 + заголовок и тег AWG 32 + S4 до 27 + добавка AWG 3.1 до 15 = 102 байта. Иначе VPS режет
-# полноразмерные пакеты на два фрагмента: у части провайдеров сеть VPS — 1400, а не 1500. Добавка
-# ограничена окном, которое модуль узнаёт и по принятым пакетам, поэтому на неё тоже оставлен запас.
-# Сверху — MTU_MAX: при сети 1500 расчёт даёт 1398, но путь от дома до VPS отсюда не виден, а у
-# PPPoE дома MTU 1492. С 1380 пакет Туннеля (1380 + 102 = 1482) проходит и его, не дожидаясь
-# mtu-check; 18 байт запаса стоят около 1 % полезной нагрузки.
+# MTU Туннеля — такой, чтобы пакет Туннеля с обёрткой помещался в сеть VPS целиком, иначе VPS режет
+# полноразмерные пакеты на два фрагмента: у части провайдеров сеть VPS — 1400, а не 1500. Обёртка
+# в модуле ядра — IPv4 20 + UDP 8 + заголовок AWG 16 + тег 16 = TUN_HDR и S4 (tun_overhead).
+# Добавка AWG 3.1 и RandomTrailers её не увеличивают: модуль ограничивает их окном udp_window —
+# наибольшим S4 + 32 + данные среди отправленных и принятых пакетов (src/send.c, src/peer.h), и
+# при одинаковом MTU у сторон (Труба пишет его в оба конфига) полноразмерный пакет не удлиняется.
+# Сверху — MTU_MAX: при сети 1500 расчёт даёт 1413–1428, но путь от дома до VPS отсюда не виден, а
+# у PPPoE дома MTU 1492. С 1380 пакет Туннеля (не больше 1380 + 60 + 27 = 1467) проходит и его, не
+# дожидаясь mtu-check.
 MTU_MAX=1380
-# Меньше — слишком мелкие пакеты: пути уже 1280 + 102 байт почти не встречаются.
+# Меньше — слишком мелкие пакеты: пути уже 1280 + 87 байт почти не встречаются.
 MTU_MIN=1280
-TUN_OVERHEAD=102
+TUN_HDR=60
+# Наибольший S4 при выборе: каждый байт S4 — байт MTU Туннеля.
+S4_MAX=27
 # Steam Datagram Relay (Dota 2, CS2) пингует релеи пакетами в 1300 байт данных — 1328 с заголовками
 # IPv4 и UDP. С MTU Туннеля меньше Роутер режет их на фрагменты, и релеи Valve не отвечают: игра
-# не находит ни одного сервера. Так было на сети VPS 1400, где расчёт даёт 1298.
+# не находит ни одного сервера. Так было на сети VPS 1400 с прежним запасом в 102 байта (MTU 1298).
+# На сети 1400 MTU 1328 получается ровно при S4 = 12 — наименьшем, что допускает защита заголовков.
 MTU_STEAM=1328
 # AWG 3.1. Добавка к пакетам данных — случайная, вместо дополнения до кратного 16: иначе длины
 # всех пакетов Туннеля дают один и тот же остаток от деления на 16. В среднем это те же ~7,5 байта.
@@ -173,13 +178,35 @@ put_file() {
 	fi
 }
 
-# MTU Туннеля по MTU интерфейса WAN: при 1500 — 1380, при 1400 — 1298.
+# MTU интерфейса WAN; интерфейса нет — 1500.
+wan_mtu() { cat "$SYS_NET/${WAN_IF:-}/mtu" 2>/dev/null || echo 1500; }
+
+# Наименьший S4: защите заголовков (AWG 3) нужно не меньше 12.
+s4_floor() { if [ "${AWG_PROTO:-1}" -ge 3 ]; then echo 12; else echo 4; fi; }
+
+# Обёртка пакета Туннеля, байт. S4 ещё не выбран — с наибольшим; у AWG 1.x S4 нет.
+tun_overhead() {
+	local s4=${S4:-}
+	if [ -z "$s4" ]; then
+		if [ "${AWG_PROTO:-1}" -ge 2 ]; then s4=$S4_MAX; else s4=0; fi
+	fi
+	echo $((TUN_HDR + s4))
+}
+
+# MTU Туннеля по MTU интерфейса WAN: сеть − 60 − S4, не больше 1380. При 1400 и S4 = 12 — 1328.
 auto_mtu() {
-	local nic m
-	nic=$(cat "$SYS_NET/${WAN_IF:-}/mtu" 2>/dev/null) || nic=1500
-	m=$((nic - TUN_OVERHEAD))
+	local m
+	m=$(( $(wan_mtu) - $(tun_overhead) ))
 	[ "$m" -le "$MTU_MAX" ] || m=$MTU_MAX
 	echo "$m"
+}
+
+# Наибольший S4 (не больше S4_MAX), при котором MTU Туннеля на этой сети вмещает пакеты Steam.
+s4_fit() {
+	local room
+	room=$(( $(wan_mtu) - TUN_HDR - MTU_STEAM ))
+	[ "$room" -le "$S4_MAX" ] || room=$S4_MAX
+	echo "$room"
 }
 
 # Заданный вручную (--mtu, TUN_MTU в pipe.env) — например, если путь до дома уже сети VPS
@@ -192,18 +219,25 @@ steam_mtu_why() {
 	echo "игры Steam (Dota 2, CS2) не найдут серверы: пакеты Steam Datagram Relay в $MTU_STEAM байт режутся на фрагменты, а релеи Valve на них не отвечают"
 }
 
-# Предупреждение, если MTU Туннеля mtu меньше MTU_STEAM, — с тем, что можно сделать. Сеть VPS
-# в 1400 байт часто задана с запасом и пропускает 1500: это проверяет ping без фрагментации.
+# Предупреждение, если MTU Туннеля mtu меньше MTU_STEAM, — с тем, что можно сделать. S4 прежней
+# установки мог быть велик для сети: rotate-keys выберет его под сеть (gen_params). Сеть VPS в 1400
+# байт часто задана с запасом и пропускает 1500: это проверяет ping без фрагментации.
 warn_steam_mtu() {
-	local mtu=$1 auto nic
+	local mtu=$1 auto nic fit try1500
 	[ "$mtu" -lt "$MTU_STEAM" ] || return 0
 	auto=$(auto_mtu)
 	if [ "$auto" -ge "$MTU_STEAM" ]; then
 		warn "MTU Туннеля $mtu меньше $MTU_STEAM: $(steam_mtu_why). Сеть VPS позволяет до $auto: install-vps.sh install --mtu auto, если путь до дома его пропускает (mtu-check), затем импортируйте router.conf"
 		return 0
 	fi
-	nic=$(cat "$SYS_NET/$WAN_IF/mtu" 2>/dev/null) || nic=1500
-	warn "MTU Туннеля $mtu меньше $MTU_STEAM: $(steam_mtu_why). Сейчас сеть VPS — $nic байт, но часто она пропускает и 1500. Проверка: ip link set $WAN_IF mtu 1500; ping -c 3 -M do -s 1472 1.1.1.1; ip link set $WAN_IF mtu $nic. Если ответы пришли — закрепите MTU 1500 в netplan, запустите install снова и импортируйте router.conf"
+	nic=$(wan_mtu)
+	fit=$(s4_fit)
+	try1500="ip link set $WAN_IF mtu 1500; ping -c 3 -M do -s 1472 1.1.1.1; ip link set $WAN_IF mtu $nic. Если ответы пришли — закрепите MTU 1500 в netplan, запустите install снова и импортируйте router.conf"
+	if [ -n "${S4:-}" ] && [ "$fit" -ge "$(s4_floor)" ] && [ "$S4" -gt "$fit" ]; then
+		warn "MTU Туннеля $mtu меньше $MTU_STEAM: $(steam_mtu_why). S4 = $S4 велик для сети VPS $nic байт: install-vps.sh rotate-keys выберет S4 под сеть, и MTU станет не меньше $MTU_STEAM; затем импортируйте router.conf. Или проверьте, не пропускает ли сеть 1500: $try1500"
+		return 0
+	fi
+	warn "MTU Туннеля $mtu меньше $MTU_STEAM: $(steam_mtu_why). Сейчас сеть VPS — $nic байт, но часто она пропускает и 1500. Проверка: $try1500"
 }
 
 # UDP-порты туннелей WireGuard и AmneziaWG, кроме интерфейса skip: у их сокетов нет inode, и ss
@@ -850,13 +884,18 @@ gen_params() {
 	while :; do S2=$(rand_between 15 150); [ $((S1 + 56)) -ne "$S2" ] && break; done
 	if [ "$AWG_PROTO" -ge 2 ]; then
 		# Защите заголовков (AWG 3) нужны S1–S4 не меньше 12; S1 и S2 и так от 15.
-		local s3min=8 s4min=4
-		if [ "$AWG_PROTO" -ge 3 ]; then s3min=12; s4min=12; fi
+		local s3min=8 s4min s4max
+		if [ "$AWG_PROTO" -ge 3 ]; then s3min=12; fi
+		s4min=$(s4_floor)
 		S3=$(rand_between "$s3min" 55)
 		# Ответ cookie (64 + S3) не должен совпадать по длине с ответом рукопожатия (92 + S2).
 		while [ "$S3" -eq $((S2 + 28)) ]; do S3=$(rand_between "$s3min" 55); done
-		# S4 удлиняет каждый пакет данных: tunnel_mtu оставляет под него до 27 байт.
-		S4=$(rand_between "$s4min" 27)
+		# S4 удлиняет каждый пакет данных, и MTU Туннеля — сеть VPS − 60 − S4 (auto_mtu). На узкой
+		# сети S4 не больше того, при котором MTU вмещает пакеты Steam: на сети 1400 это 12. Если не
+		# хватает и наименьшего, S4 наименьший — MTU выходит наибольшим из возможных.
+		s4max=$(s4_fit)
+		[ "$s4max" -ge "$s4min" ] || s4max=$s4min
+		S4=$(rand_between "$s4min" "$s4max")
 		local hs=() i lo w
 		if [ "$AWG_PROTO" -ge 3 ]; then
 			# HeaderProtectionKey шифрует заголовок целиком вместе с типом пакета, поэтому другие H
@@ -1939,11 +1978,11 @@ cmd_mtu_check() {
 		warn_steam_mtu "$cur"
 		return 0
 	fi
-	rec=$((p - TUN_OVERHEAD))
+	rec=$((p - $(tun_overhead)))
 	[ "$rec" -le "$MTU_MAX" ] || rec=$MTU_MAX
 	echo "  MTU пути VPS → Роутер: $p   MTU Туннеля сейчас: $cur${TUN_MTU:+ (задан вручную)}   по пути — не больше $rec"
 	if [ "$rec" -lt "$MTU_MIN" ]; then
-		warn "путь уже $((MTU_MIN + TUN_OVERHEAD)) байт: Туннель будет работать с фрагментацией"
+		warn "путь уже $((MTU_MIN + $(tun_overhead))) байт: Туннель будет работать с фрагментацией"
 	elif [ "$cur" -gt "$rec" ]; then
 		warn "полноразмерные пакеты Туннеля режутся на фрагменты. Уменьшите MTU: install-vps.sh install --mtu $rec, затем импортируйте router.conf в Роутер"
 		[ "$rec" -ge "$MTU_STEAM" ] || warn "но с MTU $rec $(steam_mtu_why)"
