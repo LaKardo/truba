@@ -65,6 +65,10 @@ MTU_MAX=1380
 # Меньше — слишком мелкие пакеты: пути уже 1280 + 102 байт почти не встречаются.
 MTU_MIN=1280
 TUN_OVERHEAD=102
+# Steam Datagram Relay (Dota 2, CS2) пингует релеи пакетами в 1300 байт данных — 1328 с заголовками
+# IPv4 и UDP. С MTU Туннеля меньше Роутер режет их на фрагменты, и релеи Valve не отвечают: игра
+# не находит ни одного сервера. Так было на сети VPS 1400, где расчёт даёт 1298.
+MTU_STEAM=1328
 # AWG 3.1. Добавка к пакетам данных — случайная, вместо дополнения до кратного 16: иначе длины
 # всех пакетов Туннеля дают один и тот же остаток от деления на 16. В среднем это те же ~7,5 байта.
 AWG_PADDING=0-15
@@ -182,6 +186,24 @@ auto_mtu() {
 # (PPPoE, мобильная связь): его показывает mtu-check.
 tunnel_mtu() {
 	if [ -n "${TUN_MTU:-}" ]; then echo "$TUN_MTU"; else auto_mtu; fi
+}
+
+steam_mtu_why() {
+	echo "игры Steam (Dota 2, CS2) не найдут серверы: пакеты Steam Datagram Relay в $MTU_STEAM байт режутся на фрагменты, а релеи Valve на них не отвечают"
+}
+
+# Предупреждение, если MTU Туннеля mtu меньше MTU_STEAM, — с тем, что можно сделать. Сеть VPS
+# в 1400 байт часто задана с запасом и пропускает 1500: это проверяет ping без фрагментации.
+warn_steam_mtu() {
+	local mtu=$1 auto nic
+	[ "$mtu" -lt "$MTU_STEAM" ] || return 0
+	auto=$(auto_mtu)
+	if [ "$auto" -ge "$MTU_STEAM" ]; then
+		warn "MTU Туннеля $mtu меньше $MTU_STEAM: $(steam_mtu_why). Сеть VPS позволяет до $auto: install-vps.sh install --mtu auto, если путь до дома его пропускает (mtu-check), затем импортируйте router.conf"
+		return 0
+	fi
+	nic=$(cat "$SYS_NET/$WAN_IF/mtu" 2>/dev/null) || nic=1500
+	warn "MTU Туннеля $mtu меньше $MTU_STEAM: $(steam_mtu_why). Сейчас сеть VPS — $nic байт, но часто она пропускает и 1500. Проверка: ip link set $WAN_IF mtu 1500; ping -c 3 -M do -s 1472 1.1.1.1; ip link set $WAN_IF mtu $nic. Если ответы пришли — закрепите MTU 1500 в netplan, запустите install снова и импортируйте router.conf"
 }
 
 # UDP-порты туннелей WireGuard и AmneziaWG, кроме интерфейса skip: у их сокетов нет inode, и ss
@@ -1830,6 +1852,7 @@ cmd_install() {
 	echo "  Затем: LuCI → Службы → Труба → Туннель → Импорт .conf"
 	echo
 	echo "  AmneziaWG на Трубе: $ver — модуль Роутера собирается из router/awg/SOURCES, протокол должен совпадать"
+	warn_steam_mtu "$(tunnel_mtu)"
 	if [ "${ROUTER_CONF_NEW:-0}" = 1 ]; then
 		warn "router.conf изменился (адрес, порт, MTU или параметры Туннеля) — импортируйте его в Роутер заново"
 	fi
@@ -1913,6 +1936,7 @@ cmd_mtu_check() {
 		warn "Роутер ($ip) не отвечает на ping (CGNAT провайдера или ping с WAN закрыт) — смотрю фрагменты по счётчикам ядра"
 		say "Замер 30 с. Запустите дома скачивание и отправку (например, тест скорости) через Туннель"
 		mtu_passive 30 "$cur" "$(auto_mtu)"
+		warn_steam_mtu "$cur"
 		return 0
 	fi
 	rec=$((p - TUN_OVERHEAD))
@@ -1922,9 +1946,11 @@ cmd_mtu_check() {
 		warn "путь уже $((MTU_MIN + TUN_OVERHEAD)) байт: Туннель будет работать с фрагментацией"
 	elif [ "$cur" -gt "$rec" ]; then
 		warn "полноразмерные пакеты Туннеля режутся на фрагменты. Уменьшите MTU: install-vps.sh install --mtu $rec, затем импортируйте router.conf в Роутер"
+		[ "$rec" -ge "$MTU_STEAM" ] || warn "но с MTU $rec $(steam_mtu_why)"
 	else
 		say "MTU Туннеля помещается в путь целиком"
 	fi
+	warn_steam_mtu "$cur"
 }
 
 cmd_rotate_keys() {
@@ -1988,6 +2014,7 @@ cmd_status() {
 	fi
 	echo "IP Трубы: ${PUB_IP:-?}   SSH: ${SSH_PORT:-?}   Туннель: udp/${AWG_PORT:-?}   AmneziaWG $(awg_version), протокол ${AWG_PROTO:-?}.x"
 	echo "MTU Туннеля: $(cat "$SYS_NET/$AWG_IF/mtu" 2>/dev/null || echo ?) ($([ -n "${TUN_MTU:-}" ] && echo "задан вручную; по сети VPS — до $(auto_mtu)" || echo "по сети VPS — не больше $(auto_mtu)"))   очередь ${WAN_IF:-?}: $(wan_qdisc_show)"
+	warn_steam_mtu "$(cat "$SYS_NET/$AWG_IF/mtu" 2>/dev/null || tunnel_mtu)"
 	if [ "${AWG_PROTO:-1}" -ge 3 ]; then
 		local rt="выкл   добавка к пакетам: $AWG_PADDING байт" dc cookies
 		[ "${RANDOM_TRAILERS:-0}" = 1 ] && rt=вкл

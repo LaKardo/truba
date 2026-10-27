@@ -793,6 +793,20 @@ case "$( (main install --mtu 1500) 2>&1 )" in *"--mtu: число"*) ok "пар�
 	out=$(mtu_passive 30 1298 1298); grep -q 'фрагментов нет' <<< "$out" && ok "MTU без ping: фрагментов нет" || fail "mtu_passive чисто: $out"
 	unset -f nft
 )
+# Пакеты Steam Datagram Relay — 1328 байт: с MTU Туннеля меньше релеи Valve не отвечают (Dota 2 на сети VPS 1400).
+(
+	SYS_NET="$T/smtu"; WAN_IF=eth0; TUN_MTU=''; mkdir -p "$SYS_NET/eth0"
+	echo 1500 > "$SYS_NET/eth0/mtu"
+	[ -z "$(warn_steam_mtu 1380 2>&1)$(warn_steam_mtu 1328 2>&1)" ] && ok "MTU для Steam: от 1328 — без предупреждения" || fail "MTU для Steam: лишнее предупреждение"
+	out=$(warn_steam_mtu 1300 2>&1)
+	grep -q 'MTU Туннеля 1300 меньше 1328' <<< "$out" && grep -q 'Dota 2' <<< "$out" && grep -q -- '--mtu auto' <<< "$out" \
+		&& ok "MTU для Steam: сеть VPS позволяет больше — --mtu auto" || fail "MTU для Steam, сеть 1500: $out"
+	echo 1400 > "$SYS_NET/eth0/mtu"
+	out=$(warn_steam_mtu 1298 2>&1)
+	grep -q 'сеть VPS — 1400 байт' <<< "$out" && ! grep -q -- '--mtu auto' <<< "$out" \
+		&& grep -qF 'ip link set eth0 mtu 1500; ping -c 3 -M do -s 1472 1.1.1.1; ip link set eth0 mtu 1400' <<< "$out" \
+		&& ok "MTU для Steam: сеть VPS 1400 — проверить, не пропускает ли она 1500" || fail "MTU для Steam, сеть 1400: $out"
+)
 WAN_IF=eth0; write_awg_conf; write_router_conf
 [ "$(grep -c '^S[1-4] = ' "$ROUTER_CONF")" -eq 4 ] && ok "Роутер: S1–S4" || fail "S1-S4"
 diff <(grep -E '^(S[1-4]|H[1-4]) = ' "$AWG_CONF") <(grep -E '^(S[1-4]|H[1-4]) = ' "$ROUTER_CONF") >/dev/null \
