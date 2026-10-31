@@ -696,6 +696,7 @@ if (awg) {
 		`awg.parseConf: CRLF, комментарии, ключи без учёта регистра (${JSON.stringify(conf)})`);
 	const throws = (t) => { try { awg.parseConf(t); return false; } catch (e) { return /PrivateKey|Peer/.test(e.message); } };
 	check(throws('[Peer]\nPublicKey = x') && throws('[Interface]\nPrivateKey = k\n'), 'awg.parseConf: без PrivateKey и без [Peer] с PublicKey — ошибка');
+	check(throws('[Interface]\nPrivateKey = k\n[Peer]\nPublicKey = x\n[Peer]\nEndpoint = 1.2.3.4:1\n'), 'awg.parseConf: второй [Peer] без PublicKey — ошибка');
 	Object.assign(net, { old: { '.type': 'amneziawg_awg0', public_key: 'q' }, z1: { '.type': 'zone', name: 'tun', network: [ 'x' ] } });
 	if (conf)
 		awg.applyConf('awg0', conf, 'tun');

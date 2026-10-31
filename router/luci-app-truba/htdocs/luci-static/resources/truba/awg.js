@@ -46,7 +46,8 @@ function parseConf(text) {
 	}
 	if (!res.iface.privatekey)
 		throw new Error(_('No PrivateKey in the [Interface] section'));
-	if (!res.peers.length || !res.peers[0].publickey)
+	// Без PublicKey пир в UCI не поднимет интерфейс — проверяется каждый, а не только первый.
+	if (!res.peers.length || res.peers.some((p) => !p.publickey))
 		throw new Error(_('No [Peer] section with PublicKey'));
 	return res;
 }
