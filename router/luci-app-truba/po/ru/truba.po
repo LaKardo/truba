@@ -275,6 +275,24 @@ msgstr "не настроен"
 msgid "working"
 msgstr "работает"
 
+msgid "The tunnel works, but routing is off: all IPv4 traffic goes direct. Turn it on in the status bar."
+msgstr "Туннель работает, но Маршрутизация выключена: весь IPv4-трафик идёт Напрямую. Включите её в строке состояния."
+
+msgid "The tunnel is up, but there is no handshake with Truba: %s will go into a tunnel that does not respond. Check the server and the tunnel settings first."
+msgstr "Туннель поднят, но рукопожатия с Трубой нет: %s уйдёт в Туннель, который не отвечает. Сначала проверьте сервер и настройки Туннеля."
+
+msgid "traffic of tunnel categories"
+msgstr "трафик Категорий Туннеля"
+
+msgid "all traffic"
+msgstr "весь трафик"
+
+msgid "Tunnel: %s. Emergency block is on: until the tunnel works, sites from tunnel categories will be unreachable. Everything else goes direct."
+msgstr "Туннель: %s. Аварийная блокировка включена: пока Туннель не заработает, сайты из Категорий Туннеля будут недоступны. Остальное идёт Напрямую."
+
+msgid "Tunnel: %s. Emergency block is on: until the tunnel works, devices on the network and the router itself will have no internet. Set up the tunnel first or turn off Emergency block on the Tunnel tab."
+msgstr "Туннель: %s. Аварийная блокировка включена: пока Туннель не заработает, устройства сети и сам Роутер останутся без интернета. Сначала настройте Туннель или выключите Аварийную блокировку на вкладке «Туннель»."
+
 msgid "not responding"
 msgstr "не отвечает"
 
@@ -375,6 +393,12 @@ msgstr "Нет секции [Peer] с PublicKey"
 
 msgid "Cancel"
 msgstr "Отмена"
+
+msgid "Turn on routing while the tunnel is not ready?"
+msgstr "Включить Маршрутизацию, пока Туннель не готов?"
+
+msgid "Turn on"
+msgstr "Включить"
 
 msgid "Import"
 msgstr "Импортировать"

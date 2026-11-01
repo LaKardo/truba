@@ -1,10 +1,6 @@
 msgid ""
 msgstr "Content-Type: text/plain; charset=UTF-8"
 
-#: htdocs/luci-static/resources/view/truba/devices.js
-msgid "Names from DNS cache; shared IPs may belong to several domains."
-msgstr ""
-
 #: htdocs/luci-static/resources/truba/awg.js
 msgid "No PrivateKey in the [Interface] section"
 msgstr ""
@@ -397,6 +393,30 @@ msgstr ""
 msgid "working"
 msgstr ""
 
+#: htdocs/luci-static/resources/truba/common.js
+msgid "The tunnel works, but routing is off: all IPv4 traffic goes direct. Turn it on in the status bar."
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/common.js
+msgid "The tunnel is up, but there is no handshake with Truba: %s will go into a tunnel that does not respond. Check the server and the tunnel settings first."
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/common.js
+msgid "traffic of tunnel categories"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/common.js
+msgid "all traffic"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/common.js
+msgid "Tunnel: %s. Emergency block is on: until the tunnel works, sites from tunnel categories will be unreachable. Everything else goes direct."
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/common.js
+msgid "Tunnel: %s. Emergency block is on: until the tunnel works, devices on the network and the router itself will have no internet. Set up the tunnel first or turn off Emergency block on the Tunnel tab."
+msgstr ""
+
 #: menu.d
 msgid "Devices"
 msgstr ""
@@ -492,6 +512,18 @@ msgstr ""
 
 #: htdocs/luci-static/resources/truba/ui/kit.js
 msgid "Cancel"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/ui/kit.js
+msgid "Routing"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/ui/kit.js
+msgid "Turn on routing while the tunnel is not ready?"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/ui/kit.js
+msgid "Turn on"
 msgstr ""
 
 #: htdocs/luci-static/resources/truba/ui/kit.js
@@ -679,6 +711,10 @@ msgid "Connections: %d"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/devices.js
+msgid "Names from DNS cache; shared IPs may belong to several domains."
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/devices.js
 msgid "Close"
 msgstr ""
 
@@ -719,7 +755,7 @@ msgid "State"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/dns.js
-msgid "queried all at once"
+msgid "fallback after 100 ms or an error"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/dns.js
@@ -1042,10 +1078,6 @@ msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/overview.js
 msgid "Truba IP"
-msgstr ""
-
-#: htdocs/luci-static/resources/view/truba/overview.js
-msgid "Routing"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/overview.js

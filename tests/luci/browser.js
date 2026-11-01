@@ -1547,6 +1547,99 @@ async function waitApply(page) {
 	result(await applied(t0, (st) => st.routing === false && st.mosdns === false),
 		'«Применить» панели изменений: Маршрутизация выкл → mosdns остановлен');
 
+	// Включение Маршрутизации, пока Туннель не готов (ADR 0019). На стенде awg0 поднят без рукопожатия,
+	// Аварийная блокировка вкл, сохранено «выкл». Каждый шаг кончается без несохранённых изменений.
+	const rtSw = '.hero input[data-opt="truba.main.routing"]';
+	const dlgText = () => sr(() => document.querySelector('.truba-root').shadowRoot.querySelector('dialog.dlg[open]')?.innerText || null);
+	const dlgWait = () => page.waitForFunction(() => !!document.querySelector('.truba-root').shadowRoot.querySelector('dialog.dlg[open]'),
+		{ timeout: 3000 }).then(() => true, () => false);
+	const dlgCancel = async () => {
+		await tap('dialog.dlg[open] [data-act="cancel"]');
+		await page.waitForFunction(() => !document.querySelector('.truba-root').shadowRoot.querySelector('dialog.dlg[open]'), { timeout: 3000 }).catch(() => {});
+	};
+	const swState = (sel) => sr((sel) => {
+		const r = document.querySelector('.truba-root').shadowRoot;
+		return { checked: r.querySelector(sel)?.checked, bar: r.querySelector('.changes')?.innerText || '' };
+	}, sel);
+	// Ответ status правит window.__stMod — и полного запроса «Обзора», и part='rules'. Обёртка живёт до
+	// перехода на другую страницу.
+	const stWrap = () => sr(async () => {
+		const c = await L.require('truba.common');
+		const orig = c.callStatus;
+		c.callStatus = (...a) => orig.apply(c, a).then((s) => { window.__polled = true; return (window.__stMod && s) ? window.__stMod(s) : s; });
+	});
+	const stPolled = () => sr(() => { window.__polled = false; }).then(() => until(() => sr(() => window.__polled), 12000)).then(() => settled(page));
+	await page.goto(url('overview'), { waitUntil: 'networkidle2' });
+	await settled(page);
+	await (await shadowSel(page, rtSw)).click();
+	const askDead = await dlgWait() && await dlgText();
+	await dlgCancel();
+	const afterCancel = await swState(rtSw);
+	result(/no handshake with Truba/.test(askDead || '') && afterCancel.checked === false && !afterCancel.bar,
+		'Маршрутизация: Туннель без рукопожатия — подтверждение, «Отмена» ничего не меняет', `${askDead} ${JSON.stringify(afterCancel)}`);
+
+	await (await shadowSel(page, rtSw)).click();
+	await dlgWait();
+	await tap('dialog.dlg[open] [data-act="confirm"]');
+	const confirmed = await page.waitForFunction(() => document.querySelector('.truba-root').shadowRoot.querySelector('.changes')?.innerText,
+		{ timeout: 3000 }).then((h) => h.jsonValue()).catch(() => '');
+	const onAfter = (await swState(rtSw)).checked;
+	result(/Unapplied changes: 1/.test(confirmed) && onAfter === true, 'Маршрутизация: «Включить» в окне — одно несохранённое изменение',
+		`${confirmed.replace(/\s+/g, ' ')} ${onAfter}`);
+	await resetChanges();
+
+	await sr(async () => (await L.require('truba.ui.app')).set('truba', 'main', 'killswitch', '0'));
+	await (await shadowSel(page, rtSw)).click();
+	const askKs0 = await dlgWait() && await dlgText();
+	await dlgCancel();
+	result(/no handshake with Truba/.test(askKs0 || ''), 'Маршрутизация: без рукопожатия спрашивает и при выключенной Аварийной блокировке', askKs0);
+
+	await stWrap();
+	// Итог строки состояния до подмены: подсказка не должна его менять (не предупреждение).
+	const heroSum = () => sr(() => {
+		const r = document.querySelector('.truba-root').shadowRoot;
+		return (r.querySelector('.hero .st .dot')?.className || '') + ' | ' + (r.querySelector('.hero h3')?.innerText || '');
+	});
+	const heroBefore = await heroSum();
+	await sr(() => { window.__stMod = (s) => ({ ...s, tunnel: { ...s.tunnel, up: false, awg: null } }); });
+	await stPolled();
+	await (await shadowSel(page, rtSw)).click();
+	const askDown = await dlgWait();
+	const downBar = (await swState(rtSw)).bar;
+	result(!askDown && /Unapplied changes: 2/.test(downBar), 'Маршрутизация: Туннель не поднят, блокировка выкл — без подтверждения',
+		`${askDown} ${downBar.replace(/\s+/g, ' ')}`);
+	if (askDown)
+		await dlgCancel();
+	await resetChanges();
+
+	await sr(() => { window.__stMod = (s) => ({ ...s, tunnel: { ...s.tunnel, up: true,
+		awg: { handshake: Math.floor(Date.now() / 1000) - 5, handshake_age: 5 } } }); });
+	await stPolled();
+	const idle = await sr(() => {
+		const r = document.querySelector('.truba-root').shadowRoot;
+		const t = r.querySelector('.hero .idle')?.innerText || '';
+		return { t, n: t ? r.textContent.split(t).length - 1 : 0 };
+	});
+	const heroAfter = await heroSum();
+	result(/routing is off/.test(idle.t) && idle.n === 1 && heroAfter === heroBefore,
+		'«Обзор»: Туннель работает, Маршрутизация выкл — подсказка, не предупреждение', `${JSON.stringify(idle)} ${heroBefore} → ${heroAfter}`);
+	await (await shadowSel(page, rtSw)).click();
+	const askReady = await dlgWait();
+	const readyBar = (await swState(rtSw)).bar;
+	result(!askReady && /Unapplied changes: 1/.test(readyBar), 'Маршрутизация: Туннель готов — без подтверждения', `${askReady} ${readyBar.replace(/\s+/g, ' ')}`);
+	if (askReady)
+		await dlgCancel();
+	await resetChanges();
+
+	await page.goto(url('rules'), { waitUntil: 'networkidle2' });
+	await settled(page);
+	await (await shadowSel(page, '.mode input[data-opt="truba.main.routing"]')).click();
+	const askRules = await dlgWait() && await dlgText();
+	await dlgCancel();
+	const rulesAfter = await swState('.mode input[data-opt="truba.main.routing"]');
+	result(/no handshake with Truba/.test(askRules || '') && rulesAfter.checked === false && !rulesAfter.bar,
+		'«Правила»: переключатель Маршрутизации спрашивает так же', `${askRules} ${JSON.stringify(rulesAfter)}`);
+
 	// Темы LuCI: режим страницы — по яркости фона темы; снимки на ПК и телефоне. На 375 точках нет
 	// горизонтальной прокрутки ни у страницы, ни у корня Трубы.
 	const theme = async (path) => {

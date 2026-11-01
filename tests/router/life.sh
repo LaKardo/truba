@@ -11,6 +11,21 @@ sh /etc/uci-defaults/90-truba
 check "после повторного uci-defaults правил по-прежнему нет" test -z "$(uci show truba | grep '=rule$')"
 truba reset-rules all >/dev/null; truba reset-rules selective >/dev/null
 
+section "обновление пакета: Маршрутизация (ADR 0019)"
+rt() { uci -q get truba.main.routing; }
+sh /etc/uci-defaults/90-truba
+check "обновление: включённая Маршрутизация остаётся" test "$(rt)" = 1
+uci delete truba.main.routing; uci commit truba
+sh /etc/uci-defaults/90-truba
+check "обновление без строки routing: прежнее умолчание «вкл» записано" test "$(rt)" = 1
+# Повторная установка после apk del: /etc/config/truba остался, firewall.orig удалён вместе с пакетом.
+FWO="$(eval "$(truba env)"; echo "$TRUBA_STATE_DIR")/firewall.orig"
+cp "$FWO" /tmp/firewall.orig.bak; rm -f "$FWO"
+sh /etc/uci-defaults/90-truba
+check "повторная установка: Маршрутизация выключена и при оставшемся конфиге" test "$(rt)" = 0
+cp /tmp/firewall.orig.bak "$FWO"
+uci set truba.main.routing='1'; uci commit truba
+
 section "последняя удачная копия правил (ADR 0006)"
 [ -s /etc/truba/good/meta.json ] || logread -e 'последняя удачная копия'
 check "копия на флеше: правила, конфиг mosdns, описание" eval '[ -s /etc/truba/good/truba.nft ] && [ -s /etc/truba/good/mosdns.json ] && [ -s /etc/truba/good/meta.json ]'
@@ -105,5 +120,63 @@ check "dnsmasq вернулся к серверам из бэкапа, бэка�
 check "запись в журнале, дальше ждёт интернет" eval 'logread | grep -q "truba-reinstall.*DNS сети возвращён" && kill -0 "$RI"'
 kill "$RI" 2>/dev/null; for p in $(pgrep -f 'truba/reinstall[.]sh'); do kill "$p" 2>/dev/null; done
 kill "$(cat /tmp/dm-up.pid)" 2>/dev/null
+
+section "sysupgrade: Маршрутизация выключена на время установки (ADR 0019)"
+# Вернуть то, что сняла прошлая секция: бэкап DNS и службу. reinstall.sh меняет dhcp и truba — копии.
+cp /tmp/dnsmasq.orig.json /etc/truba/state/dnsmasq.json
+check "служба снова запущена" bounded 90 /etc/init.d/truba start
+cp /etc/config/dhcp /tmp/dhcp.ri; cp /etc/config/truba /tmp/truba.ri; cp /etc/truba/state/dnsmasq.json /tmp/dnsmasq.ri.json
+# Заглушки: интернет есть, apk «ставит» пакеты и запоминает routing на момент установки Трубы.
+# Перезапуск сети и службы — через NETWORK_RESTART и TRUBA_INIT: их пути в скрипте абсолютные.
+mkdir -p /tmp/ri-bin
+printf '#!/bin/sh\nexit 0\n' > /tmp/ri-bin/nslookup
+cat > /tmp/ri-bin/apk <<-'EOF'
+	#!/bin/sh
+	case "$1" in
+	list|update) exit 0 ;;
+	esac
+	[ "$2" = kmod-amneziawg ] && exit "$(cat /tmp/apk-kmod)"
+	case " $* " in
+	*" truba "*) uci -q get truba.main.routing > /tmp/apk-routing; exit "$(cat /tmp/apk-rc)" ;;
+	esac
+	exit 0
+EOF
+chmod +x /tmp/ri-bin/nslookup /tmp/ri-bin/apk
+LIST=/etc/apk/repositories.d/truba.list
+[ -f "$LIST" ] && cp "$LIST" /tmp/truba.list.ri
+mkdir -p "${LIST%/*}"
+echo 'https://lakardo.github.io/truba/25.12.0/mediatek/filogic/packages.adb' > "$LIST"
+# ri N KMOD RC [нет-строки] — один прогон reinstall.sh; журнал прогона — в /tmp/ri.log.
+ri() {
+	echo "$2" > /tmp/apk-kmod; echo "$3" > /tmp/apk-rc; rm -f /tmp/apk-routing
+	uci set truba.main.routing='1'
+	[ -n "${4:-}" ] && uci delete truba.main.routing
+	uci commit truba
+	logger -t truba-test "reinstall $1"
+	bounded 60 env PATH="/tmp/ri-bin:$PATH" NETWORK_RESTART=true TRUBA_INIT=true sh /etc/truba/reinstall.sh >/dev/null 2>&1
+	logread | sed -n "/truba-test: reinstall $1\$/,\$p" | grep truba-reinstall > /tmp/ri.log
+}
+rt() { uci -q get truba.main.routing; }
+inlog() { grep -qF "$1" /tmp/ri.log; }
+ri 1 0 0
+check "модуль есть: apk ставит Трубу с выключенной Маршрутизацией, потом она возвращена" \
+	eval '[ "$(cat /tmp/apk-routing)" = 0 ] && [ "$(rt)" = 1 ]'
+check "модуль есть: в журнале выключение и возврат" \
+	eval 'inlog "Маршрутизация выключена на время установки (была: 1)" && inlog "Маршрутизация возвращена: 1"'
+ri 2 1 0
+check "модуля нет: Маршрутизация остаётся выключенной" test "$(rt)" = 0
+check "модуля нет: в журнале команда установки модуля и возврата" \
+	eval 'inlog "apk add kmod-amneziawg" && inlog "uci set truba.main.routing=1" && ! inlog "Маршрутизация возвращена"'
+ri 3 0 1
+check "установка не удалась: Маршрутизация остаётся выключенной" test "$(rt)" = 0
+check "установка не удалась: в журнале команда возврата" eval 'inlog "не удалось установить" && inlog "uci set truba.main.routing=1"'
+ri 4 0 0 nostring
+check "строки routing не было: после переустановки «вкл» записано явно" \
+	eval '[ "$(cat /tmp/apk-routing)" = 0 ] && [ "$(rt)" = 1 ] && inlog "(была: 1)"'
+rm -rf /tmp/ri-bin /tmp/apk-kmod /tmp/apk-rc /tmp/apk-routing /tmp/ri.log
+if [ -f /tmp/truba.list.ri ]; then mv /tmp/truba.list.ri "$LIST"; else rm -f "$LIST"; fi
+cp /tmp/dhcp.ri /etc/config/dhcp; cp /tmp/truba.ri /etc/config/truba; cp /tmp/dnsmasq.ri.json /etc/truba/state/dnsmasq.json
+/etc/init.d/dnsmasq restart >/dev/null 2>&1
+reload "после reinstall.sh"
 
 finish

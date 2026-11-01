@@ -43,7 +43,8 @@ export function upstream_ok(u) {
 // Поля: type, def; int — lo, hi и min («0 или не меньше min»); enum — values; pattern — re (POSIX).
 export const SCHEMA = {
 	main: {
-		routing:    { type: 'bool', def: true },
+		// Маршрутизацию включает только владелец (ADR 0019).
+		routing:    { type: 'bool', def: false },
 		mode:       { type: 'enum', values: [ 'all', 'selective' ], def: 'all' },
 		killswitch: { type: 'bool', def: true },
 		// Имя интерфейса попадает в правила nftables и в имена объектов ubus.

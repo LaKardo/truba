@@ -279,6 +279,10 @@ function apply_config(res, prev) {
 		push(res.warnings, 'tunnel_not_configured');
 
 	res.routing = cfg.routing;
+	// Раз на старт службы (applied.json — в /var/run) и при выключении: видно и первую установку,
+	// и Маршрутизацию, выключенную без ведома владельца (ADR 0019).
+	if (!cfg.routing && prev.routing !== false)
+		U.info('Маршрутизация выключена: IPv4-трафик и DNS сети служба не трогает');
 	res.mode = cfg.mode;
 	res.vps = vps;
 	res.endpoint = tinfo.endpoint;

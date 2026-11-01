@@ -8,7 +8,7 @@ OpenWrt-пакет `truba` (ImmortalWrt 25.12, `PKGARCH:=all`) — служба 
 
 ### ubus `truba` — `files/usr/share/rpcd/ucode/truba-api.uc`
 
-- Чтение: `status(cached, part)`, `lists()`, `categories()`, `schema()`, `sets()`, `devices(lite)`, `connections(ip)`, `check(target, mac)`, `nat_result()`, `tunnel_result()`, `rates(span=600, since=0)`, `log(lines=200)` [truba-api.uc:methods]
+- Чтение: `status(cached, part)` (`part='dns'|'rules'` — облегчённый ответ; `rules` отдаёт и `tunnel{configured,disabled,up,awg}`, `health`), `lists()`, `categories()`, `schema()`, `sets()`, `devices(lite)`, `connections(ip)`, `check(target, mac)`, `nat_result()`, `tunnel_result()`, `rates(span=600, since=0)`, `log(lines=200)` [truba-api.uc:methods]
 - Фоновые действия: `nat_test()`, `tunnel_test()`, `update_lists(force)` возвращают `{started}`; `rollback_lists()` меняет файлы сразу, применение — в фоне [truba-api.uc:methods]
 
 ### CLI — `files/usr/sbin/truba`
@@ -19,14 +19,14 @@ OpenWrt-пакет `truba` (ImmortalWrt 25.12, `PKGARCH:=all`) — служба 
 
 - `files/etc/init.d/truba` — `START=99`, `USE_PROCD=1`; `start_service` выполняет `truba apply` и открывает procd-экземпляры: `stats` всегда, `mosdns` при `applied.mosdns == true` и непустом конфиге, `watchdog` при `TRUBA_WATCHDOG=1`; `stop_service` — `truba teardown`; `service_triggers` — reload по UCI `truba`/`network` и событиям интерфейса Туннеля [init.d/truba:start_service, stop_service, service_triggers]
 - `files/etc/hotplug.d/iface/50-truba` — `truba hotplug` на каждое событие интерфейса
-- `files/etc/uci-defaults/90-truba` — первая установка: зона `truba`, fullcone, Стартовые настройки, строка переустановки в `rc.local`
-- `files/etc/truba/reinstall.sh` — переустановка пакетов после sysupgrade
+- `files/etc/uci-defaults/90-truba` — первая установка: зона `truba`, fullcone, Стартовые настройки, `routing '0'` (и при оставшемся конфиге), строка переустановки в `rc.local`; обновление без строки `routing` — `routing '1'` (ADR 0019)
+- `files/etc/truba/reinstall.sh` — переустановка пакетов после sysupgrade; на время `apk add` `routing '0'`, прежнее значение возвращается, только если установился `kmod-amneziawg` (ADR 0019)
 - `files/usr/share/truba/uninstall.sh` — откат при удалении (prerm)
 - `files/lib/upgrade/keep.d/truba` — что сохраняет sysupgrade
 
 ### Настройки UCI — `files/etc/config/truba`
 
-- `main`: `routing`, `mode` (`all`|`selective`), `killswitch`, `iface` (`awg0`), `zone` (список), `dns_hijack`, `upnp`, `stun` (список STUN-серверов; пусто — встроенный список `nattest.uc:DEFAULT_SERVERS`; в поставляемом конфиге — закомментированный пример)
+- `main`: `routing` (по умолчанию `0`, ADR 0019), `mode` (`all`|`selective`), `killswitch`, `iface` (`awg0`), `zone` (список), `dns_hijack`, `upnp`, `stun` (список STUN-серверов; пусто — встроенный список `nattest.uc:DEFAULT_SERVERS`; в поставляемом конфиге — закомментированный пример)
 - `dns`: `tunnel_upstream`, `direct_upstream`, `port` (5335), `ttl_max`, `cache_size`, `lazy_cache_ttl`, `set_timeout`
 - `lists`: `geoip_url`, `geoip_mirror`, `geosite_url`, `geosite_mirror`, `via_tunnel`, `auto_update`
 - `watchdog`: `enabled`, `interval`, `handshake_max`, `fails`, `probe`
@@ -67,6 +67,7 @@ OpenWrt-пакет `truba` (ImmortalWrt 25.12, `PKGARCH:=all`) — служба 
 - Таблица не перезагружается целиком, если не изменился `nft_key` (routing, mode, iface, vps, socket_mark, dns_hijack, set_timeout) — обновляются только наборы; при полной перезагрузке счётчики переносятся из ядра всегда, элементы `gs_*4` — только при неизменном `gkey` [core.uc:nft_table_key, core.uc:apply_config]
 - Маршрутизация только IPv4 (ADR 0005): правила `ip -4` priority 1000 (fwmark) и 1001 (oif) в таблицу 77; mosdns отвечает пустым ответом на AAAA и HTTPS; IPv6-CIDR из geoip считаются, но не попадают в наборы [net.uc:ensure_rules, dns.uc:mosdns, dat.uc:parse_geoip]
 - Таблица 77: Туннель здоров — `default dev <iface>`; упал и включена Аварийная блокировка — `blackhole default`; иначе маршрут по умолчанию удаляется [net.uc:set_table, net.uc:routes]
+- Маршрутизация выключена — служба не трогает IPv4-трафик и DNS сети; применение с `routing=0` после включённой или первое после старта пишет `info` «Маршрутизация выключена…» (ADR 0019) [core.uc:apply_config]
 - Секции межсетевого экрана `<zone>_truba` и `<zone>_truba_no_ipv6` (REJECT вне ULA/link-local/multicast) — свои; чужие секции с тем же именем не трогаются (ADR 0014, 0016) [net.uc:zones_firewall, net.uc:no6_rule]
 - TTL в кэше mosdns не больше 3600 с, устройствам — не больше `ttl_max`; IP из DNS попадают в `gs_tunnel4`/`gs_direct4` со сроком `set_timeout` (ADR 0007) [dns.uc:mosdns, render.uc:dns_elems]
 - Новый `.dat` заменяет текущий только после совпадения sha256 и успешного `dat.validate`; при сбое распаковки списки откатываются на предыдущие [core.uc:update_lists, core.uc:unpack_lists]

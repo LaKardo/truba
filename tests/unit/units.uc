@@ -520,7 +520,7 @@ writefile(C.LISTS_DIR + '/geosite.dat',
 	T.geosite_cat('zmode2', [ 'domain:mode.example.io' ]));
 writefile(C.LISTS_DIR + '/geoip.dat', T.geoip_cat('ru', [ '5.0.0.0/8' ]) + T.geoip_cat('private', [ '192.168.0.0/16' ]));
 let rule = (tag, action) => sprintf("config rule\n\toption mode 'all'\n\toption set 'geosite'\n\toption tag '%s'\n\toption action '%s'\n\n", tag, action);
-config("config main 'main'\n\toption mode 'all'\n\n" + rule('zwide', 'direct') + rule('znarrow', 'tunnel') +
+config("config main 'main'\n\toption routing '1'\n\toption mode 'all'\n\n" + rule('zwide', 'direct') + rule('znarrow', 'tunnel') +
 	rule('zfull', 'direct') + rule('zrx', 'direct') + rule('zkw', 'block') +
 	"config rule\n\toption mode 'all'\n\toption set 'geoip'\n\toption tag 'ru'\n\toption action 'direct'\n");
 
@@ -570,9 +570,10 @@ for (let c in ucats?.cats ?? [])
 	sub[c.tag] = c.subset_of;
 check('вложенность: одинаковые Категории не вложены друг в друга', same(sub.zmode, []) && same(sub.zmode2, []),
 	sprintf('%J %J', sub.zmode, sub.zmode2));
-// Маршрутизация выключена: всё напрямую, Категории — для справки.
+// Маршрутизация выключена: всё напрямую, Категории — для справки. Строки routing нет — умолчание
+// схемы «выкл» (ADR 0019).
 let cfg0 = readfile('/etc/config/truba');
-config("config main 'main'\n\toption mode 'all'\n\toption routing '0'\n\n" + rule('zkw', 'block') +
+config("config main 'main'\n\toption mode 'all'\n\n" + rule('zkw', 'block') +
 	"config rule\n\toption mode 'all'\n\toption set 'geoip'\n\toption tag 'ru'\n\toption action 'direct'\n");
 x = K.check('my-kwtest.example.io');
 check('Маршрутизация выкл: домен — Напрямую, Категории видны',

@@ -92,7 +92,9 @@ uci set firewall.@defaults[0].flow_offloading='0'; uci commit firewall
 /etc/init.d/firewall reload >/dev/null 2>&1
 
 section "стенд: служба"
-uci set truba.watchdog.enabled='0'; uci commit truba
+# Первая установка выключает Маршрутизацию (ADR 0019); остальной стенд проверяет её включённой.
+check "пакет: Маршрутизация выключена по умолчанию" test "$(uci get truba.main.routing)" = 0
+uci set truba.main.routing='1'; uci set truba.watchdog.enabled='0'; uci commit truba
 /etc/init.d/truba enable
 check "стенд: служба запустилась" bounded 90 /etc/init.d/truba start
 wait_for 15 mosdns_up || fail "стенд: mosdns не слушает $(dns_port)"

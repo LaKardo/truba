@@ -426,10 +426,11 @@ function confUpstreamRe() {
 }
 const devSchema = { sections: {
 	device: { enabled: { type: 'bool', def: true }, policy: { type: 'enum', values: [ 'tunnel', 'direct', 'rules' ], def: 'tunnel' } },
-	main: { iface: { type: 'pattern', re: '^[A-Za-z0-9_]{1,15}$', def: 'awg0' } },
+	main: { iface: { type: 'pattern', re: '^[A-Za-z0-9_]{1,15}$', def: 'awg0' }, routing: { type: 'bool', def: false },
+		killswitch: { type: 'bool', def: true }, mode: { type: 'enum', values: [ 'all', 'selective' ], def: 'all' } },
 	lists: { geoip_url: { type: 'string', def: 'https://x' } },
 	dns: { set_timeout: { type: 'int', def: 86400, lo: 0, hi: 604800, min: 600 } },
-	watchdog: { probe: { type: 'ipv4', def: '' } }
+	watchdog: { probe: { type: 'ipv4', def: '' }, handshake_max: { type: 'int', def: 180, lo: 60, hi: 3600 } }
 }, upstream_schemes: [ 'udp', 'tcp', 'tcp+pipeline', 'tls', 'tls+pipeline', 'https', 'h3', 'quic', 'doq' ],
 	upstream_re: confUpstreamRe(), consts: { fw_zone: 'truba' } };
 // String.prototype.format задаёт luci.js; в Node — замена для текстов ошибок полей и времени строк журнала (%02d).
@@ -439,7 +440,7 @@ String.prototype.format ??= function(...a) {
 };
 // state.deletes — опции, удалённые в браузере: LuCI uci.sections их не снимает, а uci.get — снимает.
 const devUci = { sections: (c, t) => devSecs.filter((s) => (s['.conf'] || 'truba') == c && s['.type'] == t),
-	get: (c, sid, o) => devSecs.find((s) => (s['.conf'] || 'truba') == c && s['.name'] == sid)?.[o], state: { deletes: {} } };
+	get: (c, sid, o) => devSecs.find((s) => (s['.conf'] || 'truba') == c && s['.name'] == sid)?.[o], state: { deletes: {}, values: {} } };
 let cdev = null;
 try {
 	cdev = new Function('baseclass', 'rpc', 'uci', '_', 'L', 'E', 'document', commonSrc)(
@@ -769,6 +770,34 @@ for (const s of translated.keys())
 	const stopped = await st({ service: false }).callStatus().then((x) => x.service === false ? 'resolved' : '?', () => 'rejected');
 	check(empty == 'rejected' && stopped == 'resolved', `common.callStatus: ответ без service — ошибка, { service: false } — ответ (${empty}, ${stopped})`);
 	check(cdev.tunnelState?.({})?.[0] === '', `common.tunnelState({}): без данных — не «служба остановлена» (${cdev.tunnelState?.({})})`);
+	// Включение Маршрутизации (ADR 0019): подтверждение, если Туннель не готов. Поднятый без рукопожатия —
+	// при любой Аварийной блокировке; остальные состояния — только с ней. Текст — по Режиму.
+	const main = { '.name': 'main', '.type': 'main' };
+	devSecs.push(main);
+	const ok = { service: true, tunnel: { configured: true, up: true }, health: { state: 'healthy' } };
+	const fresh = { ...ok, tunnel: { ...ok.tunnel, awg: { handshake: 1, handshake_age: 5 } } };
+	const stale = { ...ok, tunnel: { ...ok.tunnel, awg: { handshake: 1, handshake_age: 200 } } };
+	const R = (st) => cdev.routingRisk?.(st);
+	const notReady = [ { service: false, tunnel: {} }, { service: true, tunnel: { configured: false } },
+		{ service: true, tunnel: { configured: true, disabled: true } }, { service: true, tunnel: { configured: true, up: false } },
+		{ ...ok, health: { state: 'down' } } ];
+	check([ null, undefined, {}, { service: true } ].every((s) => R(s) === null), 'common.routingRisk: нет данных или служба без tunnel — не спрашиваем');
+	check(R(fresh) === null && cdev.tunnelReady(fresh) === true, 'common.routingRisk: Туннель со свежим рукопожатием — без вопроса');
+	check(notReady.every((s) => /^Tunnel: .*devices on the network/.test(R(s) || '')), 'common.routingRisk: Туннель не готов, блокировка вкл — без интернета');
+	check([ ok, stale, { ...ok, tunnel: { ...ok.tunnel, awg: { handshake: 0, handshake_age: null } } } ].every((s) => /no handshake.*all traffic/.test(R(s) || '')),
+		'common.routingRisk: поднят без свежего рукопожатия — «нет рукопожатия»');
+	check(R({ ...stale, health: { state: 'healthy', handshake_max: 300 } }) === null, 'common.tunnelReady: порог — из health.handshake_max, а не из настроек');
+	main.mode = 'selective';
+	check(/tunnel categories will be unreachable/.test(R(notReady[1]) || '') && /traffic of tunnel categories/.test(R(ok) || ''),
+		'common.routingRisk: «Выборочный» — свой текст');
+	main.mode = 'all';
+	main.killswitch = '0';
+	check(notReady.every((s) => R(s) === null) && /no handshake/.test(R(ok) || ''),
+		'common.routingRisk: блокировка выкл — спрашиваем только про поднятый Туннель без рукопожатия');
+	devUci.state.values = { truba: { main: { routing: '1' } } };
+	check(cdev.savedGet('main', 'routing') === true && cdev.get('main', 'routing') === false, 'common.savedGet: сохранённое значение, а не браузера');
+	devUci.state.values = {};
+	devSecs.splice(devSecs.indexOf(main), 1);
 	// Фоновая проверка: без started в ответе она не запущена — ошибка, а не прежний итог за новый.
 	const nat = new Function('baseclass', 'rpc', 'uci', '_', 'L', 'E', 'document', commonSrc)(baseclass,
 		{ declare: (o) => () => Promise.resolve(o.method == 'nat_result' ? { time: 5, ok: true } : {}) }, devUci, (s) => s, stub, stub, { querySelector: () => true });

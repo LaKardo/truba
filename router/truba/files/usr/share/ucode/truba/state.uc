@@ -222,6 +222,8 @@ function awg_peer(dev) {
 
 // Состояние для «Обзора»: его опрашивают раз в 5 с, поэтому здесь только то, что
 // «Обзор» показывает, одно соединение ubus и без лишних процессов. Версии списков — lists().
+// part: 'dns' и 'rules' — для вкладок «DNS» и «Правила» (раз в 10 с). «Правилам» нужно состояние
+// Туннеля: по нему LuCI решает, спросить ли подтверждение при включении Маршрутизации (ADR 0019).
 export function status(allow_cached, part) {
 	let ub = connect();
 	let cfg = F.load();
@@ -232,8 +234,13 @@ export function status(allow_cached, part) {
 			res.mosdns = running(ub, 'truba', 'mosdns');
 			res.dns_cache = (cfg.routing && applied?.dns_api) ? dns_cache(applied.dns_api, cfg) : null;
 		}
-		else
+		else {
+			let tinfo = F.tunnel_info(cfg.iface, ub);
+			res.tunnel = { configured: tinfo.exists, disabled: tinfo.disabled, up: tinfo.up,
+				awg: tinfo.up ? awg_peer(tinfo.device) : null };
+			res.health = health_state();
 			res.lists = { next: N.cron_next() };
+		}
 		ub?.disconnect();
 		return res;
 	}
