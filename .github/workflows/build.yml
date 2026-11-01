@@ -373,10 +373,14 @@ jobs:
           # Зависимости — в образ заранее: под procd у контейнера нет сети. amneziawg-tools под x86-64
           # может не быть в фиде образа — тогда пустой пакет с тем же именем.
           deps=$(grep -oE '[a-z0-9.+_-]+ \(>=[^)]*\)' router/truba/Makefile | cut -d' ' -f1 | grep -vx amneziawg-tools | xargs)
-          docker run --name upgrade-base "$IMG" sh -c "set -e; apk update >/dev/null; apk add $TEST_PKGS $deps >/dev/null
+          # mkpkg есть только у apk из SDK: у apk в образе роутера его нет.
+          stub="$PWD/upgrade-stub"
+          mkdir -p "$stub/root"
+          sdk/staging_dir/host/bin/apk mkpkg --info name:amneziawg-tools --info version:0-r0 \
+            --info arch:noarch --files "$stub/root" --output "$stub/awg-stub.apk"
+          docker run --name upgrade-base -v "$stub:/stub:ro" "$IMG" sh -c "set -e; apk update >/dev/null; apk add $TEST_PKGS $deps >/dev/null
             apk add amneziawg-tools >/dev/null 2>&1 || {
-              apk mkpkg --info name:amneziawg-tools --info version:0-r0 --info arch:noarch --output /tmp/awg-stub.apk
-              apk add --allow-untrusted /tmp/awg-stub.apk >/dev/null; echo 'amneziawg-tools — пустой пакет'; }"
+              apk add --allow-untrusted /stub/awg-stub.apk >/dev/null; echo 'amneziawg-tools — пустой пакет'; }"
           docker commit upgrade-base truba-upgrade >/dev/null
           docker rm upgrade-base >/dev/null
 
