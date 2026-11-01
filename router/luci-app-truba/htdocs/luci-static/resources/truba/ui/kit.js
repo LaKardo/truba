@@ -50,7 +50,7 @@ function Switch({ label, checked, disabled, opt, aria, dot, onChange }) {
 	const changed = dot !== false && app.changed(c, s, o);
 	return html`<label class="sw">
 		<input type="checkbox" data-opt=${opt} aria-label=${aria} checked=${!!checked} disabled=${!!disabled}
-			onChange=${(ev) => onChange(ev.target.checked)} />
+			onChange=${(ev) => onChange(ev.target.checked, ev)} />
 		<span>${label}</span>${changed ? html`<${Dot} level="warn" label=${_('changed, not applied yet')} />` : ''}
 	</label>`;
 }
@@ -390,6 +390,26 @@ function Dialog({ open, title, confirm, disabled, onConfirm, onClose, children }
 	</dialog>`;
 }
 
+// Переключатель «Маршрутизация» (ADR 0019): включение, которое оборвёт интернет или его часть,
+// сначала подтверждается. Возврат к сохранённому «вкл» сеть не меняет — без вопроса. st — ответ
+// truba status. Окно — соседом переключателя, не внутри <label>: клик в окне переключал бы флажок.
+function RoutingSwitch({ st }) {
+	const { html, useState } = app.lib;
+	const [ ask, setAsk ] = useState(null);
+	const set = (on) => app.set('truba', 'main', 'routing', on ? '1' : '0');
+	const change = (on, ev) => {
+		const risk = (on && !common.savedGet('main', 'routing')) ? common.routingRisk(st) : null;
+		if (!risk)
+			return set(on);
+		// Флажок контролируемый, но UCI не менялся — Preact его не перерисует.
+		ev.target.checked = false;
+		setAsk(risk);
+	};
+	return html`<${Switch} label=${_('Routing')} opt="truba.main.routing" checked=${common.get('main', 'routing')} onChange=${change} />
+		<${Dialog} open=${ask != null} title=${_('Turn on routing while the tunnel is not ready?')} confirm=${_('Turn on')}
+			onConfirm=${() => set(true)} onClose=${() => setAsk(null)}>${ask}<//>`;
+}
+
 // Последнее сообщение app.toast; через 5 с скрывается. Область role="status" есть всегда: экранный
 // чтец объявляет текст, который в неё приходит.
 function Toast() {
@@ -527,4 +547,4 @@ function ChangesBar({ view }) {
 }
 
 return baseclass.extend({ Card, Stat, Badge, Dot, Icon, Switch, Segmented, Chips, ActionTag, ShareBar, KV, Busy, Empty, Go, ChangesBar, step,
-	ActionPicker, FieldBox, Field, Fold, UpstreamList, DropZone, Dialog, Toast, Check, PageHead });
+	ActionPicker, FieldBox, Field, Fold, UpstreamList, DropZone, Dialog, RoutingSwitch, Toast, Check, PageHead });

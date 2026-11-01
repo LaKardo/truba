@@ -79,12 +79,12 @@ function Zones() {
 	</div>`;
 }
 
-function ModeCard() {
+function ModeCard({ store }) {
 	const { html } = app.lib;
+	const { status } = app.use(store);
 	const mode = common.get('main', 'mode');
 	return html`<${kit.Card} cls="mode" title=${_('Mode', 'truba')}
-		aside=${html`<${kit.Switch} label=${_('Routing')} opt="truba.main.routing" checked=${common.get('main', 'routing')}
-			onChange=${(on) => app.set('truba', 'main', 'routing', on ? '1' : '0')} />`}>
+		aside=${html`<${kit.RoutingSwitch} st=${status} />`}>
 		<div class="wide-seg"><${kit.Segmented} label=${_('Mode', 'truba')} items=${MODES()} value=${mode}
 			onChange=${(v) => app.set('truba', 'main', 'mode', v)} /></div>
 		<p class="mu note">${(mode == 'all')
@@ -292,7 +292,7 @@ function Page({ store, timing, view }) {
 			text=${_('Which traffic goes through the tunnel. Categories are taken from geoip.dat and geosite.dat as they are; new categories are never created.')} />
 		<div class="grid g2">
 			<${kit.Card} cls="w3 where" title=${_('Where it goes')} aside=${_('for all devices')}><${kit.Check} full onCat=${onCat} /></${kit.Card}>
-			<${ModeCard} />
+			<${ModeCard} store=${store} />
 			<${RuleSets} store=${store} timing=${timing} />
 			${categories}
 		</div>

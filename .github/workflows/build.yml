@@ -345,6 +345,60 @@ jobs:
           printf '{"version":"%s","target":"%s","subtarget":"%s","built":"%s"}\n' \
             "$IWRT_VERSION" "$TARGET" "$SUBTARGET" "$(date -u +%FT%TZ)" > "$dst/feed.json"
 
+      # Условие выпуска (ADR 0019): пакеты ставятся и обновляются через apk, служба запускается из
+      # postinst и не трогает сеть. Прежняя версия — из опубликованного фида этой же версии
+      # ImmortalWrt (truba собрана с PKGARCH:=all и ставится на x86-64).
+      - name: Установка и обновление пакета
+        run: |
+          set -euo pipefail
+          . tests/images.env
+          new="$PWD/publish/$IWRT_VERSION/$TARGET/$SUBTARGET"
+          old="$PWD/upgrade-old"
+          mkdir -p "$old"
+          base="https://lakardo.github.io/truba/$IWRT_VERSION/$TARGET/$SUBTARGET"
+          prev=
+          if curl -fsSL -o "$old/packages.adb" "$base/packages.adb"; then
+            prev=$(sdk/staging_dir/host/bin/apk adbdump "$old/packages.adb" \
+              | awk '/^  - name: /{n=$3} /^    version: /{if (n=="truba") {print $2; exit}}')
+          fi
+          if [ -n "$prev" ]; then
+            curl -fsSL -o "$old/truba-$prev.apk" "$base/truba-$prev.apk" \
+              || { echo "::error::в фиде есть truba $prev, но файл не скачался"; exit 1; }
+            echo "прежняя версия: truba $prev"
+          else
+            echo "::warning::в опубликованном фиде $IWRT_VERSION нет truba — случаи обновления пропущены"
+          fi
+          rm -f "$old/packages.adb"
+
+          # Зависимости — в образ заранее: под procd у контейнера нет сети. amneziawg-tools под x86-64
+          # может не быть в фиде образа — тогда пустой пакет с тем же именем.
+          deps=$(grep -oE '[a-z0-9.+_-]+ \(>=[^)]*\)' router/truba/Makefile | cut -d' ' -f1 | grep -vx amneziawg-tools | xargs)
+          # mkpkg есть только у apk из SDK: у apk в образе роутера его нет.
+          stub="$PWD/upgrade-stub"
+          mkdir -p "$stub/root"
+          sdk/staging_dir/host/bin/apk mkpkg --info name:amneziawg-tools --info version:0-r0 \
+            --info arch:noarch --files "$stub/root" --output "$stub/awg-stub.apk"
+          docker run --name upgrade-base -v "$stub:/stub:ro" "$IMG" sh -c "set -e; apk update >/dev/null; apk add $TEST_PKGS $deps >/dev/null
+            apk add amneziawg-tools >/dev/null 2>&1 || {
+              apk add --allow-untrusted /stub/awg-stub.apk >/dev/null; echo 'amneziawg-tools — пустой пакет'; }"
+          docker commit upgrade-base truba-upgrade >/dev/null
+          docker rm upgrade-base >/dev/null
+
+          cases="1"
+          [ -z "$prev" ] || cases="1 2 3 4"
+          failed=0
+          for c in $cases; do
+            docker rm -f "upgrade-$c" >/dev/null 2>&1 || true
+            docker run -d --privileged --name "upgrade-$c" -v "$PWD:/repo:ro" -v "$new:/new:ro" -v "$old:/old:ro" \
+              --entrypoint sh truba-upgrade \
+              -c 'mount --bind /dev/null /proc/kmsg && echo "touch /tmp/booted" > /etc/rc.local && exec /sbin/init' >/dev/null
+            for _ in $(seq 60); do docker exec "upgrade-$c" test -e /tmp/booted 2>/dev/null && break; sleep 0.5; done
+            docker exec "upgrade-$c" sh /repo/tests/router/upgrade.sh "$c" || failed=1
+            [ "$failed" = 0 ] || docker exec "upgrade-$c" logread | tail -40
+            docker rm -f "upgrade-$c" >/dev/null
+          done
+          exit "$failed"
+
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: feed-${{ matrix.version }}

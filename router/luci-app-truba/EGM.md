@@ -20,10 +20,10 @@ OpenWrt-пакет `luci-app-truba` — интерфейс «Службы → Т
 
 ### Общие модули — `htdocs/luci-static/resources/truba/`
 
-- `common.js` — объявления rpc (`callStatus`, `callLists`, `callCategories`, `callSets`, `callCheck`, `callUpdateLists`, `callRollbackLists`, `callRates`, `callLog`, `callDevices`, `callDevicesLite`, `callConnections`, `runNatTest`, `runTunnelTest`), схема (`loadSchema`, `schema`, `get`, `fieldError`, `upstreamError`), хелперы правил, устройств, пробросов, Туннеля, журнала и форматирования; константы `TABS`, `WARNINGS`, `ACTION_LABELS`, `REASON_LABELS`, `VIA_LABELS`, `NAT_ERRORS`, `CHECK_ERRORS`, `UPNP_MISSING`, `NBSP` [common.js]
+- `common.js` — объявления rpc (`callStatus`, `callLists`, `callCategories`, `callSets`, `callCheck`, `callUpdateLists`, `callRollbackLists`, `callRates`, `callLog`, `callDevices`, `callDevicesLite`, `callConnections`, `runNatTest`, `runTunnelTest`), схема (`loadSchema`, `schema`, `get`, `savedGet`, `fieldError`, `upstreamError`), хелперы правил, устройств, пробросов, Туннеля (`tunnelState`, `tunnelReady`, `routingRisk`), журнала и форматирования; константы `TABS`, `WARNINGS`, `ACTION_LABELS`, `REASON_LABELS`, `VIA_LABELS`, `NAT_ERRORS`, `CHECK_ERRORS`, `UPNP_MISSING`, `ROUTING_IDLE`, `NBSP` [common.js]
 - `awg.js` — разбор и импорт `router.conf`: `parseConf`, `applyConf`, `peerSection`, `configured`, `version`, проверки `mtuError`, `rangeError`, `paramError`; карты `IFACE_KEYS`, `IFACE_BOOL`, `NUM_PARAMS`, `CPS_PARAMS` [awg.js]
 - `ui/app.js` — `load`, `lib`, `mount` (Shadow DOM), `luminance`, `schemeFrom`, `scheme`, `changes`, `changeCount`, `pending`, `changed`, `store`, `use`, `usePoll`, `poll`, `every`, `set`, `add`, `remove`, `restore`, `invalid`, `toast`, `toasts`, `onFlush`, `flush`, `reset`, `actions` [ui/app.js]
-- `ui/kit.js` — компоненты `Card`, `Stat`, `Badge`, `Dot`, `Icon`, `KV`, `Busy`, `Empty`, `Go`, `Fold`, `PageHead`, `Switch`, `Segmented`, `step`, `Chips`, `ActionTag`, `ShareBar`, `ActionPicker`, `FieldBox`, `Field`, `UpstreamList`, `DropZone`, `Dialog`, `Toast`, `Check`, `ChangesBar` [ui/kit.js]
+- `ui/kit.js` — компоненты `Card`, `Stat`, `Badge`, `Dot`, `Icon`, `KV`, `Busy`, `Empty`, `Go`, `Fold`, `PageHead`, `Switch`, `Segmented`, `step`, `Chips`, `ActionTag`, `ShareBar`, `ActionPicker`, `FieldBox`, `Field`, `UpstreamList`, `DropZone`, `Dialog`, `RoutingSwitch`, `Toast`, `Check`, `ChangesBar` [ui/kit.js]
 - `ui/chart.js` — `TimeChart`, `Spark`, `scaleTop`, `gaps`, `areaFill` [ui/chart.js]
 - `ui/flow.js` — схема «устройства → Роутер → Туннель/Напрямую» `Flow`, `width` [ui/flow.js]
 - `ui/icons.js` — SVG-иконки lucide [ui/icons.js]
@@ -42,7 +42,8 @@ OpenWrt-пакет `luci-app-truba` — интерфейс «Службы → Т
 
 ## Invariants
 
-- Зависимость `truba (>=1.2.0-r7)`: версии интерфейса и службы совпадают, ubus-API поставляет пакет `truba` (ADR 0008) [Makefile:LUCI_EXTRA_DEPENDS]
+- Зависимость `truba (>=1.2.0-r8)`: версии интерфейса и службы совпадают, ubus-API поставляет пакет `truba` (ADR 0008) [Makefile:LUCI_EXTRA_DEPENDS]
+- Включение Маршрутизации («выкл → вкл», сохранено «выкл») спрашивает подтверждение, если `routingRisk(st)` не `null`: Туннель не готов (`tunnelReady` — уровень `ok` и рукопожатие не старше `handshake_max`); поднят без рукопожатия — при любой Аварийной блокировке, иначе — только при включённой. Нет данных или ответ без `tunnel` — без вопроса. «Обзор» показывает `ROUTING_IDLE` под переключателями, если Маршрутизация выкл, а Туннель готов; в предупреждения это не входит (ADR 0019) [common.js:tunnelReady, routingRisk; ui/kit.js:RoutingSwitch; view/truba/overview.js:Hero]
 - `LUCI_MINIFY_JS:=0`, `LUCI_MINIFY_CSS:=0`: jsmin не понимает шаблонные строки htm, а файлы `lib/` должны побайтно совпадать с sha256 из `lib/VERSIONS` [Makefile, lib/VERSIONS]
 - `PKG_PO_VERSION` задан явно: в CI нет git-истории `po/`, и без него перевод получил бы версию 0 [Makefile:PKG_PO_VERSION]
 - Схема загружается один раз за страницу; `get()` и `fieldError()` повторяют семантику `conf.uc:check_value` службы (неверное → умолчание); адреса DNS проверяются регулярным выражением `upstream_re` из схемы [common.js:loadSchema, get, fieldError, upstreamError]

@@ -451,8 +451,21 @@ uci set truba.main.killswitch='1'; uci set truba.watchdog.enabled='0'; uci commi
 check "Туннель в порядке → default dev awg0" eval 'ip route show table 77 | grep -q "default dev awg0"'
 
 section "Маршрутизация выкл"
-uci set truba.main.routing='0'; uci commit truba
+# Авария с Аварийной блокировкой — и выход из неё одной командой из README (ADR 0019).
+uci set truba.watchdog.enabled='1'; uci commit truba
+echo '{"state":"down"}' > /var/run/truba/health.json
+truba routes >/dev/null
+check "перед выключением: blackhole" eval 'ip route show table 77 | grep -q "blackhole default"'
+offlog() { logread | grep -c "Маршрутизация выключена: IPv4-трафик"; }
+OFF0="$(offlog)"
+uci set truba.main.routing=0; uci commit truba
 reload "Маршрутизация выкл"
+check "выкл при блокировке вкл: в таблице 77 нет default" eval '! ip route show table 77 | grep -q default'
+check "журнал: Маршрутизация выключена — одна запись" test "$(offlog)" = "$((OFF0 + 1))"
+reload "Маршрутизация выкл, повторно"
+check "журнал: повторное применение записи не добавляет" test "$(offlog)" = "$((OFF0 + 1))"
+echo '{"state":"healthy"}' > /var/run/truba/health.json
+uci set truba.watchdog.enabled='0'; uci commit truba; truba routes >/dev/null
 check "минимальная таблица: без classify, INBOUND на месте" eval '! nft list chain inet truba classify && nft list chain inet truba prerouting | grep -q 0x04000000'
 check "dnsmasq восстановлен, бэкап удалён, mosdns остановлен, cron снят" eval '! uci -q get dhcp.@dnsmasq[0].server | grep -q 5335 && [ ! -f /etc/truba/state/dnsmasq.json ] && ! pidof mosdns && ! grep -q "truba update-lists" /etc/crontabs/root'
 check "ip rule остаются (ответы на входящие)" eval 'ip rule show | grep -q "lookup 77"'

@@ -4,6 +4,10 @@
 
 log() { logger -t truba-reinstall "$*"; }
 
+# Тест подменяет перезапуск сети и службы: на стенде их пути абсолютные, PATH не поможет.
+NETWORK_RESTART="${NETWORK_RESTART:-/etc/init.d/network restart}"
+TRUBA_INIT="${TRUBA_INIT:-/etc/init.d/truba}"
+
 # sysupgrade сохраняет /etc/config/dhcp, где Труба направила dnsmasq в mosdns, а пакетов
 # Трубы и mosdns после прошивки ещё нет: dnsmasq шлёт запросы в пустой порт. Без DNS остаётся
 # вся сеть и сам Роутер (dnsmasq — его системный резолвер, localuse), поэтому ни nslookup ниже,
@@ -38,6 +42,11 @@ restore_dnsmasq() {
 	log "DNS сети возвращён к настройкам до Трубы: mosdns появится вместе с пакетами"
 }
 
+restore_routing() {
+	uci -q set truba.main.routing="$RV"
+	uci -q commit truba
+}
+
 apk list -I truba 2>/dev/null | grep -q '^truba-' && exit 0
 
 restore_dnsmasq
@@ -68,11 +77,24 @@ if ! apk update >/dev/null 2>&1; then
 	exit 1
 fi
 
+# Служба стартует посреди apk add, а Туннель поднимется только после network restart: с прежним
+# routing '1' и Аварийной блокировкой она отрезала бы DNS, и apk не докачал бы пакеты (ADR 0019).
+# Поэтому на время установки Маршрутизация выключена. Вернуть её можно, только если встал модуль
+# ядра AmneziaWG: без него Туннель не поднимется, и Роутер не смог бы скачать модуль позже.
+# Пустое значение до r8 означало «вкл»; пишем его явно — схема r8 без строки выключает.
+R="$(uci -q get truba.main.routing)"
+RV="${R:-1}"
+uci -q set truba.main.routing='0'
+uci -q commit truba
+log "Маршрутизация выключена на время установки (была: $RV)"
+
+KMOD=0
 if apk add kmod-amneziawg >/dev/null 2>&1; then
+	KMOD=1
 	log "kmod-amneziawg установлен для ${VERSION}"
 else
 	# Остальное всё равно ставим: служба и интерфейс покажут, что Туннеля нет.
-	log "под ImmortalWrt ${VERSION} в фиде ещё нет kmod-amneziawg — Туннель не поднимется. Когда сборка появится: apk update && apk add kmod-amneziawg && /etc/init.d/network restart"
+	log "под ImmortalWrt ${VERSION} в фиде ещё нет kmod-amneziawg — Туннель не поднимется, Маршрутизация оставлена выключенной. Когда сборка появится: apk update && apk add kmod-amneziawg && /etc/init.d/network restart && uci set truba.main.routing=$RV && uci commit truba && /etc/init.d/truba reload"
 fi
 
 PKGS="amneziawg-tools luci-proto-amneziawg truba luci-app-truba"
@@ -82,10 +104,14 @@ if apk add $PKGS >/dev/null 2>&1; then
 	log "пакеты Трубы переустановлены: $PKGS"
 	# restart, а не reload: обработчик протокола amneziawg netifd находит только при запуске,
 	# без этого Туннель остаётся «proto none, NO_DEVICE» до перезагрузки.
-	/etc/init.d/network restart
-	/etc/init.d/truba enable
-	/etc/init.d/truba start
+	$NETWORK_RESTART
+	if [ "$KMOD" = 1 ]; then
+		restore_routing
+		log "Маршрутизация возвращена: $RV"
+	fi
+	$TRUBA_INIT enable
+	$TRUBA_INIT start
 else
-	log "не удалось установить: $PKGS"
+	log "не удалось установить: $PKGS. Маршрутизация оставлена выключенной. Вернуть: uci set truba.main.routing=$RV && uci commit truba && /etc/init.d/truba reload"
 	exit 1
 fi

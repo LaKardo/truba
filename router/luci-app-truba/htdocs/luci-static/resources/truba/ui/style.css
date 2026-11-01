@@ -106,6 +106,7 @@
 .hero h3::first-letter { text-transform: uppercase; }
 .hero .ip b { display: block; font-size: 15px; font-weight: 500; }
 .hero .tg { display: flex; flex-wrap: wrap; gap: 8px; }
+.hero .idle { flex-basis: 100%; margin: 0; }
 
 /* ---- Переключатель ---- */
 .sw {

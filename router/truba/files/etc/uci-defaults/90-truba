@@ -54,6 +54,18 @@ if [ "$FIRST" = 1 ] && [ -z "$(uci -q show truba | grep '=rule$')" ]; then
 	/usr/sbin/truba reset-rules selective >/dev/null 2>&1
 fi
 
+# Маршрутизацию включает только владелец (ADR 0019). Первая установка выключает её, даже если
+# /etc/config/truba остался от удалённого пакета: иначе служба, запущенная посреди apk add,
+# отрезала бы сеть до настройки Туннеля. Обновление: без строки routing прежняя схема включала
+# Маршрутизацию, новая выключила бы её.
+uci -q get truba.main >/dev/null || uci -q set truba.main=main
+if [ "$FIRST" = 1 ]; then
+	uci -q set truba.main.routing='0'
+elif [ -z "$(uci -q get truba.main.routing)" ]; then
+	uci -q set truba.main.routing='1'
+fi
+uci -q commit truba
+
 # mosdns запускает служба truba со своим конфигом.
 [ -x /etc/init.d/mosdns ] && {
 	/etc/init.d/mosdns stop >/dev/null 2>&1

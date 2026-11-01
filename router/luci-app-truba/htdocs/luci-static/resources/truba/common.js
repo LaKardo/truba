@@ -210,7 +210,15 @@ function schemaOpt(sec, key) {
 // Действующее значение опции — как его понимает служба (truba.conf): из UCI, а если его нет или
 // оно неверное — умолчание схемы. sid — для секций без имени (устройства).
 function get(sec, key, sid) {
-	const o = schemaOpt(sec, key), v = uci.get('truba', sid || sec, key);
+	return parseOpt(schemaOpt(sec, key), uci.get('truba', sid || sec, key));
+}
+
+// Значение опции в сохранённых настройках — без несохранённых изменений браузера.
+function savedGet(sec, key) {
+	return parseOpt(schemaOpt(sec, key), uci.state?.values?.truba?.[sec]?.[key]);
+}
+
+function parseOpt(o, v) {
 	if (!o)
 		return v;
 	if (v == null)
@@ -754,6 +762,38 @@ function tunnelState(st) {
 	return [ 'ok', _('working') ];
 }
 
+// Туннель готов: поднят, не упал и рукопожатие с Трубой свежее — не старше порога watchdog.
+// Уровень ok этого не значит: интерфейс поднимается и без рукопожатия, а watchdog объявляет
+// Туннель упавшим не сразу (или никогда, если выключен).
+function tunnelReady(st) {
+	if (!st || tunnelState(st)[0] != 'ok')
+		return false;
+	const a = st.tunnel?.awg, max = st.health?.handshake_max ?? get('watchdog', 'handshake_max');
+	return !!(a?.handshake && a.handshake_age != null && a.handshake_age <= max);
+}
+
+const ROUTING_IDLE = _('The tunnel works, but routing is off: all IPv4 traffic goes direct. Turn it on in the status bar.');
+
+// Оборвёт ли включение Маршрутизации интернет или его часть (ADR 0019): null — нет, иначе текст
+// подтверждения. Аварийная блокировка и Режим — из UCI браузера, с несохранёнными изменениями.
+// Нет данных или служба старше r8 (нет tunnel) — не спрашиваем.
+function routingRisk(st) {
+	if (!st || !('service' in st) || !('tunnel' in st) || tunnelReady(st))
+		return null;
+	const sel = get('main', 'mode') == 'selective';
+	const [ level, text ] = tunnelState(st);
+	// Поднятый Туннель без рукопожатия: в таблице 77 маршрут в него, Аварийная блокировка ни при чём.
+	if (level == 'ok')
+		return _('The tunnel is up, but there is no handshake with Truba: %s will go into a tunnel that does not respond. Check the server and the tunnel settings first.')
+			.format(sel ? _('traffic of tunnel categories') : _('all traffic'));
+	if (!get('main', 'killswitch'))
+		return null;
+	return (sel
+		? _('Tunnel: %s. Emergency block is on: until the tunnel works, sites from tunnel categories will be unreachable. Everything else goes direct.')
+		: _('Tunnel: %s. Emergency block is on: until the tunnel works, devices on the network and the router itself will have no internet. Set up the tunnel first or turn off Emergency block on the Tunnel tab.'))
+		.format(text);
+}
+
 // ---- Журнал (truba.log) ----
 
 // Строка logread: «Wed Oct  7 22:47:05 2026 daemon.notice truba: текст»; у mosdns текст —
@@ -823,12 +863,12 @@ function tabUrl(tab) {
 
 return baseclass.extend({
 	callStatus, callLists, callCategories, callSets, callCheck, callUpdateLists, callRollbackLists, callRates, callLog,
-	loadSchema, schema, get, fieldError, handshakeLevel, callDevices, callDevicesLite, callConnections,
+	loadSchema, schema, get, savedGet, fieldError, handshakeLevel, callDevices, callDevicesLite, callConnections,
 	devRate, devShare, devActive, deviceIndex, deviceSections, deviceSection, deviceName, devicePolicy, normMac, connLabel,
 	ruleKey, ruleOf, ruleSections, ruleActions, ruleAction, savedRuleActions, catRows, catsDue, listsDue, listsKick, listsSummary, checkErrorText,
 	runNatTest, runTunnelTest, parseLog, logShown, upstreamError, dnsStats, natSummary, upnpState, upnpRows,
 	forwardRows, fwEnabled, portError, forwardErrors, zoneOfIp, forwardValues, natPick,
 	ACTION_LABELS, REASON_LABELS, VIA_LABELS, WARNINGS, NAT_ERRORS, CHECK_ERRORS, UPNP_MISSING, NBSP, TABS,
 	fmtBytes, fmtRate, fmtAge, fmtTime, fmtDate, fmtNum, missingText,
-	setResult, setError, tunnelIface, tunnelState, probes, lossPct, tabUrl, invalidTab
+	setResult, setError, tunnelIface, tunnelState, tunnelReady, routingRisk, ROUTING_IDLE, probes, lossPct, tabUrl, invalidTab
 });

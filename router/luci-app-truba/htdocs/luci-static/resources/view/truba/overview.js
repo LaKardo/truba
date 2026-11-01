@@ -186,9 +186,9 @@ function Hero({ st, iface, warns }) {
 			<${kit.Switch} label=${_('Tunnel')} opt=${'network.' + iface + '.disabled'} disabled=${!ifaceExists}
 				checked=${ifaceExists && uci.get('network', iface, 'disabled') != '1'}
 				onChange=${(on) => app.set('network', iface, 'disabled', on ? null : '1')} />
-			<${kit.Switch} label=${_('Routing')} opt="truba.main.routing" checked=${common.get('main', 'routing')}
-				onChange=${(on) => app.set('truba', 'main', 'routing', on ? '1' : '0')} />
+			<${kit.RoutingSwitch} st=${st} />
 		</div>
+		${(!common.get('main', 'routing') && common.tunnelReady(st)) ? html`<p class="mu idle">${common.ROUTING_IDLE}</p>` : ''}
 	</div>`;
 }
 
