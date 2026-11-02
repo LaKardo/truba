@@ -1110,6 +1110,33 @@ msgstr "Рукопожатие"
 msgid "Loss over %d min"
 msgstr "Потери за %d мин"
 
+msgid "Jitter"
+msgstr "Джиттер"
+
+msgid "Latency median / 95%"
+msgstr "Задержка: медиана / 95%"
+
+msgid "Recent outages"
+msgstr "Последние простои"
+
+msgid "ongoing"
+msgstr "продолжается"
+
+msgid "uplink changed"
+msgstr "сменился канал до Трубы"
+
+msgid "tunnel back %d s after the change"
+msgstr "Туннель вернулся через %d с после смены"
+
+msgid "%d s"
+msgstr "%d с"
+
+msgid "%d min %d s"
+msgstr "%d мин %d с"
+
+msgid "%d h %d min"
+msgstr "%d ч %d мин"
+
 msgid "get through"
 msgstr "проходят"
 

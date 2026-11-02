@@ -2,7 +2,7 @@
 'use strict';
 
 import { cursor } from 'uci';
-import { readfile, stat, unlink } from 'fs';
+import { readfile, stat, unlink, popen } from 'fs';
 import * as C from 'truba.const';
 import * as U from 'truba.util';
 import * as F from 'truba.conf';
@@ -79,6 +79,39 @@ function set_table(state, tinfo, killswitch) {
 	return 'fallback';
 }
 
+// IPv4 серверов DNS «Туннеля», к которым mosdns подключается: «@IP» или сам адрес в URL.
+export function tunnel_dns_ips(list) {
+	let out = [];
+	for (let u in list ?? []) {
+		let m = match(u, regexp(F.UPSTREAM_RE));
+		let ip = m ? (m[6] ? substr(m[6], 1) : m[3]) : null;
+		if (U.is_ipv4(ip))
+			push(out, ip);
+	}
+	return uniq(out);
+};
+
+// Какие серверы DNS «Туннеля» отклонять (набор dns_down4), пока Туннель не работает: те, что в подсети
+// Туннеля (DNS на Трубе). Остальным хватает таблицы 77: при Аварийной блокировке blackhole отвечает ошибкой
+// сразу, без неё запросы с меткой «Туннель» уходят напрямую, и запасной DoH отвечает.
+export function dns_down_ips(state, cfg, tinfo) {
+	if (state != 'down' || !tinfo.subnet)
+		return [];
+	return filter(tunnel_dns_ips(cfg.dns.tunnel), ip => U.cidr_contains(tinfo.subnet, ip));
+};
+
+// Набор dns_down4: таблицы нет (Маршрутизация выкл, служба остановлена) — ничего.
+function dns_down_set(ips) {
+	let s = 'flush set inet ' + C.NFT_TABLE + ' dns_down4\n';
+	if (length(ips))
+		s += 'add element inet ' + C.NFT_TABLE + ' dns_down4 { ' + join(', ', ips) + ' }\n';
+	let p = popen('nft -f - >/dev/null 2>&1', 'w');
+	if (p) {
+		p.write(s);
+		p.close();
+	}
+}
+
 // Таблица 77 по здоровью Туннеля: его состояние watchdog пишет в HEALTH_FILE.
 export function routes(cfg, tinfo) {
 	cfg ??= F.load();
@@ -91,8 +124,40 @@ export function routes(cfg, tinfo) {
 		state = 'down';
 	else
 		state = 'healthy';
+	if (cfg.routing)
+		dns_down_set(dns_down_ips(state, cfg, tinfo));
 	// Аварийная блокировка имеет смысл только при включённой Маршрутизации.
 	return set_table(state, tinfo, cfg.routing && cfg.killswitch);
+};
+
+// ---- Канал до Трубы (WAN) ----
+
+// Через что уходят внешние пакеты Туннеля: устройство, его IPv4, шлюз по умолчанию на нём и шлюз маршрута
+// до Трубы, который netifd держит для Туннеля (host dependency). null — до Трубы маршрута нет.
+export function uplink(vps) {
+	let r = U.run('ip -4 route get ' + U.shq(vps) + ' mark ' + sprintf('0x%x', C.MARK_DIRECT));
+	let dev = (r.code == 0) ? match(r.out, /\sdev ([^ \n]+)/)?.[1] : null;
+	if (!dev)
+		return null;
+	let host = match(U.run('ip -4 route show exact ' + U.shq(vps + '/32')).out, /via ([0-9.]+) dev ([^ \n]+)/);
+	return {
+		dev,
+		addr: match(U.run('ip -4 -o addr show dev ' + U.shq(dev)).out, /inet ([0-9.]+)/)?.[1],
+		gw: match(U.run('ip -4 route show default dev ' + U.shq(dev)).out, /via ([0-9.]+)/)?.[1],
+		host_via: (host && host[2] == dev) ? host[1] : null,
+	};
+};
+
+// Что делать по событию канала до Трубы. prev — прежнее состояние (WAN_FILE), cur — uplink() и iface события.
+//   save — записать cur: сменились устройство, адрес или шлюз;
+//   act  — обновить Туннель: смена или повторный подъём того же интерфейса (кабель переткнули к тому же
+//          провайдеру). Первое событие после загрузки (prev нет) только запоминается; продление DHCP
+//          без смены и подъём соседнего интерфейса на том же устройстве (wan6) — ничего;
+//   stale_route — маршрут до Трубы ведёт через шлюз, которого на канале больше нет.
+export function wan_change(prev, cur, ifup) {
+	let same = prev != null && prev.dev == cur.dev && prev.addr == cur.addr && prev.gw == cur.gw;
+	let act = !!cur.addr && prev != null && (!same || (ifup && prev.iface == cur.iface));
+	return { save: !same, act, stale_route: act && !!cur.gw && !!cur.host_via && cur.host_via != cur.gw };
 };
 
 export function set_rp_filter(dev) {

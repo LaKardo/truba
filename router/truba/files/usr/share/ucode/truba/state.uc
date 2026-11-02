@@ -314,10 +314,33 @@ export function lists() {
 	};
 };
 
+const MONTHS = { Jan: 1, Feb: 2, Mar: 3, Apr: 4, May: 5, Jun: 6, Jul: 7, Aug: 8, Sep: 9, Oct: 10, Nov: 11, Dec: 12 };
+
+// Время строки logread («Mon Nov  2 18:11:33 2026 …») в секундах с эпохи или null.
+export function logread_time(line) {
+	let m = match(line ?? '', /^\w{3} (\w{3}) +([0-9]+) ([0-9]+):([0-9]+):([0-9]+) ([0-9]{4}) /);
+	if (!m || !MONTHS[m[1]])
+		return null;
+	return timelocal({ year: int(m[6]), mon: MONTHS[m[1]], mday: int(m[2]), hour: int(m[3]), min: int(m[4]), sec: int(m[5]) });
+};
+
+// Строки копии журнала Трубы раньше первой строки logread (first): их в logread уже нет.
+// Без logread (first == null) — все.
+export function older_events(text, first) {
+	let t0 = logread_time(first), out = [];
+	for (let l in split(text ?? '', '\n')) {
+		let m = match(l, /^([0-9]+)\t(.+)$/);
+		if (m && (t0 == null || int(m[1]) < t0))
+			push(out, m[2] + '\n');
+	}
+	return out;
+};
+
 // Строки для «Журнала» (truba.log): Труба и её watchdog, mosdns (ошибки DNS-серверов) и интерфейс Туннеля
 // (netifd, ядро). Имя интерфейса — как его читает служба, по схеме ^[A-Za-z0-9_]{1,15}$: в выражение оно
 // подставляется как есть. «invalid msg» — повреждённые запросы устройств, которые dnsmasq пересылает как
-// есть: это шум, а не ошибка Трубы.
+// есть: это шум, а не ошибка Трубы. Строки Трубы старше первой строки logread (буфер logd их уже вытеснил) —
+// из её копии (C.EVENTS_FILE).
 export function log(n) {
 	n = int(n ?? 200);
 	if (n < 10 || n > 2000)
@@ -326,16 +349,23 @@ export function log(n) {
 	let stream = popen('logread -e ' + U.shq(C.LOG_TAG + '\\|mosdns\\|' + iface), 'r');
 	if (!stream)
 		return { log: '' };
-	let ring = [], count = 0, line;
-	while (length(line = stream.read('line') ?? ''))
+	let ring = [], count = 0, line, first = null;
+	while (length(line = stream.read('line') ?? '')) {
+		first ??= line;
 		if (index(line, 'invalid msg') < 0)
 			ring[count++ % n] = line;
+	}
 	stream.close();
-	let out = '';
+	let lines = [];
 	for (let i = (count > n ? count - n : 0); i < count; i++)
-		out += ring[i % n];
-	return { log: out };
+		push(lines, ring[i % n]);
+	if (length(lines) < n) {
+		let old = older_events(readfile(C.EVENTS_FILE), first);
+		lines = [ ...slice(old, (length(old) > n - length(lines)) ? length(old) - (n - length(lines)) : 0), ...lines ];
+	}
+	return { log: join('', lines) };
 };
+
 
 // Размеры наборов для «Обзора»: geoip — подсетей по Действиям (посчитаны при применении),
 // dns — IP, которые mosdns положил по ответам для доменов geosite. Дороже status — реже.

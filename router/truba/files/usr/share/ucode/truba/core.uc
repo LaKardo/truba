@@ -197,6 +197,8 @@ function nft_table_key(cfg, ctx, vps) {
 		ctx.socket_mark,
 		cfg.dns_hijack,
 		cfg.dns.set_timeout,
+		// Версия набора цепочек: новая цепочка (dns_down) требует перезагрузки таблицы после обновления пакета.
+		2,
 	];
 	// Элементы geoip, geosite и Политик устройств обновляются отдельно.
 	return U.fnv1a(sprintf('%J', parts));
@@ -204,11 +206,16 @@ function nft_table_key(cfg, ctx, vps) {
 
 // IP Трубы. Имя endpoint не отрезолвилось (DNS ещё не поднят при старте, сбой upstream) —
 // прежний адрес того же endpoint: без него в bypass4 нет адреса Трубы и её трафик ушёл бы в неё же.
+// Прежний — из applied.json, а после перезагрузки (его там ещё нет) — из последней удачной копии.
 function vps_ip(tinfo, prev) {
-	let vps = F.vps_ip(tinfo);
-	if (vps == null && tinfo.endpoint && prev.endpoint == tinfo.endpoint && U.is_ipv4(prev.vps)) {
-		U.warn_log('endpoint ' + tinfo.endpoint + ' не резолвится — прежний адрес ' + prev.vps);
-		vps = prev.vps;
+	let known = prev;
+	if (!(known.endpoint == tinfo.endpoint && U.is_ipv4(known.vps)))
+		known = U.read_json(C.GOOD_META, {});
+	let old = (tinfo.endpoint && known.endpoint == tinfo.endpoint && U.is_ipv4(known.vps)) ? known.vps : null;
+	let vps = F.vps_ip(tinfo, old);
+	if (vps == null && old) {
+		U.warn_log('endpoint ' + tinfo.endpoint + ' не резолвится — прежний адрес ' + old);
+		vps = old;
 	}
 	return vps;
 }
@@ -414,7 +421,7 @@ function keep_running(res, prev) {
 			        dns_hijack: good.dns_hijack, zones: good.zones, nft_key: good.nft_key, nft_gen: res.time };
 			if (good.mosdns) {
 				writefile(C.STAMP_FILE, good.gkey ?? '');
-				DNS.dnsmasq_enable(good.port);
+				DNS.dnsmasq_enable(good.port ?? F.SCHEMA.dns.port.def);
 			}
 			else
 				DNS.dnsmasq_restore();
@@ -441,9 +448,27 @@ const FALLBACK_LOG = {
 	none: 'правил Трубы нет: трафик и DNS идут напрямую',
 };
 
+// Что изменилось с прошлого применения — для строки «применено». Повода apply не знает (его запускает
+// init-скрипт по настройкам, событию интерфейса или спискам), поэтому — по итогу. Ничего — событие
+// интерфейса или повторное «Сохранить и применить».
+const APPLY_CAUSES = [
+	[ 'routing', 'Маршрутизация' ], [ 'mode', 'Режим' ], [ 'nft_key', 'структура правил' ], [ 'gkey', 'Политики и Наборы' ],
+	[ 'members_key', 'устройства и зоны' ], [ 'geoip_key', 'geoip' ], [ 'vps', 'адрес Трубы' ], [ 'table', 'таблица Туннеля' ],
+];
+export function apply_cause(prev, res) {
+	if (prev?.time == null)
+		return 'запуск';
+	let ch = [];
+	for (let c in APPLY_CAUSES)
+		if (prev[c[0]] != res[c[0]])
+			push(ch, c[1]);
+	return length(ch) ? 'изменено: ' + join(', ', ch) : 'без изменений';
+};
+
 // Применить настройки. Итог — в applied.json: его показывает «Обзор», а init-скрипт по
 // полю mosdns решает, запускать ли mosdns, — и при ошибке тоже (ADR 0006).
 export function apply() {
+	let t0 = U.now_ms();
 	let lk = U.lock(C.LOCK_APPLY);
 	ensure_dirs();
 	let prev = U.read_json(C.APPLIED_FILE, {});
@@ -468,8 +493,9 @@ export function apply() {
 		U.warn_log(FALLBACK_LOG[res.fallback] ?? res.fallback);
 	}
 	else {
-		U.info(sprintf('применено: Маршрутизация %s, Режим %s, таблица Туннеля: %s',
-			res.routing ? 'вкл' : 'выкл', res.mode, res.table));
+		U.info(sprintf('применено за %d мс (%s): Маршрутизация %s, Режим %s, таблица Туннеля: %s%s',
+			U.now_ms() - t0, apply_cause(prev, res), res.routing ? 'вкл' : 'выкл', res.mode, res.table,
+			res.routing ? (res.nft_gen == res.time ? ', правила перезагружены' : ', правила прежние') : ''));
 	}
 	delete res.loaded;
 
@@ -495,15 +521,82 @@ export function teardown() {
 // устройстве (обратный маршрут к источнику входящих — не через Туннель), затем таблица Туннеля; правила ip
 // переставляет полное применение по тому же событию (ADR 0009). Любой интерфейс: наборы локальных
 // подсетей — адреса могли смениться. Служба остановлена — ничего.
+// Канал до Трубы — подъём или смена (другой провайдер: новый адрес, шлюз). Пакеты Туннеля должны
+// уйти с нового адреса, тогда Труба узнает его по первому же пакету. Маршрут до Трубы на шлюз, которого
+// больше нет, пересоздаёт только перезапуск Туннеля (его держит netifd). Иначе — новый порт Туннеля: свежая
+// запись conntrack и Full cone вместо старой, которую keepalive не дал бы забыть. Порт, заданный
+// владельцем, не меняется — тогда удаляется запись conntrack (если есть утилита), иначе перезапуск.
+function tunnel_renew(cfg, tinfo, vps, stale_route) {
+	let fixed = int(cursor().get('network', cfg.iface, 'listen_port') ?? 0);
+	if (stale_route) {
+		U.info('маршрут до Трубы ведёт через прежний шлюз — перезапуск Туннеля ' + cfg.iface);
+		system([ 'ifup', cfg.iface ]);
+		return 'restart';
+	}
+	if (!fixed && system([ 'awg', 'set', tinfo.device, 'listen-port', '0' ]) == 0)
+		return 'new_port';
+	if (fixed && system('command -v conntrack >/dev/null') == 0) {
+		system(sprintf('conntrack -D -p udp -d %s --sport %d >/dev/null 2>&1', U.shq(vps), fixed));
+		return 'conntrack';
+	}
+	system([ 'ifup', cfg.iface ]);
+	return 'restart';
+}
+
+// Событие не Туннеля: если это канал, по которому идут пакеты Туннеля, и он поднялся или сменился —
+// записать в журнал, обновить Туннель и попросить watchdog проверить его сейчас. Пропал — отметить в
+// WAN_FILE (down): пока канала нет, watchdog не считает неудачи и не перезапускает Туннель впустую.
+function uplink_event(cfg, ev, applied) {
+	let prev = U.read_json(C.WAN_FILE, null);
+	if (ev.action == 'ifdown') {
+		if (prev?.iface == ev.iface && prev.down == null) {
+			U.info(sprintf('канал до Трубы пропал: %s (%s)', ev.iface, prev.dev));
+			prev.down = time();
+			U.write_json(C.WAN_FILE, prev);
+		}
+		return;
+	}
+	let tinfo = F.tunnel_info(cfg.iface);
+	// Тот же интерфейс снова поднят — отметка «пропал» снимается, даже если дальше событие не о канале.
+	if (prev?.down != null && prev.iface == ev.iface) {
+		delete prev.down;
+		U.write_json(C.WAN_FILE, prev);
+	}
+	let vps = (applied.endpoint == tinfo.endpoint && U.is_ipv4(applied.vps)) ? applied.vps : vps_ip(tinfo, applied);
+	let cur = vps ? N.uplink(vps) : null;
+	if (!cur || cur.dev == tinfo.device || cur.dev != (ev.device || N.iface_up(ev.iface).device))
+		return;
+	cur.iface = ev.iface;
+	let d = N.wan_change(prev, cur, ev.action == 'ifup');
+	if (d.save)
+		U.write_json(C.WAN_FILE, cur);
+	if (!d.act || !tinfo.up)
+		return;
+	U.info(sprintf('канал до Трубы: %s (%s), адрес %s → %s, шлюз %s → %s', ev.iface, cur.dev,
+		prev?.addr ?? '?', cur.addr, prev?.gw ?? '?', cur.gw ?? '—'));
+	let act = tunnel_renew(cfg, tinfo, vps, d.stale_route);
+	system([ 'ubus', 'send', C.RECHECK_EVENT, sprintf('%J', { reason: 'wan', iface: ev.iface, action: act }) ]);
+	// Новый адрес: соединения mosdns с серверами DNS «Напрямую» (DoT) остались на прежнем — перезапустить
+	// mosdns (фильтр журнала делает это по SIGHUP сразу, кэш сохраняется в дамп).
+	if (prev?.addr && prev.addr != cur.addr && applied.mosdns)
+		system(sprintf("ubus call service signal '%J' >/dev/null 2>&1", { name: 'truba', instance: 'mosdns', signal: 1 }));
+}
+
 export function hotplug(ev) {
 	if (!(ev.action in [ 'ifup', 'ifdown', 'ifupdate' ]) || !stat(C.APPLIED_FILE))
 		return;
 	let cfg = F.load();
+	let applied = U.read_json(C.APPLIED_FILE, {});
 	if (ev.iface == cfg.iface) {
 		if (ev.action == 'ifup' && ev.device)
 			N.set_rp_filter(ev.device);
 		N.routes(cfg);
+		// Подъём Туннеля — проверить сразу: иначе Аварийная блокировка держится до следующего цикла watchdog.
+		if (ev.action == 'ifup')
+			system([ 'ubus', 'send', C.RECHECK_EVENT, sprintf('%J', { reason: 'tunnel', iface: ev.iface }) ]);
 	}
+	else
+		uplink_event(cfg, ev, applied);
 	refresh_bypass(null, null, null, null, cfg);
 };
 

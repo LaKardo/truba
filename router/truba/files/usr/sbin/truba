@@ -40,7 +40,8 @@ function usage() {
 		'                     (auto — запуск от watchdog после подъёма Туннеля)\n' +
 		'  tunnel-test        ping Трубы пакетами трёх размеров, до полного MTU Туннеля\n' +
 		'  watchdog           цикл контроля Туннеля (запускает procd)\n' +
-		'  stats              цикл записи истории скорости для «Обзора» (запускает procd)\n');
+		'  stats              цикл записи истории скорости для «Обзора» (запускает procd)\n' +
+		'  mosdns-log <команда…>  запустить mosdns, сводя его шумные строки журнала в одну в минуту\n');
 	exit(2);
 }
 
@@ -139,6 +140,11 @@ case 'watchdog':
 case 'stats':
 	load('stats').run();
 	break;
+
+case 'mosdns-log':
+	if (!length(args))
+		usage();
+	exit(load('mosdnslog').run(args));
 
 default:
 	usage();

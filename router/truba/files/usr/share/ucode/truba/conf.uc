@@ -337,14 +337,40 @@ export function tunnel_info(iface, ub) {
 	return res;
 };
 
-// IP Трубы: endpoint, при необходимости отрезолвленный.
-export function vps_ip(tinfo) {
+// IPv4 пира Туннеля из вывода awg show <dev> endpoints («ключ<TAB>адрес:порт»).
+export function parse_endpoints(out) {
+	for (let l in split(out ?? '', '\n')) {
+		let m = match(trim(l), /\s([0-9.]+):[0-9]+$/);
+		if (m && U.is_ipv4(m[1]))
+			return m[1];
+	}
+	return null;
+};
+
+// IPv4 пира Туннеля, с которым уже идёт обмен.
+export function awg_endpoint(dev) {
+	return dev ? parse_endpoints(U.run('awg show ' + U.shq(dev) + ' endpoints').out) : null;
+};
+
+// Адрес Трубы из ответа DNS: прежний, если он ещё в ответе, иначе наименьший.
+export function pick_vps(ips, prev) {
+	if (prev && prev in ips)
+		return prev;
+	return sort([ ...ips ], (a, b) => U.ip2int(a) - U.ip2int(b))[0];
+};
+
+// IP Трубы: endpoint, при необходимости отрезолвленный. Для имени первым берётся адрес, к которому
+// Туннель уже ходит (awg show endpoints): трафик Туннеля идёт к нему, его и должен обходить bypass4,
+// и он не зависит от DNS (при старте dnsmasq уже направлен в mosdns, а mosdns ещё не запущен).
+// Иначе — из ответа DNS: прежний адрес (prev), если он ещё в ответе, а не последний: порядок адресов
+// в ответе меняется от запроса к запросу, а адрес Трубы входит в отпечаток таблицы nftables (смена
+// адреса — перезагрузка таблицы). Без прежнего — наименьший, чтобы выбор не зависел от порядка.
+export function vps_ip(tinfo, prev) {
 	if (!tinfo.endpoint)
 		return null;
 	if (U.is_ipv4(tinfo.endpoint))
 		return tinfo.endpoint;
-	let ips = U.nslookup(tinfo.endpoint);
-	return ips[length(ips) - 1];
+	return awg_endpoint(tinfo.device) ?? pick_vps(U.nslookup(tinfo.endpoint), prev);
 };
 
 // Устройства (l3) сетей, входящих в выбранные зоны межсетевого экрана.

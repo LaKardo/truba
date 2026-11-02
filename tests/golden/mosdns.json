@@ -154,7 +154,7 @@
 					"exec": "$fetch_tunnel"
 				},
 				{
-					"exec": "ttl 0-300"
+					"exec": "ttl 5-300"
 				},
 				{
 					"exec": "nftset inet,truba,gs_tunnel4,ipv4_addr,32"
@@ -187,7 +187,7 @@
 					"exec": "$fetch_direct"
 				},
 				{
-					"exec": "ttl 0-300"
+					"exec": "ttl 5-300"
 				},
 				{
 					"exec": "nftset inet,truba,gs_direct4,ipv4_addr,32"
@@ -218,6 +218,9 @@
 			"args": [
 				{
 					"exec": "$fetch_router"
+				},
+				{
+					"exec": "ttl 5-300"
 				}
 			]
 		},
@@ -245,6 +248,9 @@
 			"args": [
 				{
 					"exec": "$fetch_default"
+				},
+				{
+					"exec": "ttl 5-300"
 				}
 			]
 		},

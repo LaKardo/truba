@@ -744,6 +744,28 @@ function lossPct(p) {
 	return p.length ? Math.round(p.filter((x) => x == null).length * 100 / p.length) : null;
 }
 
+// Джиттер по окну проверок, мс: среднее изменение задержки между соседними ответами (как в RFC 3550,
+// без сглаживания); null — меньше двух ответов подряд.
+function jitterMs(p) {
+	let sum = 0, n = 0;
+	for (let i = 1; i < p.length; i++)
+		if (p[i] != null && p[i - 1] != null) {
+			sum += Math.abs(p[i] - p[i - 1]);
+			n++;
+		}
+	return n ? sum / n : null;
+}
+
+// Длительность простоя: «45 с», «3 мин 20 с», «2 ч 5 мин».
+function fmtSpan(sec) {
+	sec = Math.max(0, Math.round(+sec || 0));
+	if (sec < 60)
+		return _('%d s').format(sec);
+	if (sec < 3600)
+		return _('%d min %d s').format(Math.floor(sec / 60), sec % 60);
+	return _('%d h %d min').format(Math.floor(sec / 3600), Math.floor(sec % 3600 / 60));
+}
+
 // Состояние Туннеля по status: [уровень, текст] — для плитки «Обзора» и вкладки «Туннель».
 function tunnelState(st) {
 	const t = st.tunnel || {}, h = st.health || {};
@@ -870,5 +892,5 @@ return baseclass.extend({
 	forwardRows, fwEnabled, portError, forwardErrors, zoneOfIp, forwardValues, natPick,
 	ACTION_LABELS, REASON_LABELS, VIA_LABELS, WARNINGS, NAT_ERRORS, CHECK_ERRORS, UPNP_MISSING, NBSP, TABS,
 	fmtBytes, fmtRate, fmtAge, fmtTime, fmtDate, fmtNum, missingText,
-	setResult, setError, tunnelIface, tunnelState, tunnelReady, routingRisk, ROUTING_IDLE, probes, lossPct, tabUrl, invalidTab
+	setResult, setError, tunnelIface, tunnelState, tunnelReady, routingRisk, ROUTING_IDLE, probes, lossPct, jitterMs, fmtSpan, tabUrl, invalidTab
 });

@@ -21,6 +21,10 @@ import * as K from 'truba.check';
 import * as S from 'truba.stats';
 import * as DV from 'truba.devstats';
 import * as DVC from 'truba.devices';
+import * as ML from 'truba.mosdnslog';
+import * as ST from 'truba.state';
+import * as WD from 'truba.watchdog';
+import * as CORE from 'truba.core';
 
 const check = T.check, same = T.same;
 const GOLDEN = ARGV[0] ?? '/repo/tests/golden';
@@ -216,11 +220,12 @@ check('кэш: дамп по поколению — новый при смене
 	match(gen(), /^\/var\/lib\/truba\/mosdns-cache-[0-9a-f]{8}\.dump$/) && gen({ ttl_max: 60 }) == gen() &&
 	gen({ direct: [ 'udp://192.0.2.9' ] }) != gen() && gen(null, sel) != gen() &&
 	gen(null, { ...plan, geosite: map(plan.geosite, (g, i) => i ? g : { ...g, action: (g.action == 'tunnel') ? 'direct' : 'tunnel' }) }) != gen());
-check('mosdns: кэш — в цепочке каждого пути, ответ в нём свежий не дольше часа; TTL и nftset — после неё, только у Категорий',
+check('mosdns: кэш — в цепочке каждого пути, ответ в нём свежий не дольше часа; TTL устройствам — после неё на всех путях, nftset — только у Категорий',
 	!length(filter(filter(three.plugins, p => p.tag == 'main')[0].args, x => x.exec == '$cache')) &&
 	length(filter(three.plugins, p => match(p.tag, /^fetch_/) && p.args[0].exec == '$cache' && p.args[2].exec == 'ttl 0-3600')) == 4 &&
-	filter(three.plugins, p => p.tag == 'flow_direct')[0].args[1].exec == 'ttl 0-300' &&
-	length(filter(three.plugins, p => p.tag == 'flow_default')[0].args) == 1);
+	filter(three.plugins, p => p.tag == 'flow_direct')[0].args[1].exec == 'ttl 5-300' &&
+	same(filter(three.plugins, p => p.tag == 'flow_default')[0].args, [ { exec: '$fetch_default' }, { exec: 'ttl 5-300' } ]) &&
+	same(filter(three.plugins, p => p.tag == 'flow_router')[0].args, [ { exec: '$fetch_router' }, { exec: 'ttl 5-300' } ]));
 check('mosdns: у каждого сервера idle_timeout, один сервер — просто forward',
 	length(filter(three.plugins, p => p.type == 'forward' && p.args.upstreams[0].idle_timeout != 360)) == 0 &&
 	filter(three.plugins, p => p.tag == 'up_direct')[0]?.type == 'forward');
@@ -364,6 +369,56 @@ let ri = readfile('/repo/router/truba/files/etc/truba/reinstall.sh');
 check('reinstall.sh: путь бэкапа dnsmasq и адрес mosdns — как у службы',
 	index(ri, C.DNSMASQ_BACKUP) >= 0 && index(ri, C.MOSDNS_ADDR + '#${port:-' + F.SCHEMA.dns.port.def + '}') >= 0);
 
+// ---- dnsmasq: бэкап без адреса mosdns, восстановление без бэкапа ----
+
+{
+	const dm = (opts) => "config dnsmasq 'dm'\n" + opts + '\n';
+	const dhcp = () => { let c = cursor(); c.load('dhcp'); return c.get_all('dhcp', 'dm'); };
+	writefile('/etc/config/truba', "config truba 'dns'\n\toption port '5335'\n");
+	unlink(C.DNSMASQ_BACKUP);
+	unlink(C.GOOD_META);
+
+	writefile('/etc/config/dhcp', dm("\tlist server '9.9.9.9'\n\tlist server '/lan.example/10.0.0.1'\n\tlist server '127.0.0.1#5053'\n"));
+	DNS.dnsmasq_enable(5335);
+	let b = U.read_json(C.DNSMASQ_BACKUP, null);
+	check('dnsmasq: бэкап — исходные серверы, включая чужой 127.0.0.1#…; dnsmasq — в mosdns',
+		same(b?.server, [ '9.9.9.9', '/lan.example/10.0.0.1', '127.0.0.1#5053' ]) && b.noresolv == null &&
+		same(dhcp().server, [ '/lan.example/10.0.0.1', '127.0.0.1#5335' ]) && dhcp().noresolv == '1', sprintf('%J %J', b, dhcp()));
+	DNS.dnsmasq_restore();
+	check('dnsmasq: восстановление из бэкапа', same(dhcp().server, [ '9.9.9.9', '/lan.example/10.0.0.1', '127.0.0.1#5053' ]) &&
+		dhcp().noresolv == null && dhcp().cachesize == null && !U.read_json(C.DNSMASQ_BACKUP, null), sprintf('%J', dhcp()));
+
+	// Каталог state пропал, а dnsmasq уже направлен в mosdns (прежний порт 5340 — из последней удачной копии).
+	U.mkdirp(C.GOOD_DIR);
+	U.write_json(C.GOOD_META, { port: 5340 });
+	writefile('/etc/config/dhcp', dm("\toption noresolv '1'\n\toption cachesize '0'\n\tlist server '127.0.0.1#5340'\n"));
+	DNS.dnsmasq_enable(5335);
+	b = U.read_json(C.DNSMASQ_BACKUP, null);
+	check('dnsmasq: без бэкапа и уже в mosdns — в бэкапе нет адреса mosdns и значений Трубы',
+		same(b?.server, []) && b.noresolv == null && b.cachesize == null && same(dhcp().server, [ '127.0.0.1#5335' ]), sprintf('%J', b));
+
+	unlink(C.DNSMASQ_BACKUP);
+	writefile('/etc/config/dhcp', dm("\toption noresolv '1'\n\toption cachesize '0'\n\tlist server '/lan.example/10.0.0.1'\n\tlist server '127.0.0.1#5335'\n"));
+	DNS.dnsmasq_restore();
+	check('dnsmasq: восстановление без бэкапа — убран только адрес mosdns, снова серверы провайдера',
+		same(dhcp().server, [ '/lan.example/10.0.0.1' ]) && dhcp().noresolv == null, sprintf('%J', dhcp()));
+	writefile('/etc/config/dhcp', dm("\toption noresolv '1'\n\tlist server '127.0.0.1#5053'\n"));
+	check('dnsmasq: восстановление без бэкапа — чужой 127.0.0.1#… не тронут',
+		!DNS.dnsmasq_restore() && same(dhcp().server, [ '127.0.0.1#5053' ]) && dhcp().noresolv == '1', sprintf('%J', dhcp()));
+	unlink(C.GOOD_META);
+
+	const NS = 'Proto Recv-Q Send-Q Local Address           Foreign Address         State       PID/Program name\n' +
+		'tcp        0      0 127.0.0.1:5335          0.0.0.0:*               LISTEN      4233/mosdns\n' +
+		'udp        0      0 127.0.0.1:5335          0.0.0.0:*                           4233/mosdns\n' +
+		'udp        0      0 0.0.0.0:5353            0.0.0.0:*                           812/umdns\n' +
+		'tcp        0      0 192.168.1.1:5400        0.0.0.0:*               LISTEN      900/other\n' +
+		'tcp        0      0 :::5401                 :::*                    LISTEN      901/other\n' +
+		'tcp        0      0 127.0.0.1:5402          127.0.0.1:40000         ESTABLISHED 902/other\n';
+	check('порт mosdns: свой не занят; чужой UDP или TCP на 127.0.0.1 и всех адресах — занят; другой адрес и соединение — нет',
+		!DNS.port_taken(5335, NS) && DNS.port_taken(5353, NS) && DNS.port_taken('5401', NS) &&
+		!DNS.port_taken(5400, NS) && !DNS.port_taken(5402, NS));
+}
+
 // Адрес Трубы внутри Туннеля — из адреса Роутера (ubus нет — из настроек).
 function peer_of(addr) {
 	writefile('/etc/config/network', sprintf("config interface 'awg0'\n\toption proto 'amneziawg'\n\tlist addresses '%s'\n\n" +
@@ -483,6 +538,56 @@ check('IPv6: имя занято чужой секцией — она не тр�
 	check('dnsmasq и зоны: устройства без адреса IPv4 и пустой ввод — без ошибки',
 		same(U([ 'nope' ]), []) && same(DNS.dns_unbound?.([ 'ms0' ], null, null), []));
 }
+
+// ---- Адрес Трубы при endpoint-имени ----
+
+check('адрес Трубы: из awg show endpoints — IPv4 пира, без пира — нет',
+	F.parse_endpoints('9QLm+Kz8=\t91.211.27.175:50182\n') == '91.211.27.175' &&
+	F.parse_endpoints('9QLm+Kz8=\t(none)\n') == null && F.parse_endpoints('') == null &&
+	F.parse_endpoints('k=\t[2001:db8::1]:51820\n') == null);
+check('адрес Трубы из DNS: прежний, пока он в ответе; иначе наименьший — не зависит от порядка',
+	F.pick_vps([ '203.0.113.9', '203.0.113.10', '198.51.100.7' ], '203.0.113.10') == '203.0.113.10' &&
+	F.pick_vps([ '203.0.113.9', '198.51.100.7' ], '203.0.113.10') == '198.51.100.7' &&
+	F.pick_vps([ '198.51.100.7', '203.0.113.9' ]) == F.pick_vps([ '203.0.113.9', '198.51.100.7' ]) &&
+	F.pick_vps([], null) == null);
+
+// ---- Канал до Трубы: смена провайдера ----
+
+let W = (addr, gw, iface) => ({ dev: 'wan', addr, gw, iface: iface ?? 'wan', host_via: '176.103.208.1' });
+let wc = (prev, cur, up) => N.wan_change(prev, cur, up);
+check('канал до Трубы: первое событие после загрузки — запомнить, Туннель не трогать',
+	same(wc(null, W('176.103.208.167', '176.103.208.1'), true), { save: true, act: false, stale_route: false }));
+check('канал до Трубы: продление DHCP без смены — ничего',
+	same(wc(W('176.103.208.167', '176.103.208.1'), W('176.103.208.167', '176.103.208.1'), false), { save: false, act: false, stale_route: false }));
+check('канал до Трубы: другой провайдер — обновить Туннель; маршрут до Трубы через прежний шлюз — устарел',
+	same(wc(W('176.103.208.167', '176.103.208.1'), W('10.20.30.40', '10.20.30.1'), true), { save: true, act: true, stale_route: true }));
+check('канал до Трубы: тот же адрес после переподключения кабеля — обновить, маршрут цел',
+	same(wc(W('176.103.208.167', '176.103.208.1'), W('176.103.208.167', '176.103.208.1'), true), { save: false, act: true, stale_route: false }));
+check('канал до Трубы: подъём соседнего интерфейса на том же устройстве (wan6) — ничего',
+	!wc(W('176.103.208.167', '176.103.208.1'), W('176.103.208.167', '176.103.208.1', 'wan6'), true).act);
+check('канал до Трубы: адреса ещё нет — Туннель не трогать',
+	!wc(W('176.103.208.167', '176.103.208.1'), W(null, null), true).act);
+
+// ---- DNS, пока Туннель не работает ----
+
+check('серверы DNS «Туннеля»: IPv4 из адреса или «@IP», имена — нет',
+	same(N.tunnel_dns_ips([ 'udp://10.77.77.1', 'https://1.1.1.1/dns-query', 'tls://dns.google@8.8.8.8', 'https://dns.example/q', '10.77.77.1:53' ]),
+		[ '10.77.77.1', '1.1.1.1', '8.8.8.8' ]));
+let dcfg2 = { dns: { tunnel: [ 'udp://10.77.77.1', 'https://1.1.1.1/dns-query' ] } };
+check('Туннель упал — отклонять только DNS в подсети Туннеля; в порядке — ничего',
+	same(N.dns_down_ips('down', dcfg2, { subnet: '10.77.77.0/30' }), [ '10.77.77.1' ]) &&
+	same(N.dns_down_ips('healthy', dcfg2, { subnet: '10.77.77.0/30' }), []) &&
+	same(N.dns_down_ips('down', dcfg2, { subnet: null }), []));
+
+// ---- Наблюдаемость: квантили задержки, повод применения ----
+
+check('задержка p50/p95: потери не входят, ближайший ранг; без ответов — null',
+	WD.rtt_quantile([ 30, null, 10, 20, 40 ], 0.5) == 20 && WD.rtt_quantile([ 30, null, 10, 20, 40 ], 0.95) == 40 &&
+	WD.rtt_quantile([ 7 ], 0.5) == 7 && WD.rtt_quantile([ null, null ], 0.5) == null && WD.rtt_quantile([], 0.95) == null);
+check('повод применения: запуск, без изменений, что изменилось',
+	CORE.apply_cause({}, { time: 1 }) == 'запуск' &&
+	CORE.apply_cause({ time: 1, mode: 'all', table: 'x' }, { time: 2, mode: 'all', table: 'x' }) == 'без изменений' &&
+	CORE.apply_cause({ time: 1, mode: 'all', gkey: 'a' }, { time: 2, mode: 'list', gkey: 'b' }) == 'изменено: Режим, Политики и Наборы');
 
 // ---- «Проверить домен/IP»: Приоритет для IP ----
 
@@ -891,5 +996,61 @@ check('API check: цель с пробелом или «;» не уходит в
 check('API nat_result: итога ещё нет — пустой ответ', same(api.nat_result.call(), {}));
 check('API connections: не IPv4 не уходит в командную строку',
 	api.connections?.call({ args: { ip: '1.2.3.4; reboot' } })?.error == 'invalid ip' && api.connections.call({ args: {} }).error == 'invalid ip');
+
+// ---- Журнал mosdns: сводка шумных строк (truba.mosdnslog) ----
+
+{
+	const Z = '2026-11-02T13:48:11.609Z\tWARN\t';
+	let lines = [
+		Z + 'up_tunnel_0\tupstream error\t{"uqid": 1, "qname": "astrav1.online.", "upstream": "udp://10.77.77.1", "error": "context deadline exceeded"}',
+		Z + 'udp_in\tentry err\t{"query": {"uqid": 1, "qname": "astrav1.online.", "qtype": 1}, "error": "context deadline exceeded"}',
+		Z + 'up_tunnel\tprimary error\t{"query": {"qname": "astrav1.online."}}',
+		Z + 'udp_in\tentry err\t{"query": {"qname": "astrav1.online."}}',
+		Z + 'tcp_in\tentry err\t{"query": {"qname": "b.example."}}',
+		Z + 'udp_in\tinvalid msg\t{"error": "dns: buffer size too small"}',
+		'2026-11-02T13:48:12.000Z\tERROR\tfailed to load cache dump: open x: no such file',
+		'2026-11-02T13:48:12.000Z\tINFO\tmain\tstarting',
+		'не строка mosdns',
+	];
+	let s = ML.summary_new(), passed = [];
+	for (let l in lines)
+		if (ML.summary_add(s, ML.parse(l)))
+			push(passed, l);
+	check('журнал mosdns: строки неудачных запросов — в сводку, остальные — как есть',
+		same(passed, slice(lines, 6)) && s.failed == 3 && s.invalid == 1, sprintf('%J %J', passed, s));
+	let txt = ML.summary_text(s, 60);
+	check('журнал mosdns: сводка — число запросов, имена по убыванию, серверы с ошибкой',
+		txt == 'за 60 с без ответа 3 запросов: astrav1.online ×2, b.example ×1; ' +
+			'ошибки серверов: udp://10.77.77.1 (context deadline exceeded) ×1; повреждённых запросов: 1', txt);
+	let only = ML.summary_new();
+	ML.summary_add(only, ML.parse(Z + 'udp_in\tinvalid msg\t{}'));
+	check('журнал mosdns: только повреждённые запросы устройств и пустая минута — без сводки',
+		ML.summary_text(only, 60) == null && ML.summary_text(ML.summary_new(), 60) == null);
+	let many = ML.summary_new(), n = 0;
+	for (let i = 0; i < 50; i++)
+		n += ML.summary_add(many, ML.parse('2026-11-02T13:48:12.000Z\tINFO\tline ' + i)) ? 1 : 0;
+	check('журнал mosdns: прочих строк — не больше 20 в минуту, остальные посчитаны',
+		n == 20 && many.skipped == 30 && index(ML.summary_text(many, 60), '30') >= 0);
+}
+
+// ---- Копия журнала Трубы: строки, которые logread уже вытеснил ----
+
+{
+	let t = timelocal({ year: 2026, mon: 11, mday: 2, hour: 18, min: 11, sec: 33 });
+	let l = U.event_line(localtime(t), 'warn', 'truba', 'проба\nвторая');
+	check('копия журнала: строка в виде logread, перевод строки — пробелом',
+		l == 'Mon Nov  2 18:11:33 2026 daemon.warn truba: проба вторая\n' && ST.logread_time(l) == t, l);
+	let text = sprintf('%d\tстарая\n%d\tна границе\n%d\tновая\nмусор\n', t - 10, t, t + 5);
+	check('копия журнала: в «Журнал» — только строки раньше первой строки logread, без logread — все',
+		same(ST.older_events(text, l), [ 'старая\n' ]) && length(ST.older_events(text, null)) == 3);
+	unlink(C.EVENTS_FILE);
+	for (let i = 0; i < 1200; i++)
+		U.log('info', sprintf('событие %04d ', i) + 'x');
+	let ev = readfile(C.EVENTS_FILE);
+	check('копия журнала: не больше EVENTS_MAX, обрезана по целым строкам, последняя строка — последняя запись',
+		length(ev) <= C.EVENTS_MAX && match(ev, /^[0-9]+\t\w{3} /) && index(ev, 'событие 1199 x\n') == length(ev) - length('событие 1199 x\n'),
+		sprintf('%d', length(ev)));
+	unlink(C.EVENTS_FILE);
+}
 
 T.finish();

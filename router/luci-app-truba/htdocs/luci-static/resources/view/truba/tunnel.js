@@ -42,6 +42,8 @@ function StateCard({ st, iface }) {
 	const win = Math.max(1, Math.round((probes.length || common.schema().consts.probe_window) * interval / 60));
 	const measured = wdOn && t.up && probes.length > 0;
 	const pct = common.lossPct(probes) ?? 0;
+	const jit = measured ? common.jitterMs(probes) : null;
+	const outs = (wdOn && Array.isArray(h.outages)) ? h.outages.slice(-3).reverse() : [];
 	const b = h.big;
 	const table = (st.table || '').trim();
 
@@ -65,6 +67,11 @@ function StateCard({ st, iface }) {
 		<${kit.KV} rows=${[
 			[ _('Tunnel watchdog'), !wdOn ? _('the watchdog is off') : h.state
 				? '%s %s'.format(h.state == 'healthy' ? _('healthy since') : _('down since'), common.fmtTime(h.since)) : _('no data') ],
+			[ _('Jitter'), (jit != null) ? _('%d ms').format(Math.round(jit)) : '—' ],
+			[ _('Latency median / 95%'), (measured && h.rtt_p50 != null) ? '%s / %s'.format(_('%d ms').format(Math.round(h.rtt_p50)), _('%d ms').format(Math.round(h.rtt_p95))) : '—' ],
+			[ _('Recent outages'), !outs.length ? '—' : html`${outs.map((o) => html`<div>${common.fmtTime(o.start)} — ${
+				(o.end != null) ? common.fmtSpan(o.secs) : _('ongoing')}${o.wan ? ', ' + _('uplink changed') : ''}${
+				o.after_wan ? ', ' + _('tunnel back %d s after the change').format(o.after_wan.ping) : ''} (${o.why})</div>`)}` ],
 			[ _('Tunnel route table'), !st.service ? _('service stopped')
 				: /blackhole/.test(table) ? _('emergency block (tunnel traffic is dropped)')
 				: /default dev/.test(table) ? _('via tunnel') : _('fallback to direct (no tunnel route)') ],

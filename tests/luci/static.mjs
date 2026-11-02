@@ -770,6 +770,10 @@ for (const s of translated.keys())
 	const stopped = await st({ service: false }).callStatus().then((x) => x.service === false ? 'resolved' : '?', () => 'rejected');
 	check(empty == 'rejected' && stopped == 'resolved', `common.callStatus: ответ без service — ошибка, { service: false } — ответ (${empty}, ${stopped})`);
 	check(cdev.tunnelState?.({})?.[0] === '', `common.tunnelState({}): без данных — не «служба остановлена» (${cdev.tunnelState?.({})})`);
+	check(cdev.jitterMs([ 30, 40, null, 50, 44 ]) === 8 && cdev.jitterMs([ 30, null, 40 ]) === null && cdev.jitterMs([]) === null,
+		'common.jitterMs: среднее изменение между соседними ответами, потери разрывают пару');
+	check(/^45\b/.test(cdev.fmtSpan(45)) && /^3\D+20\b/.test(cdev.fmtSpan(200)) && /^2\D+5\b/.test(cdev.fmtSpan(7500)),
+		`common.fmtSpan: секунды, минуты, часы (${cdev.fmtSpan(45)}; ${cdev.fmtSpan(200)}; ${cdev.fmtSpan(7500)})`);
 	// Включение Маршрутизации (ADR 0019): подтверждение, если Туннель не готов. Поднятый без рукопожатия —
 	// при любой Аварийной блокировке; остальные состояния — только с ней. Текст — по Режиму.
 	const main = { '.name': 'main', '.type': 'main' };

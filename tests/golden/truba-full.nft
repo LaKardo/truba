@@ -53,6 +53,9 @@ table inet truba {
 	set dev_direct {
 		type ether_addr;
 	}
+	set dns_down4 {
+		type ipv4_addr;
+	}
 	set dv_tunnel_down {
 		type ipv4_addr;
 		flags dynamic,timeout;
@@ -162,6 +165,12 @@ table inet truba {
 		ip daddr 203.0.113.10 ip dscp != cs0 ip dscp set cs0
 		ip daddr 203.0.113.10 meta mark set meta mark and 0xf0ffffff or 0x02000000 return
 		socket mark and 0x0f000000 == 0x01000000 meta mark set meta mark and 0xf0ffffff or 0x01000000
+	}
+
+	chain dns_down {
+		type filter hook output priority filter; policy accept;
+		ip daddr @dns_down4 meta mark and 0x0f000000 == 0x01000000 meta l4proto tcp reject with tcp reset
+		ip daddr @dns_down4 meta mark and 0x0f000000 == 0x01000000 reject
 	}
 
 	chain dns_hijack {

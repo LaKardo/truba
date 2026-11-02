@@ -179,6 +179,20 @@ function dns_chains(cfg) {
 	return s + dns_snat_chain();
 }
 
+// DNS-серверы на Трубе, пока Туннель не работает (dns_down4, заполняет net.routes). Запрос mosdns к ним сразу
+// получает отказ (ICMP «порт закрыт», для TCP — RST), а не теряется в Туннеле до тайм-аута 5 с: mosdns
+// переходит к следующему серверу, и устройство получает ответ или ошибку за доли секунды. Без интерфейса
+// Туннеля такой запрос ушёл бы ещё и провайдеру открытым текстом. Только пакеты с меткой «Туннель» — свои
+// сокеты Роутера (so_mark): ping watchdog до Трубы меток не несёт и проверяет Туннель как раньше.
+function dns_down_chain() {
+	let s = '\n\tchain dns_down {\n';
+	s += '\t\ttype filter hook output priority filter; policy accept;\n';
+	s += '\t\tip daddr @dns_down4 meta mark and ' + hex(C.MARK_MASK) + ' == ' + hex(C.MARK_TUNNEL) + ' meta l4proto tcp reject with tcp reset\n';
+	s += '\t\tip daddr @dns_down4 meta mark and ' + hex(C.MARK_MASK) + ' == ' + hex(C.MARK_TUNNEL) + ' reject\n';
+	s += '\t}\n';
+	return s;
+}
+
 // timeout — срок элементов по умолчанию, с (набор с flags timeout).
 function set_decl(name, typ, flags, elems, timeout) {
 	let s = '\tset ' + name + ' {\n\t\ttype ' + typ + ';\n';
@@ -251,6 +265,7 @@ export function nft_full(cfg, plan, ctx) {
 	s += set_decl('gs_direct4', 'ipv4_addr', gst ? 'timeout' : null, dns_elems(ctx.gs_direct4, gst), gst);
 	s += set_decl('dev_tunnel', 'ether_addr', null, ctx.dev_tunnel);
 	s += set_decl('dev_direct', 'ether_addr', null, ctx.dev_direct);
+	s += set_decl('dns_down4', 'ipv4_addr', null, null);
 	s += dev_sets();
 	s += counter_decls([ ...CONN_COUNTERS, ...TRAFFIC_COUNTERS ], ctx.counters);
 
@@ -286,6 +301,7 @@ export function nft_full(cfg, plan, ctx) {
 	s += persist_chain();
 	s += stats_chain(iface);
 	s += output_chain(ctx);
+	s += dns_down_chain();
 	s += dns_chains(cfg);
 
 	s += '}\n';

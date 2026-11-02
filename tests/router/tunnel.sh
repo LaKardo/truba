@@ -85,6 +85,16 @@ check "крупные пакеты во весь MTU проходят, status в
 NAT_TIME="$(jsonfilter -i /var/run/truba/nat.json -e '@.time')"; LAST="$(health '@.last_check')"
 next_cycle() { [ "$(health '@.last_check')" -gt "$LAST" ]; }
 check "следующий цикл: без нового подъёма Туннеля NAT не перепроверяется" eval 'wait_for 15 next_cycle && [ "$(jsonfilter -i /var/run/truba/nat.json -e "@.time")" = "$NAT_TIME" ]'
+# Смена канала до Трубы (hotplug шлёт truba.recheck): проверка через 2 с, а не через интервал (10 с).
+sleep 1; LAST="$(health '@.last_check')"
+ubus send truba.recheck '{"reason":"wan","iface":"wan"}'
+check "truba.recheck: проверка Туннеля сразу, не дожидаясь интервала" wait_for 5 next_cycle
+check "окно проверок: p50 и p95 задержки" eval '[ -n "$(health @.rtt_p50)" ] && [ -n "$(health @.rtt_p95)" ]'
+# Канал до Трубы пропал (отметка hotplug): проверка не идёт, неудачи не копятся.
+echo "{\"dev\":\"ul0\",\"iface\":\"wan\",\"down\":$(date +%s)}" > /var/run/truba/wan.json
+LAST="$(health '@.last_check')"
+check "канал пропал: цикл без проверки, неудач нет" eval 'wait_for 15 next_cycle && [ "$(health @.wan_down)" = true ] && [ "$(health @.fails)" = 0 ]'
+rm -f /var/run/truba/wan.json
 # Обновление пакета меняет код, но не команду инстанса: reload должен перезапустить watchdog.
 WD="$(pgrep -f 'truba watchdo[g]')"; SINCE="$(health '@.since')"
 echo '// обновлено' >> /usr/share/ucode/truba/const.uc
@@ -120,7 +130,10 @@ uci delete network.awg0.listen_port; uci commit network
 uci delete truba.watchdog.probe; uci delete truba.watchdog.fails; uci commit truba
 reload "ping по умолчанию"
 wd_up() { [ "$(health '@.state')" = healthy ] && tlog | grep -q 'truba-watchdog: Туннель восстановлен'; }
-check "Туннель снова отвечает — строка «восстановлен»" wait_for 40 wd_up
+check "Туннель снова отвечает — строка «восстановлен» с длительностью простоя" eval 'wait_for 40 wd_up && tlog | grep -qE "Туннель восстановлен \(.*\), простой [0-9]+ с"'
+check "строка «применено» — с длительностью" eval 'tlog | grep -qE "truba: применено за [0-9]+ мс"'
+check "журнал простоев: последний закрыт — начало, конец, длительность, причина" eval \
+	'[ -n "$(health "@.outages[-1].end")" ] && [ "$(health "@.outages[-1].secs")" -ge 0 ] && health "@.outages[-1].why" | grep -q "192.0.2.200"'
 
 section "status: сторож службы"
 # «Состояние» на «Туннеле» и «Обзоре» — по работающему сторожу, а не по переключателю в браузере: в UCI сессии

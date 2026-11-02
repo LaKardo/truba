@@ -181,6 +181,48 @@ uci -q delete truba.dns.port; uci commit truba
 reload "порт по умолчанию"
 check "порт API свободен — API снова есть" wait_for 10 eval 'curl -s -m 2 http://127.0.0.1:5336/metrics | grep -q "^mosdns_cache_query_total"'
 
+section "порт DNS mosdns занят другой программой"
+# mosdns на занятом порту не запустится, а dnsmasq слал бы запросы сети чужой программе.
+upstream 5347 44.0.0.7
+uci set truba.dns.port=5347; uci commit truba
+/etc/init.d/truba reload >/dev/null 2>&1
+check "reload: порт 5347 занят — ошибка применения" grep -q "5347 занят" /var/run/truba/applied.json
+check "dnsmasq не направлен на чужой порт, DNS сети идёт мимо Трубы" eval '! uci -q get dhcp.@dnsmasq[0].server | grep -q "#5347" && ! uci -q get dhcp.@dnsmasq[0].server | grep -q "127.0.0.1#5335"'
+kill "$(cat /tmp/up-5347.pid)"
+uci -q delete truba.dns.port; uci commit truba
+reload "порт по умолчанию"
+check "порт свободен — без ошибки, dnsmasq снова в mosdns" eval 'no_error && wait_for 10 mosdns_up && uci -q get dhcp.@dnsmasq[0].server | grep -q "127.0.0.1#5335"'
+
+section "журнал mosdns: сводка вместо строки на каждый неудачный запрос"
+check "mosdns запущен через фильтр журнала" eval 'ubus call service list "{\"name\":\"truba\"}" | jsonfilter -e "@.truba.instances.mosdns.command[1]" | grep -qx mosdns-log'
+# Сервер «Туннеля» не отвечает (порт без сервера): каждый запрос — несколько строк WARN mosdns.
+uci -q batch <<-'EOF'
+	delete truba.dns.tunnel_upstream
+	add_list truba.dns.tunnel_upstream='udp://127.0.0.1:5419'
+	commit truba
+EOF
+reload "сервер Туннеля молчит"
+wait_for 10 mosdns_up
+N0="$(logread -e mosdns | grep -c 'entry err')"
+for i in 1 2 3; do nslookup -port="$(dns_port)" "dead$i.zz-tun.trubatest" 127.0.0.1 >/dev/null 2>&1 & done; wait
+check "строк о каждом запросе в журнале нет" eval '[ "$(logread -e mosdns | grep -c "entry err")" = "$N0" ]'
+PID="$(pidof mosdns)"
+uci -q batch <<-'EOF'
+	delete truba.dns.tunnel_upstream
+	add_list truba.dns.tunnel_upstream='udp://127.0.0.1:5401'
+	commit truba
+EOF
+reload "сервер Туннеля снова отвечает"
+check "при остановке сводка записана: имена без ответа" wait_for 10 eval 'logread -e mosdns | grep "сводка" | grep -q "zz-tun.trubatest"'
+check "mosdns остановлен сигналом procd через фильтр, а не брошен" eval '! kill -0 "$PID" 2>/dev/null && wait_for 10 mosdns_up'
+check "копия журнала Трубы: строки службы в /var/run/truba/events.log" eval 'grep -q "truba: " /var/run/truba/events.log'
+# Смена адреса WAN: hotplug шлёт инстансу mosdns SIGHUP, фильтр перезапускает mosdns сразу, сам остаётся.
+FPID="$(ubus call service list '{"name":"truba"}' | jsonfilter -e '@.truba.instances.mosdns.pid')"; PID="$(pidof mosdns)"
+ubus call service signal '{"name":"truba","instance":"mosdns","signal":1}'
+mosdns_new() { P="$(pidof mosdns)"; [ -n "$P" ] && [ "$P" != "$PID" ] && mosdns_up; }
+check "SIGHUP: mosdns перезапущен сразу, фильтр журнала тот же" eval 'wait_for 4 mosdns_new && kill -0 "$FPID" && logread -e truba | grep -q "mosdns перезапускается"'
+check "после перезапуска по SIGHUP DNS отвечает" eval '[ "$(ask a.zz-dom.trubatest)" = 44.0.0.2 ]'
+
 section "срок IP из DNS в наборах (ADR 0007)"
 # left_le IP N — элементу IP в gs_direct4 осталось не больше N с.
 left_le() { L="$(nft -j list set inet truba gs_direct4 | jsonfilter -e "@.nftables[*].set.elem[@.elem.val='$1'].elem.expires")"; [ -n "$L" ] && [ "$L" -le "$2" ]; }

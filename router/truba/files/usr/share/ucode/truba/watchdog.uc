@@ -2,6 +2,7 @@
 'use strict';
 
 import * as uloop from 'uloop';
+import { connect } from 'ubus';
 import { readfile } from 'fs';
 import { cursor } from 'uci';
 import * as C from 'truba.const';
@@ -119,6 +120,29 @@ export function tunnel_test() {
 const NAT_RETRY = 600, NAT_WAIT = 60;
 let nat_started = 0;
 
+// После события truba.recheck: первая проверка через RECHECK_DELAY с, после смены канала до Трубы — ещё
+// FAST_SPAN с раз в FAST_INTERVAL с.
+const RECHECK_DELAY = 2, FAST_INTERVAL = 5, FAST_SPAN = 60;
+// Сколько последних простоев хранить в health.json.
+const OUTAGES_MAX = 10;
+
+// Квантиль q (0…1) задержек окна, мс: ближайший ранг; null — ответов нет. Потери не входят.
+export function rtt_quantile(probes, q) {
+	let v = sort(filter(probes, x => x != null), (a, b) => a - b);
+	if (!length(v))
+		return null;
+	let i = int(q * length(v) + 0.999999) - 1;
+	return v[i < 0 ? 0 : (i >= length(v) ? length(v) - 1 : i)];
+};
+
+// Канал до Трубы пропал (событие ifdown, отметка в WAN_FILE): неудачи проверок — не вина Туннеля.
+// Не дольше WAN_DOWN_MAX: если подъём канала прошёл мимо (другое имя интерфейса), контроль не замирает.
+const WAN_DOWN_MAX = 300;
+function wan_down() {
+	let d = U.read_json(C.WAN_FILE, null)?.down;
+	return d != null && time() - d < WAN_DOWN_MAX;
+}
+
 function nat_due(since) {
 	if (time() - nat_started < NAT_WAIT)
 		return false;
@@ -141,7 +165,23 @@ export function run() {
 	let since = (fresh && prev.since) ? prev.since : time(), fails = 0;
 	let probes = (fresh && type(prev.probes) == 'array') ? slice(prev.probes, -C.PROBE_WINDOW) : [];   // задержки, мс; null — потеря
 	let big = fresh ? prev.big : null, big_n = 0;   // итог big_probe
+	// Простои переживают перезапуск watchdog и перерыв: это история, а не текущее окно.
+	let outages = (type(prev?.outages) == 'array') ? slice(prev.outages, -OUTAGES_MAX) : [];
 	let timer;
+	// Быстрые проверки после смены канала до Трубы: раз в FAST_INTERVAL с в течение FAST_SPAN с — Туннель
+	// возвращается за секунды, а не к следующему циклу. last_up — интерфейс был поднят на прошлом цикле.
+	let fast_until = 0, last_up = true;
+	// Смена канала до Трубы, по которой ещё не записано, через сколько пришли рукопожатие и ping.
+	let wan_at = null;
+	// Простой идёт — отметить в нём время события (смена канала, действие).
+	let mark = (k, v) => {
+		if (state == 'down' && length(outages) && outages[-1].end == null) {
+			if (k == 'act')
+				push(outages[-1].acts ??= [], v);
+			else
+				outages[-1][k] = v;
+		}
+	};
 
 	let probed = (rtt) => {
 		push(probes, rtt);
@@ -157,6 +197,9 @@ export function run() {
 		rec.fails = fails;
 		rec.probes = probes;
 		rec.big = big;
+		rec.outages = outages;
+		rec.rtt_p50 = rtt_quantile(probes, 0.5);
+		rec.rtt_p95 = rtt_quantile(probes, 0.95);
 		U.mkdirp(C.RUN_DIR);
 		U.write_json(C.HEALTH_FILE, rec);
 	};
@@ -164,15 +207,26 @@ export function run() {
 	let set_state = (next, info, rec, tinfo) => {
 		if (next == state)
 			return;
+		let was = time() - since;
 		state = next;
 		since = time();
+		// Журнал простоев для «Туннеля»: начало, длительность, причина. Последние OUTAGES_MAX.
+		if (next == 'down')
+			push(outages, { start: since, why: info });
+		else if (length(outages) && outages[-1].end == null) {
+			outages[-1].end = since;
+			outages[-1].secs = was;
+		}
+		while (length(outages) > OUTAGES_MAX)
+			shift(outages);
 		// routes() читает состояние из файла — записать до пересчёта таблицы.
 		save(rec);
 		let table = N.routes(cfg, tinfo);
 		U.log(next == 'healthy' ? 'notice' : 'warning',
-			sprintf('Туннель %s (%s); таблица Туннеля: %s',
-				next == 'healthy' ? 'восстановлен' : 'не отвечает', info, table), C.WATCHDOG_TAG);
-		system([ 'ubus', 'send', 'truba.tunnel', sprintf('%J', { state: next, info, table }) ]);
+			sprintf('Туннель %s (%s)%s; таблица Туннеля: %s',
+				next == 'healthy' ? 'восстановлен' : 'не отвечает', info,
+				next == 'healthy' ? sprintf(', простой %d с', was) : '', table), C.WATCHDOG_TAG);
+		system([ 'ubus', 'send', 'truba.tunnel', sprintf('%J', { state: next, info, table, ...(next == 'healthy' ? { downtime: was } : {}) }) ]);
 	};
 
 	let tick = () => {
@@ -189,21 +243,27 @@ export function run() {
 			set_state('down', 'интерфейс выключен', rec, tinfo);
 		}
 		else if (!tinfo.up) {
+			// В окно не идёт: «Потери» — про пакеты в Туннеле, а не про выключенный интерфейс.
 			fails++;
-			probed(null);
 			if (fails >= w.fails)
 				set_state('down', 'интерфейс не поднят', rec, tinfo);
+		}
+		else if (wan_down()) {
+			// Кабель вынут или канал ещё поднимается: Туннелю некуда слать пакеты. Не считать неудачи и не
+			// перезапускать — по подъёму канала hotplug сам обновит Туннель и попросит проверить его.
+			rec.wan_down = true;
 		}
 		else {
 			let probe = length(w.probe) ? w.probe : tinfo.peer;
 			let ping_ok = true;
 			if (probe) {
 				rec.rtt = ping_rtt(tinfo.device, probe);
-				// Одна контрольная проба после потери; цикл всё равно даёт только один результат.
+				// В окно — первая попытка: повтор скрывал бы одиночные потери, и «Потери» были бы занижены.
+				probed(rec.rtt);
+				// Одна контрольная проба после потери: вердикт цикла — по ней.
 				if (rec.rtt == null)
 					rec.rtt = ping_rtt(tinfo.device, probe);
 				ping_ok = rec.rtt != null;
-				probed(rec.rtt);
 			}
 			let age = handshake_age(tinfo.device);
 			rec.ping = ping_ok;
@@ -211,6 +271,16 @@ export function run() {
 
 			if (ping_ok && age != null && age <= w.handshake_max) {
 				fails = 0;
+				// Сколько Туннель возвращался после смены канала: ping и рукопожатие (его время — по awg). Новый
+				// порт сессию не рвёт, и рукопожатия может не быть до планового rekey: тогда hs — null.
+				if (wan_at != null) {
+					let hs = time() - age;
+					let n = { ping: time() - wan_at, hs: (hs >= wan_at) ? hs - wan_at : null };
+					U.log('info', sprintf('после смены канала до Трубы: ping через %d с, %s', n.ping,
+						(n.hs != null) ? sprintf('рукопожатие через %d с', n.hs) : 'сессия прежняя'), C.WATCHDOG_TAG);
+					mark('after_wan', n);
+					wan_at = null;
+				}
 				set_state('healthy', sprintf('handshake %d с назад', age), rec, tinfo);
 				// В фоне: проверка ждёт ответов до 4,5 с, а цикл не должен.
 				if (nat_due(since)) {
@@ -230,6 +300,7 @@ export function run() {
 					set_state('down', why, rec, tinfo);
 					if (fails % w.fails == 0) {
 						U.log('warn', 'перезапуск интерфейса ' + cfg.iface + ': ' + why, C.WATCHDOG_TAG);
+						mark('act', { t: time(), what: 'restart' });
 						// 0 просит ядро выбрать новый порт. Явный listen_port владельца не менять.
 						// Только сокет Туннеля: общую таблицу NAT устройств не сбрасывать.
 						if (!int(cursor().get('network', cfg.iface, 'listen_port') ?? 0) &&
@@ -242,10 +313,32 @@ export function run() {
 		}
 
 		save(rec);
-		timer.set(w.interval * 1000);
+		last_up = tinfo.up;
+		let iv = (time() < fast_until && FAST_INTERVAL < w.interval) ? FAST_INTERVAL : w.interval;
+		timer.set(iv * 1000);
 	};
 
 	uloop.init();
 	timer = uloop.timer(1000, tick);
+	// truba.recheck (из hotplug): Туннель поднялся или сменился канал до Трубы — проверить через RECHECK_DELAY с.
+	// Неудачи, пока интерфейса не было, к перезапуску не ведут: только что поднятый Туннель иначе мог бы
+	// сразу уйти на перезапуск. Свой перезапуск watchdog (интерфейс был поднят) счёт неудач не сбрасывает —
+	// иначе перезапуски шли бы чаще чем раз в fails циклов.
+	let ub = connect();
+	let recheck = ub?.listener(C.RECHECK_EVENT, (ev, data) => {
+		if (data?.reason == 'wan') {
+			fails = 0;
+			fast_until = time() + FAST_SPAN;
+			wan_at = time();
+			mark('wan', wan_at);
+			if (data.action)
+				mark('act', { t: wan_at, what: data.action });
+		}
+		else if (!last_up)
+			fails = 0;
+		timer.set(RECHECK_DELAY * 1000);
+	});
 	uloop.run();
+	recheck?.remove();
+	ub?.disconnect();
 };

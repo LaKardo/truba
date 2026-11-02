@@ -364,6 +364,18 @@ msgid "This external port is already forwarded: %s"
 msgstr ""
 
 #: htdocs/luci-static/resources/truba/common.js
+msgid "%d s"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/common.js
+msgid "%d min %d s"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/common.js
+msgid "%d h %d min"
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/common.js
 msgid "no data"
 msgstr ""
 
@@ -1510,6 +1522,30 @@ msgid "down since"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/tunnel.js
+msgid "Jitter"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/tunnel.js
+msgid "Latency median / 95%"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/tunnel.js
+msgid "Recent outages"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/tunnel.js
+msgid "ongoing"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/tunnel.js
+msgid "uplink changed"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/tunnel.js
+msgid "tunnel back %d s after the change"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/tunnel.js
 msgid "Tunnel route table"
 msgstr ""
 
@@ -1773,3 +1809,4 @@ msgstr ""
 #: menu.d
 msgid "Overview"
 msgstr ""
+

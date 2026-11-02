@@ -23,10 +23,12 @@ const UPSTREAM_IDLE = 360;
 // Сколько кэш держит ответ свежим, с. Дольше — устаревший ответ живёт заметно дольше ttl_max:
 // - после обновления списков домен, перешедший в другую Категорию, ещё получает ответ прежнего сервера
 //   (маршрут при этом сразу по новой Категории);
-// - mosdns 5.3.3 не пишет в дамп время сохранения, и после перезапуска ответы из дампа уходят
-//   с TTL 1, пока запись не устареет: устройства переспрашивают раз в секунду.
+// - mosdns 5.3.3 не пишет в дамп время сохранения, и после перезапуска ответы из дампа идут
+//   с TTL 1, пока запись не устареет (устройствам — не меньше TTL_MIN).
 // Час покрывает TTL большинства ответов, которые ttl_max обрезал бы (у 90 % — меньше 45 минут).
 const CACHE_TTL_MAX = 3600;
+// Наименьший TTL ответа устройству, с: столько же mosdns ставит истёкшим ответам ленивого кэша.
+const TTL_MIN = 5;
 
 // Адрес сервера в конфиге mosdns: «url@dial_ip» → { addr, dial_addr }. Неверные адреса conf.uc уже отбросил.
 function upstream(u, mark) {
@@ -135,10 +137,15 @@ export function mosdns(cfg, plan, router_hosts, gsdir) {
 		cache.lazy_cache_ttl = cfg.dns.lazy_cache_ttl;
 	push(plugins, { tag: 'cache', type: 'cache', args: cache });
 
-	let ttl = sprintf('ttl 0-%d', cfg.dns.ttl_max);
+	// Устройствам — TTL от TTL_MIN до ttl_max на всех путях. Нижняя граница — ради ответов из дампа:
+	// mosdns 5.3.3 не пишет в него время сохранения, и после перезапуска такие ответы уходили бы с TTL 1,
+	// пока запись не устареет (до CACHE_TTL_MAX), — устройства переспрашивали бы раз в секунду.
+	// Верхняя и у доменов без Категории: иначе домен, который со следующим обновлением списков попал
+	// в Категорию, устройство ещё до часа открывало бы по прежнему ответу.
+	let ttl = sprintf('ttl %d-%d', TTL_MIN, cfg.dns.ttl_max);
 	// nftset в mosdns 5 — только встроенное действие: «семейство,таблица,набор,тип,маска».
 	let nftset = (set) => sprintf('nftset inet,%s,%s,ipv4_addr,32', C.NFT_TABLE, set);
-	// Путь ответа: fetch_* — кэш и серверы, затем, для Категорий, TTL и nftset. Кэш сохраняет ответ,
+	// Путь ответа: fetch_* — кэш и серверы, затем TTL для устройств и, для Категорий, nftset. Кэш сохраняет ответ,
 	// когда fetch_* завершилась, — с TTL сервера, но не дольше CACHE_TTL_MAX; устройства получают не
 	// больше ttl_max и часто перепроверяют адрес, а запись в кэше не устаревает раньше срока и не
 	// обновляется в фоне каждые ttl_max. Ответ из кэша тоже проходит через nftset — до ответа
@@ -152,9 +159,9 @@ export function mosdns(cfg, plan, router_hosts, gsdir) {
 			{ matches: [ '!has_resp' ], exec: f[1] },
 			{ exec: sprintf('ttl 0-%d', CACHE_TTL_MAX) },
 		] });
-		let flow = [ { exec: '$fetch_' + f[0] } ];
+		let flow = [ { exec: '$fetch_' + f[0] }, { exec: ttl } ];
 		if (f[2])
-			push(flow, { exec: ttl }, { exec: nftset(f[2]) });
+			push(flow, { exec: nftset(f[2]) });
 		push(plugins, { tag: 'flow_' + f[0], type: 'sequence', args: flow });
 	}
 
@@ -198,6 +205,18 @@ function dnsmasq_section(c) {
 	return sid;
 }
 
+// Адрес mosdns в списке server dnsmasq: только с портами Трубы (из настроек, последней удачной копии
+// и по умолчанию), а не любой 127.0.0.1#… — так может слушать и свой резолвер владельца
+// (https-dns-proxy, stubby), его трогать нельзя. Портов несколько: порт могли сменить.
+function is_mosdns_server(s) {
+	let c = cursor();
+	c.load('truba');
+	for (let p in [ c.get('truba', 'dns', 'port'), U.read_json(C.GOOD_META, {})?.port, F.SCHEMA.dns.port.def ])
+		if (p != null && s == C.MOSDNS_ADDR + '#' + p)
+			return true;
+	return false;
+}
+
 export function dnsmasq_enable(port) {
 	let c = cursor();
 	c.load('dhcp');
@@ -205,21 +224,31 @@ export function dnsmasq_enable(port) {
 	if (!sid)
 		return false;
 
+	port ??= F.SCHEMA.dns.port.def;
 	let want = C.MOSDNS_ADDR + '#' + port;
 	let cur = U.to_list(c.get('dhcp', sid, 'server'));
+	let ours = s => s == want || is_mosdns_server(s);
 
 	if (!stat(C.DNSMASQ_BACKUP)) {
+		// dnsmasq уже направлен в mosdns, а бэкапа нет (каталог state пропал): его noresolv и cachesize —
+		// значения Трубы, а не исходные. Такой бэкап «восстановил» бы адрес остановленного mosdns, и сеть
+		// осталась бы без DNS. Тогда в бэкап — без адреса mosdns и с умолчаниями dnsmasq.
+		let routed = length(filter(cur, ours)) > 0;
 		U.mkdirp(C.STATE_DIR);
 		U.write_json(C.DNSMASQ_BACKUP, {
 			sid,
-			noresolv: c.get('dhcp', sid, 'noresolv'),
-			cachesize: c.get('dhcp', sid, 'cachesize'),
-			server: cur,
+			noresolv: routed ? null : c.get('dhcp', sid, 'noresolv'),
+			cachesize: routed ? null : c.get('dhcp', sid, 'cachesize'),
+			server: filter(cur, s => !ours(s)),
 		});
+		if (routed)
+			U.warn_log('dnsmasq уже направлен в mosdns, а бэкапа его настроек нет: при выключении будут умолчания dnsmasq');
 	}
 
 	// Серверы для отдельных доменов (/domain/ip) оставляем, общие заменяем на mosdns.
 	let servers = filter(cur, s => index(s, '/') == 0);
+	let saved = U.read_json(C.DNSMASQ_BACKUP, {})?.server ?? [];
+	let dropped = filter(cur, s => index(s, '/') != 0 && !ours(s) && !(s in saved));
 	push(servers, want);
 
 	let changed = (c.get('dhcp', sid, 'noresolv') != '1') || (c.get('dhcp', sid, 'cachesize') != '0') ||
@@ -227,6 +256,9 @@ export function dnsmasq_enable(port) {
 	if (!changed)
 		return false;
 
+	// Общие серверы, добавленные при включённой Трубе, в бэкап не попали: после выключения их не будет.
+	if (length(dropped))
+		U.warn_log('dnsmasq: серверы ' + join(', ', dropped) + ' заменены на mosdns — DNS сети идёт через Трубу');
 	c.set('dhcp', sid, 'noresolv', '1');
 	c.set('dhcp', sid, 'cachesize', '0');
 	c.set('dhcp', sid, 'server', servers);
@@ -235,12 +267,31 @@ export function dnsmasq_enable(port) {
 	return true;
 };
 
+// Вернуть dnsmasq к настройкам до Трубы. Серверы для отдельных доменов (/domain/ip), добавленные
+// при включённой Трубе, остаются. Бэкапа нет — убрать хотя бы адрес mosdns (как reinstall.sh):
+// иначе dnsmasq слал бы запросы в остановленный mosdns, и сеть осталась бы без DNS.
 export function dnsmasq_restore() {
 	let b = U.read_json(C.DNSMASQ_BACKUP, null);
-	if (!b)
-		return false;
 	let c = cursor();
 	c.load('dhcp');
+	if (!b) {
+		let sid = dnsmasq_section(c);
+		let cur = U.to_list(sid ? c.get('dhcp', sid, 'server') : null);
+		let rest = filter(cur, s => !is_mosdns_server(s));
+		if (length(rest) == length(cur))
+			return false;
+		if (length(rest))
+			c.set('dhcp', sid, 'server', rest);
+		else
+			c.delete('dhcp', sid, 'server');
+		// Без общих серверов — снова серверы провайдера (resolv.conf).
+		if (!length(filter(rest, s => index(s, '/') != 0)))
+			c.delete('dhcp', sid, 'noresolv');
+		c.commit('dhcp');
+		U.warn_log('бэкапа настроек dnsmasq нет: убран только адрес mosdns');
+		system('/etc/init.d/dnsmasq restart >/dev/null 2>&1');
+		return true;
+	}
 	let sid = b.sid;
 	if (c.get('dhcp', sid) == null)
 		sid = dnsmasq_section(c);
@@ -251,8 +302,12 @@ export function dnsmasq_restore() {
 			else
 				c.set('dhcp', sid, k, b[k]);
 		}
-		if (length(b.server ?? []))
-			c.set('dhcp', sid, 'server', b.server);
+		let server = filter(b.server ?? [], s => !is_mosdns_server(s));
+		for (let s in U.to_list(c.get('dhcp', sid, 'server')))
+			if (index(s, '/') == 0 && !(s in server))
+				push(server, s);
+		if (length(server))
+			c.set('dhcp', sid, 'server', server);
 		else
 			c.delete('dhcp', sid, 'server');
 		c.commit('dhcp');
@@ -264,20 +319,33 @@ export function dnsmasq_restore() {
 
 // ---- Порт API и адреса зон ----
 
-// Порт API mosdns занят другой программой? Ошибка API останавливает mosdns целиком —
-// весь DNS сети, поэтому тогда mosdns запускается без API (нет только счётчиков кэша).
-// Конфликтуют слушатели этого порта на 127.0.0.1 и на всех адресах.
-export function api_port_taken(api) {
-	let port = split(api, ':')[1];
-	for (let l in split(U.run('netstat -lntp').out, '\n')) {
+// netstat — вывод netstat -l…p: строки TCP со state LISTEN, строки UDP без state.
+export function port_taken(port, netstat) {
+	port = '' + port;
+	for (let l in split(netstat ?? '', '\n')) {
 		let f = split(trim(l), /\s+/);
-		if (f[5] != 'LISTEN' || match(f[6] ?? '', /\/mosdns$/))
+		let prog = (f[0] == 'tcp' || f[0] == 'tcp6') ? (f[5] == 'LISTEN' ? f[6] : null)
+			: (f[0] == 'udp' || f[0] == 'udp6') ? f[5] : null;
+		if (prog == null || match(prog, /\/mosdns$/))
 			continue;
 		let i = rindex(f[3], ':');
 		if (substr(f[3], i + 1) == port && (substr(f[3], 0, i) in [ C.MOSDNS_ADDR, '0.0.0.0', '::', '' ]))
 			return true;
 	}
 	return false;
+};
+
+// Порт API mosdns занят другой программой? Ошибка API останавливает mosdns целиком —
+// весь DNS сети, поэтому тогда mosdns запускается без API (нет только счётчиков кэша).
+// Конфликтуют слушатели этого порта на 127.0.0.1 и на всех адресах.
+export function api_port_taken(api) {
+	return port_taken(split(api, ':')[1], U.run('netstat -lntp').out);
+};
+
+// Порт DNS mosdns (127.0.0.1, UDP и TCP) занят другой программой? Тогда mosdns не запустится,
+// а dnsmasq слал бы запросы сети чужой программе.
+export function dns_port_taken(port) {
+	return port_taken(port, U.run('netstat -lntup').out);
 };
 
 // Перехват DNS отправляет запрос устройства на первый адрес IPv4 устройства зоны, через которое он
@@ -382,6 +450,12 @@ export function dns_heal(devs, fast) {
 // DNS при включённой Маршрутизации — после загрузки таблицы nftables (ADR 0006): конфиг mosdns,
 // дампы кэша, метка поколения, dnsmasq и адреса зон. Итог — адрес API mosdns или null.
 export function apply(cfg, plan, hosts, gkey, lan_if) {
+	// Порт DNS занят — mosdns не запустится: dnsmasq возвращается к прежним серверам, DNS сети идёт мимо
+	// Трубы, а ошибка видна на «Обзоре» (ADR 0006: применение не удалось, таблица остаётся).
+	if (dns_port_taken(cfg.dns.port)) {
+		dnsmasq_restore();
+		die(sprintf('порт %s#%d занят другой программой: mosdns не запустится, DNS сети идёт мимо Трубы — смените порт DNS', C.MOSDNS_ADDR, cfg.dns.port));
+	}
 	if (api_port_taken(cfg.dns.api)) {
 		U.warn_log(sprintf('порт %s занят другой программой: mosdns без API, счётчиков кэша на «Обзоре» не будет', cfg.dns.api));
 		cfg.dns.api = null;

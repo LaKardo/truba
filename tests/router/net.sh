@@ -327,6 +327,30 @@ check "служба остановлена (нет applied.json): событие
 mv /tmp/applied.json /var/run/truba/applied.json
 ip link del hp0
 
+section "смена канала до Трубы (провайдера)"
+# Внешние пакеты Туннеля идут через ul0 — это «WAN» стенда. Первое событие только запоминает канал.
+wanhp() { ACTION="$1" INTERFACE=wan DEVICE=ul0 sh /etc/hotplug.d/iface/50-truba; }
+rm -f /var/run/truba/wan.json
+PORT0="$(wg show awg0 listen-port)"
+wanhp ifup
+check "первое событие: канал записан, Туннель не тронут" eval '[ "$(jsonfilter -i /var/run/truba/wan.json -e @.addr)" = 198.51.100.1 ] && [ "$(wg show awg0 listen-port)" = "$PORT0" ]'
+wanhp ifupdate
+check "продление DHCP без смены: порт Туннеля прежний" test "$(wg show awg0 listen-port)" = "$PORT0"
+# Как после смены провайдера: прежний адрес канала был другим.
+echo '{"dev":"ul0","addr":"192.0.2.10","gw":"192.0.2.1","iface":"wan"}' > /var/run/truba/wan.json
+wanhp ifupdate
+check "смена адреса канала: новый порт Туннеля, строка в журнале, новое состояние записано" eval \
+	'[ "$(wg show awg0 listen-port)" != "$PORT0" ] && logread -e truba | grep -q "канал до Трубы: wan (ul0), адрес 192.0.2.10 → 198.51.100.1" && [ "$(jsonfilter -i /var/run/truba/wan.json -e @.addr)" = 198.51.100.1 ]'
+tping() { ping -c1 -W2 -I awg0 10.77.77.1 >/dev/null; }
+check "Туннель с нового порта: ping до Трубы (сессия та же, Труба узнаёт порт по первому пакету)" wait_for 10 tping
+PORT1="$(wg show awg0 listen-port)"
+ACTION=ifup INTERFACE=wan6 DEVICE=ul0 sh /etc/hotplug.d/iface/50-truba
+check "подъём соседнего интерфейса на том же устройстве — порт прежний" test "$(wg show awg0 listen-port)" = "$PORT1"
+wanhp ifdown
+check "канал пропал: отметка в wan.json и строка в журнале" eval '[ -n "$(jsonfilter -i /var/run/truba/wan.json -e @.down)" ] && logread -e truba | grep -q "канал до Трубы пропал: wan (ul0)"'
+wanhp ifup
+check "канал снова поднят: отметка снята" eval '[ -z "$(jsonfilter -i /var/run/truba/wan.json -e @.down)" ]'
+
 section "DSCP пакетов Туннеля"
 # Ядро ставит рукопожатию AF41 — по нему WireGuard и AmneziaWG узнают. Труба обнуляет DSCP всего,
 # что Роутер шлёт на IP Трубы: до её цепочки output рукопожатие (148 байт, udp length 156) ещё
@@ -444,11 +468,59 @@ uci set truba.watchdog.enabled='1'; uci commit truba
 echo '{"state":"down"}' > /var/run/truba/health.json
 truba routes >/dev/null
 check "Туннель упал, блокировка вкл → blackhole" eval 'ip route show table 77 | grep -q "blackhole default"'
+check "Туннель упал: DNS на Трубе — в dns_down4" in_set dns_down4 10.77.77.1
+# Без отказа запрос ждал бы ответа из Туннеля до тайм-аута mosdns (5 с).
+T0=$(date +%s); nslookup -port="$(dns_port)" down$$.trubatest 127.0.0.1 >/dev/null 2>&1; T1=$(date +%s)
+check "Туннель упал: новое имя — ответ mosdns без ожидания тайм-аута ($((T1 - T0)) с)" test $((T1 - T0)) -le 2
+check "Туннель упал: ping watchdog до Трубы не отклоняется (без метки)" ping -c1 -W2 -I awg0 10.77.77.1
 uci set truba.main.killswitch='0'; uci commit truba; truba routes >/dev/null
 check "Туннель упал, блокировка выкл → без default" eval '! ip route show table 77 | grep -q default'
 echo '{"state":"healthy"}' > /var/run/truba/health.json
 uci set truba.main.killswitch='1'; uci set truba.watchdog.enabled='0'; uci commit truba; truba routes >/dev/null
 check "Туннель в порядке → default dev awg0" eval 'ip route show table 77 | grep -q "default dev awg0"'
+check "Туннель в порядке → dns_down4 пуст" eval '! in_set dns_down4 10.77.77.1'
+
+section "утечка DNS: интерфейс Туннеля выключен"
+# Всё, что уходит к серверам DNS «Туннеля» (10.77.77.1, 1.1.1.1) не через awg0, — утечка к провайдеру.
+# Счётчик в самом конце postrouting видит то, что действительно покинуло Роутер.
+nft -f - <<-'EOF'
+	table inet leak {
+		counter dns_tun {}
+		counter doh {}
+		chain post {
+			type filter hook postrouting priority 400; policy accept;
+			ip daddr 10.77.77.1 oifname != "awg0" counter name dns_tun
+			ip daddr 1.1.1.1 oifname != "awg0" counter name doh
+		}
+	}
+EOF
+leak() { nft list counter inet leak "$1" | awk '/packets/ { print $2 }'; }
+ifdown awg0
+down_ready() { ! iface_up awg0 && in_set dns_down4 10.77.77.1 && idle; }
+check "ifdown awg0: DNS на Трубе — в dns_down4" wait_for 20 down_ready
+ask_new() { for i in 1 2 3; do nslookup -port="$(dns_port)" "leak$i-$$.zz-full.trubatest" 127.0.0.1 >/dev/null 2>&1; nslookup -port="$(dns_port)" "x$i-$$.zz-full.trubatest" 127.0.0.1 >/dev/null 2>&1; done; }
+ask_new
+check "Блокировка вкл: к DNS Туннеля мимо awg0 — ни пакета (10.77.77.1: $(leak dns_tun), 1.1.1.1: $(leak doh))" \
+	eval '[ "$(leak dns_tun)" = 0 ] && [ "$(leak doh)" = 0 ]'
+uci set truba.main.killswitch='0'; uci commit truba; truba routes >/dev/null
+ask_new
+check "Блокировка выкл: к DNS на Трубе мимо awg0 — ни пакета ($(leak dns_tun)); запасной DoH идёт напрямую — по замыслу ($(leak doh))" \
+	test "$(leak dns_tun)" = 0
+# Контроль, что проверка видит утечку: без отказа (прежнее поведение) запросы к 10.77.77.1 при выключенном
+# интерфейсе уходили бы по main мимо Туннеля.
+nft flush set inet truba dns_down4
+nft reset counters table inet leak >/dev/null
+ask_new
+CTRL="$(leak dns_tun)"
+check "контроль: без dns_down4 запросы к 10.77.77.1 уходят мимо awg0 ($CTRL пакетов) — утечка, которую закрывает отказ" test "$CTRL" -gt 0
+truba routes >/dev/null
+uci set truba.main.killswitch='1'; uci commit truba
+nft delete table inet leak
+ifup awg0
+up_ready() { iface_up awg0 && ! in_set dns_down4 10.77.77.1 && idle; }
+check "ifup awg0: dns_down4 снова пуст" wait_for 30 up_ready
+# reload по событию интерфейса procd запускает с задержкой: дождаться его, чтобы он не попал в следующий раздел.
+sleep 3; wait_for 30 idle
 
 section "Маршрутизация выкл"
 # Авария с Аварийной блокировкой — и выход из неё одной командой из README (ADR 0019).

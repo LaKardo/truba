@@ -5,15 +5,6 @@ import { readfile, rename, mkdir, stat, popen, unlink, open } from 'fs';
 import { connect } from 'ubus';
 import * as C from 'truba.const';
 
-// tag — для своего источника на «Журнале» (watchdog); без него — тег службы.
-export function log(level, msg, tag) {
-	system([ 'logger', '-t', tag ?? C.LOG_TAG, '-p', 'daemon.' + level, msg ]);
-};
-
-export function info(msg) { log('info', msg); };
-export function warn_log(msg) { log('warn', msg); };
-export function err(msg) { log('err', msg); };
-
 export function shq(s) {
 	return "'" + replace('' + s, "'", "'\\''") + "'";
 };
@@ -88,6 +79,46 @@ export function write_atomic(path, data, mode) {
 export function write_json(path, obj) {
 	return write_atomic(path, sprintf('%J', obj));
 };
+
+const WDAYS = [ 'Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat' ];
+const MONS = [ 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec' ];
+
+// Строка в виде logread: «Mon Nov  2 18:11:33 2026 daemon.warn truba: текст».
+export function event_line(t, level, tag, msg) {
+	return sprintf('%s %s %2d %02d:%02d:%02d %d daemon.%s %s: %s\n', WDAYS[t.wday % 7], MONS[t.mon - 1], t.mday,
+		t.hour, t.min, t.sec, t.year, level, tag, replace('' + msg, /\n/g, ' '));
+};
+
+// Дописать строку; файл больше EVENTS_MAX — оставить вторую половину (по целым строкам).
+function event_add(line) {
+	if (!stat(C.RUN_DIR))
+		mkdirp(C.RUN_DIR);
+	let f = open(C.EVENTS_FILE, 'a', 0644);
+	if (!f)
+		return;
+	f.write(line);
+	f.close();
+	if ((stat(C.EVENTS_FILE)?.size ?? 0) <= C.EVENTS_MAX)
+		return;
+	let s = readfile(C.EVENTS_FILE) ?? '';
+	s = substr(s, length(s) - C.EVENTS_MAX / 2);
+	write_atomic(C.EVENTS_FILE, substr(s, index(s, '\n') + 1));
+}
+
+// Журнал: syslog и копия в EVENTS_FILE. tag — для своего источника на «Журнале» (watchdog);
+// без него — тег службы.
+export function log(level, msg, tag) {
+	tag ??= C.LOG_TAG;
+	system([ 'logger', '-t', tag, '-p', 'daemon.' + level, msg ]);
+	try {
+		event_add(time() + '\t' + event_line(localtime(), level, tag, msg));
+	}
+	catch (e) { }
+};
+
+export function info(msg) { log('info', msg); };
+export function warn_log(msg) { log('warn', msg); };
+export function err(msg) { log('err', msg); };
 
 // Перенос файла. Между файловыми системами (tmpfs /tmp → overlay /etc) rename
 // не работает (EXDEV), тогда — копия рядом с целью и атомарный rename.

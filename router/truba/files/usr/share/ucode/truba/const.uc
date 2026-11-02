@@ -41,6 +41,11 @@ export const REINSTALL = CONF_DIR + '/reinstall.sh';
 // В памяти: распакованные списки, итоги и состояние, сгенерированные конфиги.
 export const DATA_DIR  = '/var/lib/truba';
 export const RUN_DIR   = '/var/run/truba';
+// Свои строки журнала Трубы — копия в памяти: кольцевой буфер logd общий, и шум других программ
+// вытесняет их оттуда. «Журнал» берёт отсюда строки, которых в logread уже нет.
+// Строка: «время (с эпохи)<TAB>строка в виде logread».
+export const EVENTS_FILE = RUN_DIR + '/events.log';
+export const EVENTS_MAX  = 65536;
 export const ETC_DIR   = '/var/etc/truba';
 // Временные: скачивание Наборов правил, проверка Туннеля (каталог mktemp с этим префиксом).
 export const TMP_DIR   = '/tmp';
@@ -52,6 +57,11 @@ export const NFT_FILE    = ETC_DIR + '/truba.nft';
 export const STAMP_FILE  = DATA_DIR + '/stamp';
 export const CATS_FILE   = DATA_DIR + '/categories.json';
 export const HEALTH_FILE = RUN_DIR + '/health.json';
+// Канал до Трубы (WAN): устройство, адрес и шлюз на последнем событии — по ним смена провайдера
+// отличается от продления DHCP.
+export const WAN_FILE = RUN_DIR + '/wan.json';
+// Событие ubus: проверить Туннель сейчас (подъём Туннеля или смена WAN), не дожидаясь интервала watchdog.
+export const RECHECK_EVENT = 'truba.recheck';
 export const APPLIED_FILE = RUN_DIR + '/applied.json';
 export const COUNTERS_FILE = RUN_DIR + '/counters.json';
 export const DNS_NAMES_FILE = RUN_DIR + '/dnsnames.json';
