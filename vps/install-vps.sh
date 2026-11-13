@@ -269,7 +269,7 @@ pick_port() {
 }
 
 STATE_KEYS="WAN_IF PUB_IP SSH_PORT AWG_PORT AWG_PROTO VPS_PRIV VPS_PUB RTR_PRIV RTR_PUB PSK JC JMIN JMAX
-S1 S2 S3 S4 H1 H2 H3 H4 I1 I1_SRV HPK RANDOM_TRAILERS SSH_CONFIRMED SSH_FALLBACK TUN_MTU DNS_CF DNS_GOOGLE
+S1 S2 S3 S4 H1 H2 H3 H4 I1 I1_SRV HPK RANDOM_TRAILERS SSH_CONFIRMED SSH_FALLBACK TUN_MTU
 UFW_DISABLED UNBOUND_PREEXISTING RESOLVCONF_ENABLED"
 
 # Допустимо ли значение поля pipe.env. Пустое — у полей, которых может ещё не быть.
@@ -286,8 +286,6 @@ state_value_ok() {
 		TUN_MTU) [[ $v =~ ^[0-9]{4}$ ]] && [ "$v" -ge "$MTU_MIN" ] && [ "$v" -le "$MTU_MAX" ] ;;
 		H1|H2|H3|H4) [[ $v =~ ^[0-9]{1,10}(-[0-9]{1,10})?$ ]] ;;
 		I1|I1_SRV) [[ $v =~ ^[A-Za-z0-9\<\>\ ]+$ ]] ;;
-		DNS_CF) [[ " $DNS_CF_PAIR " == *" $v "* ]] ;;
-		DNS_GOOGLE) [[ " $DNS_GOOGLE_PAIR " == *" $v "* ]] ;;
 		RANDOM_TRAILERS|SSH_CONFIRMED|UFW_DISABLED|UNBOUND_PREEXISTING|RESOLVCONF_ENABLED) [[ $v =~ ^[01]$ ]] ;;
 		*) return 0 ;;
 	esac
@@ -347,8 +345,6 @@ save_state() {
 		SSH_CONFIRMED='${SSH_CONFIRMED:-0}'
 		SSH_FALLBACK='${SSH_FALLBACK:-}'
 		TUN_MTU='${TUN_MTU:-}'
-		DNS_CF='${DNS_CF:-}'
-		DNS_GOOGLE='${DNS_GOOGLE:-}'
 	EOF
 }
 
@@ -686,7 +682,6 @@ install_packages() {
 	metas=$(kernel_headers_metas)
 	[ -n "$metas" ] || warn "не найден метапакет заголовков ядра: после обновления ядра DKMS может не собрать amneziawg — проверяйте install-vps.sh status"
 	# Конфиг unbound — до пакета: служба сразу стартует с ним, а не на 127.0.0.1.
-	pick_forwarders
 	write_unbound_conf
 	# shellcheck disable=SC2086 # списки пакетов
 	apt_get install -y -qq nftables fail2ban unattended-upgrades curl unbound $hdr $metas >/dev/null
@@ -1369,57 +1364,26 @@ setup_awg_service() {
 
 # ---------- DNS для Роутера ----------
 
-# У Cloudflare и Google по два anycast-адреса, и с одного VPS они могут вести в разные точки
-# присутствия: на Трубе 2026-10-26 до 8.8.8.8 было 22 мс, до 8.8.4.4 — 0,6 мс. Новое соединение DoT
-# стоит три поездки, поэтому у каждого поставщика берётся ближний адрес пары (ADR 0013). Прежний
-# выбор остаётся, пока другой адрес не ближе на DNS_SWITCH_MS: иначе повторный install из-за
-# разброса менял бы конфиг и перезапускал unbound, сбрасывая его кэш. Без ответа на ping (ICMP
-# закрыт) выбор не меняется.
-DNS_CF_PAIR="1.1.1.1 1.0.0.1"
-DNS_GOOGLE_PAIR="8.8.8.8 8.8.4.4"
-DNS_SWITCH_MS=5
+# Пересылка — только в Cloudflare, на оба его адреса: 1.1.1.1 и 1.0.0.1. Он проверяет DNSSEC сам
+# (подписанным именам ставит флаг AD, на подделанную подпись отвечает SERVFAIL) и не фильтрует
+# домены. Google в пересылке нет: адресов 8.8.8.8 и 8.8.4.4 скрипт не пишет ни в конфиг, ни в
+# pipe.env; поля DNS_CF и DNS_GOOGLE из pipe.env прежних версий не читаются и при записи исчезают.
+DNS_FORWARDERS=(1.1.1.1 1.0.0.1)
+DNS_TLS_NAME=cloudflare-dns.com
 
-# Наименьший RTT ping в мс или пусто, если ответа нет.
-rtt_min() {
-	{ ping -n -q -c 5 -i 0.2 -W 1 "$1" 2>/dev/null || true; } | awk '/^(rtt|round-trip)/ { split($4, r, "/"); print r[1] }'
-}
-
-# pick_near прежний a b rtt_a rtt_b → «адрес rtt_a rtt_b» (RTT — «-», если ответа нет). Без прежнего — a.
-pick_near() {
-	local cur=${1:-$2} ra=${4:-} rb=${5:-} rc ro new
-	if [ "$cur" = "$2" ]; then rc=$ra; ro=$rb; else rc=$rb; ro=$ra; fi
-	new=$cur
-	if [ -n "$rc" ] && [ -n "$ro" ] && awk -v c="$rc" -v o="$ro" -v d="$DNS_SWITCH_MS" 'BEGIN { exit !(o + d <= c) }'; then
-		if [ "$cur" = "$2" ]; then new=$3; else new=$2; fi
-	fi
-	echo "$new ${ra:--} ${rb:--}"
-}
-
-# Все четыре адреса пингуются разом: по очереди замер занимал 4 с, а при закрытом ICMP — до 20.
-pick_forwarders() {
-	local a b c d ra rb rc rd dir
-	read -r a b <<< "$DNS_CF_PAIR"; read -r c d <<< "$DNS_GOOGLE_PAIR"
-	dir=$(mktemp -d)
-	rtt_min "$a" > "$dir/a" & rtt_min "$b" > "$dir/b" & rtt_min "$c" > "$dir/c" & rtt_min "$d" > "$dir/d" &
-	wait
-	ra=$(cat "$dir/a"); rb=$(cat "$dir/b"); rc=$(cat "$dir/c"); rd=$(cat "$dir/d")
-	rm -rf "$dir"
-	read -r DNS_CF ra rb <<< "$(pick_near "${DNS_CF:-}" "$a" "$b" "$ra" "$rb")"
-	read -r DNS_GOOGLE rc rd <<< "$(pick_near "${DNS_GOOGLE:-}" "$c" "$d" "$rc" "$rd")"
-	say "DNS для Роутера: пересылка на $DNS_CF и $DNS_GOOGLE (ping, мс: $a $ra, $b $rb, $c $rc, $d $rd)"
+unbound_forward_lines() {
+	local a
+	for a in "${DNS_FORWARDERS[@]}"; do printf '    forward-addr: %s@853#%s\n' "$a" "$DNS_TLS_NAME"; done
 }
 
 # unbound на адресе Трубы в Туннеле (ADR 0013). Роутер шлёт ему обычные запросы внутри Туннеля
-# (Туннель и так шифрован), а TLS до Cloudflare и Google держит VPS — в 3–4 мс от них. Новое
-# соединение стоит тогда 13–30 мс, а не две поездки через Туннель, как у DoH с Роутера.
-# Выбор самого быстрого адреса (fast-server-permil) не включается: unbound сравнивает адреса по
-# времени ответа с поправкой на разброс и залипает на Google. У Cloudflare ответ то 5 мс по открытому
-# соединению, то 19 мс и больше с новым (простаивающий DoT он закрывает через 10 с): разброс большой,
-# он проигрывает и дальше получает только редкие запросы на остывшее соединение (ADR 0013).
-# Адресов пересылки два, по одному у Cloudflare и Google: промахи делятся на меньшее число
-# соединений, и каждое реже простаивает дольше 10 с. С четырьмя адресами медленных (дольше 65 мс)
-# ответов было вдвое больше. Если один адрес недоступен, unbound уходит на другого поставщика.
-# Адрес каждого поставщика — ближний по ping из его пары (pick_forwarders).
+# (Туннель и так шифрован), а TLS до Cloudflare держит VPS — в нескольких мс от него. Новое
+# соединение стоит тогда ~14 мс, а не две поездки через Туннель, как у DoH с Роутера.
+# Адресов пересылки два: промахи делятся на два соединения, и каждое реже простаивает дольше 10 с
+# (простаивающий DoT Cloudflare закрывает через 10 с). С четырьмя адресами медленных (дольше 65 мс)
+# ответов было вдвое больше. Если один адрес недоступен, unbound уходит на другой. Выбор самого
+# быстрого адреса (fast-server-permil) не включается: у остывшего соединения разброс времени ответа
+# большой, такой адрес проигрывает и дальше получает только редкие запросы (ADR 0013).
 write_unbound_conf() {
 	put_file 644 "$UNBOUND_CONF" <<-EOF
 		# Труба: DNS для Роутера. Сгенерировано install-vps.sh
@@ -1441,7 +1405,7 @@ write_unbound_conf() {
 		    ip-freebind: yes
 		    access-control: $RTR_TUN/32 allow
 		    do-ip6: no
-		    # DNSSEC проверяют сами Cloudflare и Google: своя проверка — лишние запросы на промахах.
+		    # DNSSEC проверяет Cloudflare: своя проверка — лишние запросы на промахах.
 		    module-config: "iterator"
 		    tls-cert-bundle: /etc/ssl/certs/ca-certificates.crt
 		    hide-identity: yes
@@ -1452,9 +1416,8 @@ write_unbound_conf() {
 		forward-zone:
 		    name: "."
 		    forward-tls-upstream: yes
-		    # По одному адресу у каждого: соединение с ним реже остывает (ADR 0013).
-		    forward-addr: ${DNS_CF:-1.1.1.1}@853#cloudflare-dns.com
-		    forward-addr: ${DNS_GOOGLE:-8.8.8.8}@853#dns.google
+		    # Оба адреса Cloudflare; других поставщиков нет (ADR 0013).
+		$(unbound_forward_lines)
 	EOF
 	UNBOUND_CONF_CHANGED=$FILE_CHANGED
 }
@@ -1475,7 +1438,7 @@ setup_unbound() {
 # повторы отвечает кэш Роутера), медиана ответа серверов на промахи и среднее время ответа каждого
 # адреса пересылки по замерам unbound.
 unbound_status() {
-	local stats servers
+	local stats servers foreign
 	stats=$(unbound-control stats_noreset 2>/dev/null) || return 0
 	awk -F= '
 		$1 == "total.num.queries" { q = $2 } $1 == "total.num.cachehits" { h = $2 }
@@ -1490,6 +1453,26 @@ unbound_status() {
 		$1 ~ /@853$/ && $2 == "." { for (i = 3; i < NF; i++) if ($i == "ping") { sub(/@853$/, "", $1); print $(i + 1), $1 } }' \
 		| sort -n | awk '{ printf "%s%s — %d мс", sep, $2, $1; sep = ", " }')
 	[ -z "$servers" ] || echo "Серверы пересылки (замер unbound): $servers"
+	foreign=$(unbound_foreign_forwards)
+	[ -n "$foreign" ] || return 0
+	# Адрес стоит в самом конфиге — конфиг писала прежняя версия скрипта (до неё пересылка шла и в Google).
+	if grep -qsE "^ *forward-addr: (${foreign// /|})@" "$UNBOUND_CONF"; then
+		warn "unbound пересылает запросы ещё и на $foreign: его конфиг написан прежней версией install-vps.sh. Запустите install снова — пересылка останется только в Cloudflare"
+	else
+		warn "unbound пересылает запросы не туда, куда велит конфиг Трубы: $foreign. Так делает /etc/resolvconf/update.d/unbound: он отдаёт unbound серверы DNS самого VPS, без TLS. Впишите USE_RESOLVCONF_FORWARDS=no в /etc/default/unbound и выполните systemctl restart unbound"
+	fi
+}
+
+# Адреса пересылки работающего unbound, которых нет в конфиге Трубы; пусто — пересылка как в конфиге.
+# Подменить её на ходу может пакет unbound: при установленном resolvconf его
+# /etc/resolvconf/update.d/unbound передаёт unbound серверы DNS самого VPS (unbound-control forward) —
+# какие заданы у хостера, часто 8.8.8.8, и без TLS. Конфиг при этом прежний, поэтому сверяется
+# работающая служба. Строка list_forwards: «. IN forward 1.1.1.1 1.0.0.1».
+unbound_foreign_forwards() {
+	{ unbound-control list_forwards 2>/dev/null || true; } | awk -v want="${DNS_FORWARDERS[*]}" '
+		BEGIN { n = split(want, w, " "); for (i = 1; i <= n; i++) known[w[i]] = 1 }
+		$1 == "." && $3 == "forward" { for (i = 4; i <= NF; i++) if (!($i in known)) { printf "%s%s", sep, $i; sep = " " } }
+		END { if (sep != "") print "" }'
 }
 
 # ---------- SSH ----------

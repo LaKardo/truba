@@ -16,7 +16,7 @@
 | [0010](0010-speed-history-on-router-in-ram.md) | Историю скорости ведёт Роутер, только в оперативной памяти |
 | [0011](0011-own-mark-byte-survives-foreign-chains.md) | Метки Трубы — свои биты 24–27, решение ставится после чужих цепочек mangle и пишется в ct mark последним, свои сокеты берут метку у сокета |
 | [0012](0012-tests-on-real-immortalwrt-in-docker.md) | Проверки — в Docker на настоящей ImmortalWrt, независимыми частями параллельно |
-| [0013](0013-tunnel-dns-server-on-vps.md) | DNS «Туннеля» — свой сервер на Трубе: unbound в Туннеле, TLS до Cloudflare и Google держит VPS |
+| [0013](0013-tunnel-dns-server-on-vps.md) | DNS «Туннеля» — свой сервер на Трубе: unbound в Туннеле, TLS до Cloudflare держит VPS |
 | [0014](0014-routed-zones-forwarding-and-dns-snat.md) | Перенаправления зон Маршрутизации в `truba` ведёт Труба; DNS из чужих подсетей dnsmasq получает от имени Роутера |
 | [0015](0015-single-source-schema-and-constants.md) | Один источник значений: схема настроек и константы — в ucode службы, LuCI и shell берут их у неё (`truba schema`, `truba env`) |
 | [0016](0016-ipv6-internet-closed-for-routed-zones.md) | IPv6-интернет закрыт каждой зоне Маршрутизации своим правилом, которое ведёт служба; интернет — все адреса, кроме локальных |

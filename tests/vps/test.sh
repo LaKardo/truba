@@ -1092,9 +1092,12 @@ if { command -v unbound >/dev/null && command -v dig >/dev/null; } || apt-get in
 	done
 	[ "$(stat -c %a "$UNBOUND_CONF")" = 644 ] && ok "unbound: конфиг читаем службой" || fail "unbound: права конфига"
 	grep -qx '    forward-tls-upstream: yes' "$UNBOUND_CONF" \
-		&& [ "$(grep -E '^    forward-addr:' "$UNBOUND_CONF" | xargs)" = "forward-addr: 1.1.1.1@853#cloudflare-dns.com forward-addr: 8.8.8.8@853#dns.google" ] \
-		&& ok "unbound: к Cloudflare и Google — только по TLS, с проверкой имени сервера, по одному адресу" || fail "unbound: пересылка по TLS: $(grep forward-addr "$UNBOUND_CONF" | xargs)"
-	# Выбор самого быстрого адреса залипает на Google (ADR 0013): промахи делятся между всеми адресами.
+		&& [ "$(grep -E '^    forward-addr:' "$UNBOUND_CONF" | xargs)" = "forward-addr: 1.1.1.1@853#cloudflare-dns.com forward-addr: 1.0.0.1@853#cloudflare-dns.com" ] \
+		&& ok "unbound: к Cloudflare — только по TLS, с проверкой имени сервера, на оба его адреса" || fail "unbound: пересылка по TLS: $(grep forward-addr "$UNBOUND_CONF" | xargs)"
+	# Google в пересылке нет: ни его адресов, ни имени его сервера в конфиге.
+	! grep -qE '8\.8\.8\.8|8\.8\.4\.4|dns\.google|2001:4860:4860' "$UNBOUND_CONF" \
+		&& ok "unbound: Google в пересылке нет" || fail "unbound: Google в конфиге: $(grep -E '8\.8\.|google|2001:4860' "$UNBOUND_CONF" | xargs)"
+	# Выбор самого быстрого адреса залипает на одном из них (ADR 0013): промахи делятся между всеми адресами.
 	[ "$(unbound-checkconf -o fast-server-permil)" = 0 ] \
 		&& ok "unbound: промахи — всем адресам, без выбора самого быстрого" || fail "unbound: fast-server-permil $(unbound-checkconf -o fast-server-permil)"
 	# Адреса Туннеля ещё нет: awg0 поднимается позже, а unbound всё равно стартует.
@@ -1114,39 +1117,19 @@ else
 	fail "apt-get install unbound"
 fi
 
-# Адрес пересылки у поставщика — ближний по ping из пары (замер с Трубы 2026-10-26: 8.8.8.8 — 22 мс,
-# 8.8.4.4 — 0,6). Прежний выбор остаётся, пока другой не ближе на 5 мс; без ответа ping — не меняется.
-# Четыре адреса пингуются одновременно.
+# Адреса пересылки не зависят ни от окружения, ни от pipe.env прежних версий: там были поля DNS_CF и
+# DNS_GOOGLE с выбранными адресами. Теперь они не читаются, а при записи pipe.env исчезают.
 (
-	rtt() { echo "rtt min/avg/max/mdev = $1/$1/$1/0.000 ms"; }
-	out=$(pick_near '' 8.8.8.8 8.8.4.4 22.097 0.555)
-	[ "$out" = '8.8.4.4 22.097 0.555' ] && ok "unbound: из пары — ближний адрес" || fail "pick_near ближний: $out"
-	out=$(pick_near '' 1.1.1.1 1.0.0.1 3.2 0.9)
-	[ "$out" = '1.1.1.1 3.2 0.9' ] && ok "unbound: другой ближе меньше чем на 5 мс — адрес прежний" || fail "pick_near разброс: $out"
-	out=$(pick_near 8.8.4.4 8.8.8.8 8.8.4.4 22.097 0.555)
-	[ "$out" = '8.8.4.4 22.097 0.555' ] && ok "unbound: прежний ближний адрес остаётся" || fail "pick_near прежний: $out"
-	out=$(pick_near 8.8.4.4 8.8.8.8 8.8.4.4 0.6 22)
-	[ "$out" = '8.8.8.8 0.6 22' ] && ok "unbound: другой адрес стал ближе — переход" || fail "pick_near переход: $out"
-	out=$(pick_near '' 8.8.8.8 8.8.4.4 22 '')
-	[ "$out" = '8.8.8.8 22 -' ] && ok "unbound: адрес без ответа на ping не выбирается" || fail "pick_near без ответа: $out"
-	out=$(set -Eeuo pipefail; pick_near 8.8.4.4 8.8.8.8 8.8.4.4 '' '')
-	[ "$out" = '8.8.4.4 - -' ] && ok "unbound: ping закрыт — выбор прежний, без ошибки под set -e" || fail "pick_near ping закрыт: $out"
-	ping() { case "${@: -1}" in 8.8.8.8) rtt 22.097 ;; 8.8.4.4) rtt 0.555 ;; 1.1.1.1) rtt 0.555 ;; 1.0.0.1) rtt 0.597 ;; esac; }
-	UNBOUND_CONF="$T/unbound-near.conf"; DNS_CF=''; DNS_GOOGLE=''
-	out=$(pick_forwarders; write_unbound_conf; grep -E '^    forward-addr:' "$UNBOUND_CONF" | xargs)
-	grep -q 'пересылка на 1.1.1.1 и 8.8.4.4 (ping, мс: 1.1.1.1 0.555, 1.0.0.1 0.597, 8.8.8.8 22.097, 8.8.4.4 0.555)' <<< "$out" \
-		&& grep -q 'forward-addr: 1.1.1.1@853#cloudflare-dns.com forward-addr: 8.8.4.4@853#dns.google$' <<< "$out" \
-		&& ok "unbound: конфиг — с выбранными адресами, имена серверов прежние" || fail "pick_forwarders: $out"
-	ping() { sleep 1; rtt 1; }
-	t0=$(date +%s%N); pick_forwarders >/dev/null; dt=$(( ($(date +%s%N) - t0) / 1000000 ))
-	[ "$dt" -lt 3000 ] && ok "unbound: четыре замера идут одновременно ($dt мс)" || fail "pick_forwarders по очереди: $dt мс"
-	ping() { return 1; }
-	out=$(set -Eeuo pipefail; DNS_CF=1.0.0.1 DNS_GOOGLE=8.8.4.4; pick_forwarders; echo "$DNS_CF $DNS_GOOGLE")
-	grep -q '^1.0.0.1 8.8.4.4$' <<< "$out" && ok "unbound: ping закрыт — прежние адреса, без ошибки под set -e" || fail "pick_forwarders без ping: $out"
-	state_value_ok DNS_GOOGLE 8.8.4.4 && state_value_ok DNS_CF 1.0.0.1 && ! state_value_ok DNS_GOOGLE 1.1.1.1 \
-		&& ! state_value_ok DNS_CF 9.9.9.9 && ok "pipe.env: адрес DNS — только из пары своего поставщика" || fail "state_value_ok DNS_*"
-	STATE="$T/near-pipe.env"; DNS_GOOGLE=8.8.4.4; save_state
-	( unset DNS_GOOGLE; load_state; [ "$DNS_GOOGLE" = 8.8.4.4 ] ) && ok "pipe.env хранит выбранный адрес DNS" || fail "pipe.env: DNS_GOOGLE"
+	UNBOUND_CONF="$T/unbound-env.conf"
+	out=$(DNS_GOOGLE=8.8.4.4 DNS_CF=1.0.0.1; export DNS_GOOGLE DNS_CF; write_unbound_conf; grep -E '^    forward-addr:' "$UNBOUND_CONF" | xargs)
+	[ "$out" = "forward-addr: 1.1.1.1@853#cloudflare-dns.com forward-addr: 1.0.0.1@853#cloudflare-dns.com" ] \
+		&& ok "unbound: переменные DNS_GOOGLE и DNS_CF на пересылку не влияют" || fail "unbound: пересылка из окружения: $out"
+	STATE="$T/old-dns-pipe.env"
+	printf "%s\n" "WAN_IF='eth0'" "DNS_CF='1.0.0.1'" "DNS_GOOGLE='8.8.4.4'" > "$STATE"; chmod 600 "$STATE"
+	( unset DNS_GOOGLE DNS_CF WAN_IF; load_state; [ "$WAN_IF" = eth0 ] && [ -z "${DNS_GOOGLE:-}" ] && [ -z "${DNS_CF:-}" ] ) \
+		&& ok "pipe.env прежней версии читается, поля DNS_CF и DNS_GOOGLE пропускаются" || fail "pipe.env: прежние поля DNS"
+	STATE="$T/new-dns-pipe.env"; save_state
+	! grep -qE 'DNS_|8\.8\.8\.8|8\.8\.4\.4' "$STATE" && ok "pipe.env: адресов DNS в нём больше нет" || fail "pipe.env: $(grep -E 'DNS_|8\.8\.8\.8|8\.8\.4\.4' "$STATE" | cut -d= -f1 | xargs)"
 )
 
 # status: строки про unbound — из его счётчиков и замеров (вывод снят с настоящей Трубы). Без unbound
@@ -1156,14 +1139,26 @@ unbound-control() {
 		stats_noreset) printf '%s\n' total.num.queries=9316 total.num.cachehits=522 total.recursion.time.avg=0.036148 \
 			total.recursion.time.median=0.0159878 num.answer.rcode.NOERROR=8020 num.answer.rcode.SERVFAIL=3 ;;
 		dump_infra) printf '%s\n' '1.0.0.1@853 . ttl 786 ping 26 var 38 rtt 178 rto 178 tA 0 tAAAA 0 tother 0' \
-			'8.8.8.8@853 . ttl 770 ping 11 var 7 rtt 50 rto 50 tA 0 tAAAA 0 tother 0' \
 			'1.1.1.1@853 . ttl 871 ping 14 var 79 rtt 330 rto 330 tA 0 tAAAA 0 tother 0' ;;
+		list_forwards) echo "${FWD_LIVE:-. IN forward 1.1.1.1 1.0.0.1}" ;;
 	esac
 }
-out=$(set -Eeuo pipefail; unbound_status; echo конец)
+out=$(set -Eeuo pipefail; unbound_status 2>"$T/status-err"; echo конец)
 [ "$out" = "DNS для Роутера (unbound на 10.77.77.1): запросов 9316, из кэша 5 %, ответ серверов — медиана 16 мс, SERVFAIL 3
-Серверы пересылки (замер unbound): 8.8.8.8 — 11 мс, 1.1.1.1 — 14 мс, 1.0.0.1 — 26 мс
-конец" ] && ok "status: unbound — запросы, кэш, медиана, серверы по замеру" || fail "status unbound: $out"
+Серверы пересылки (замер unbound): 1.1.1.1 — 14 мс, 1.0.0.1 — 26 мс
+конец" ] && [ ! -s "$T/status-err" ] && ok "status: unbound — запросы, кэш, медиана, серверы по замеру" || fail "status unbound: $out $(cat "$T/status-err")"
+# Пересылку работающего unbound подменил не конфиг Трубы (resolvconf отдал серверы DNS самого VPS):
+# status называет чужие адреса, свои — нет.
+out=$(set -Eeuo pipefail; FWD_LIVE='. IN forward 8.8.8.8 1.1.1.1 8.8.4.4'; unbound_status 2>&1 >/dev/null; echo конец)
+grep -q 'не туда, куда велит конфиг Трубы: 8.8.8.8 8.8.4.4\. ' <<< "$out" && grep -q 'USE_RESOLVCONF_FORWARDS=no' <<< "$out" && grep -qx конец <<< "$out" \
+	&& ok "status: чужие адреса пересылки у работающего unbound — предупреждение" || fail "status: чужая пересылка: $out"
+# Труба, установленная прежней версией: Google стоит в самом конфиге — status зовёт запустить install.
+printf '%s\n' 'forward-zone:' '    forward-addr: 1.1.1.1@853#cloudflare-dns.com' '    forward-addr: 8.8.8.8@853#dns.google' > "$T/unbound-old.conf"
+out=$(set -Eeuo pipefail; UNBOUND_CONF="$T/unbound-old.conf"; FWD_LIVE='. IN forward 1.1.1.1 8.8.8.8'; unbound_status 2>&1 >/dev/null; echo конец)
+grep -q 'ещё и на 8.8.8.8: его конфиг написан прежней версией' <<< "$out" && ! grep -q resolvconf <<< "$out" && grep -qx конец <<< "$out" \
+	&& ok "status: Google в конфиге прежней версии — совет запустить install" || fail "status: конфиг прежней версии: $out"
+[ -z "$(FWD_LIVE='. IN forward 1.0.0.1 1.1.1.1'; unbound_foreign_forwards)" ] && [ -z "$(FWD_LIVE=''; unbound-control() { return 1; }; unbound_foreign_forwards)" ] \
+	&& ok "status: свои адреса в любом порядке и молчащий unbound-control — без предупреждения" || fail "status: ложное предупреждение о пересылке"
 unbound-control() { [ "$1" = stats_noreset ] && printf '%s\n' total.num.queries=0; [ "$1" = stats_noreset ]; }
 out=$(set -Eeuo pipefail; unbound_status; echo конец)
 [ "$out" = "DNS для Роутера (unbound на 10.77.77.1): запросов 0, из кэша 0 %, ответ серверов — медиана 0 мс, SERVFAIL 0

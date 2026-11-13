@@ -6,7 +6,7 @@
 
 Две стороны и Туннель между ними:
 
-- **Труба** (VPS, Ubuntu 24.04) — `vps/install-vps.sh`. nftables `ip truba_nat` пробрасывает весь публичный IP (кроме порта SSH и порта AWG) на адрес Роутера в Туннеле `10.77.77.2`; `inet truba_filter` закрывает всё остальное. На `10.77.77.1` работает unbound (DoT к Cloudflare и Google) как первый DNS-сервер «Туннеля» для Роутера (ADR 0013). Состояние — в `/etc/truba/pipe.env`, для Роутера генерируется `/root/truba/router.conf`.
+- **Труба** (VPS, Ubuntu 24.04) — `vps/install-vps.sh`. nftables `ip truba_nat` пробрасывает весь публичный IP (кроме порта SSH и порта AWG) на адрес Роутера в Туннеле `10.77.77.2`; `inet truba_filter` закрывает всё остальное. На `10.77.77.1` работает unbound (DoT к Cloudflare, адреса 1.1.1.1 и 1.0.0.1) как первый DNS-сервер «Туннеля» для Роутера (ADR 0013). Состояние — в `/etc/truba/pipe.env`, для Роутера генерируется `/root/truba/router.conf`.
 - **Роутер** (ImmortalWrt) — пакет `router/truba`. Служба строит таблицу nftables `inet truba`: метки `0x01000000` (Туннель), `0x02000000` (Напрямую), `0x04000000` (входящие) в маске `0x0f000000` (ADR 0011), правила `ip -4 rule` priority 1000/1001 ведут в таблицу 77, где маршрут по умолчанию — Туннель, blackhole или ничего (`net.uc:set_table`); подъём и падение Туннеля — полное применение настроек через `truba hotplug` (ADR 0009). mosdns на `127.0.0.1:5335` классифицирует домены по Категориям geosite и наполняет наборы `gs_tunnel4`/`gs_direct4` (ADR 0003, 0007); dnsmasq перенаправляется на него. Контроль Туннеля, статистика скорости и устройств живут в RAM (ADR 0010, 0018). Всё доступно через ubus `truba` (ADR 0008).
 - **Интерфейс** — пакет `router/luci-app-truba`. Семь вкладок LuCI на Preact в Shadow DOM (ADR 0017), читают только ubus `truba.*`, схему берут из `truba.schema` (ADR 0015), правят UCI и применяют через LuCI с откатом.
 
@@ -37,7 +37,7 @@
 
 ## Global Side Effects
 
-- Труба: системные файлы в `/etc/truba`, `/etc/amnezia/amneziawg`, `/etc/systemd/system`, `/etc/sysctl.d`, `/etc/ssh/sshd_config.d`, `/etc/unbound/unbound.conf.d`, `/etc/fail2ban/jail.d`; таблицы nft `truba_nat`/`truba_filter`; пакеты из PPA `amnezia/ppa`; трафик к keyserver Ubuntu, `1.1.1.1`/`1.0.0.1`/`8.8.8.8`/`8.8.4.4` [vps/EGM.md]
+- Труба: системные файлы в `/etc/truba`, `/etc/amnezia/amneziawg`, `/etc/systemd/system`, `/etc/sysctl.d`, `/etc/ssh/sshd_config.d`, `/etc/unbound/unbound.conf.d`, `/etc/fail2ban/jail.d`; таблицы nft `truba_nat`/`truba_filter`; пакеты из PPA `amnezia/ppa`; трафик к keyserver Ubuntu, DoT к `1.1.1.1`/`1.0.0.1` [vps/EGM.md]
 - Роутер: таблица `inet truba`, таблица маршрутов 77, UCI `dhcp`/`firewall`/`upnpd`/`network`, `/etc/crontabs/root`, `/etc/rc.local`, флеш `/etc/truba/{lists,state,good}`, RAM `/var/run/truba`, `/var/lib/truba`, `/var/etc/truba`; загрузка `.dat` с GitHub/jsDelivr (`kirilllavrov/geoip-builder`, `geosite-builder`); STUN к Google и Cloudflare; переустановка пакетов через `apk` после sysupgrade [router/truba/EGM.md]
 - Интерфейс: браузерный UCI и `localStorage['truba.span']`; изменяющие ubus-вызовы `update_lists`, `rollback_lists`, `nat_test`, `tunnel_test` [router/luci-app-truba/EGM.md]
 - CI: ветка `gh-pages` — подписанный фид apk (`APK_SIGN_KEY`/`APK_SIGN_PUB` в Secrets) [README.md, .github/workflows/build.yml]
