@@ -376,12 +376,7 @@ export function dns_unbound(devs, udp, addrs) {
 };
 
 function dns_probe(devs) {
-	let addrs = null;
-	try {
-		addrs = json(U.run('ip -4 -j addr show').out);
-	}
-	catch (e) { }
-	return dns_unbound(devs, U.run('netstat -lnu').out, addrs);
+	return dns_unbound(devs, U.run('netstat -lnu').out, U.ip_json('-4 addr show'));
 }
 
 function dnsmasq_pid() {

@@ -436,37 +436,30 @@ export function dev_zones(ub) {
 };
 
 // Все подключённые IPv4-подсети (scope link в main) — локальный трафик не трогаем.
+// Без полноценного ip (U.ip_json) список пуст — об этом предупреждает применение (core.uc:apply_config).
 export function connected_subnets() {
-	let r = U.run('ip -4 -j route show table main scope link');
 	let out = [];
-	try {
-		for (let rt in json(r.out) ?? []) {
-			let dst = rt.dst;
-			if (!dst || dst == 'default')
-				continue;
-			if (!match(dst, /\//))
-				dst += '/32';
-			push(out, dst);
-		}
+	for (let rt in U.ip_json('-4 route show table main scope link') ?? []) {
+		let dst = rt?.dst;
+		if (type(dst) != 'string' || dst == 'default')
+			continue;
+		if (!match(dst, /\//))
+			dst += '/32';
+		push(out, dst);
 	}
-	catch (e) { }
 	return uniq(out);
 };
 
 // Подсети всех IPv4-адресов Роутера — их dnsmasq с --local-service считает локальными и отвечает
 // только им. У адреса /32 (mesh-VPN) подсеть — он сам: узлы такой сети для dnsmasq чужие.
 export function local_subnets() {
-	let r = U.run('ip -4 -j addr show');
 	let out = [];
-	try {
-		for (let l in json(r.out) ?? [])
-			for (let a in l.addr_info ?? []) {
-				let rg = U.cidr_range(a.local + '/' + a.prefixlen);
-				if (rg)
-					push(out, U.int2ip(rg[0]) + '/' + a.prefixlen);
-			}
-	}
-	catch (e) { }
+	for (let l in U.ip_json('-4 addr show') ?? [])
+		for (let a in l?.addr_info ?? []) {
+			let rg = U.cidr_range(a?.local + '/' + a?.prefixlen);
+			if (rg)
+				push(out, U.int2ip(rg[0]) + '/' + a.prefixlen);
+		}
 	return uniq(out);
 };
 

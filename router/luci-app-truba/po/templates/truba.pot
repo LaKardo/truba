@@ -106,6 +106,10 @@ msgid "The current rule sets could not be read, so the previous ones were restor
 msgstr ""
 
 #: htdocs/luci-static/resources/truba/common.js
+msgid "The full ip utility (package ip-full) is missing: the router's own subnets are not excluded from routing, and device zones and the uplink to Truba are not detected. Reinstall ip-full."
+msgstr ""
+
+#: htdocs/luci-static/resources/truba/common.js
 msgid "the tunnel is not configured"
 msgstr ""
 

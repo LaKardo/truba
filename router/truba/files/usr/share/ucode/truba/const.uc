@@ -28,6 +28,10 @@ export const WATCHDOG_TAG = LOG_TAG + '-watchdog';
 export const CLI  = '/usr/sbin/truba';
 export const INIT = '/etc/init.d/truba';
 
+// Полноценный ip (iproute2) пакета ip-full. /sbin/ip — ссылка на него, но её же ставит и BusyBox:
+// после переустановки busybox она ведёт на его ip, и тогда служба вызывает этот файл (util.uc:ip_full).
+export const IP_FULL = '/usr/libexec/ip-full';
+
 // Адрес, на котором слушает mosdns: к нему dnsmasq пересылает запросы, там же API mosdns.
 export const MOSDNS_ADDR = '127.0.0.1';
 

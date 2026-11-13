@@ -50,7 +50,9 @@ const WARNINGS = {
 	lists_missing: { tab: 'rules', text: _('Rule sets are not downloaded yet — only the mode default applies. Download is in progress.') },
 	zones_without_devices: { tab: 'rules', text: _('The selected firewall zones have no active devices.') },
 	tunnel_not_configured: { tab: 'tunnel', text: _('The tunnel is not configured yet — import the configuration on the Tunnel tab.') },
-	lists_rolled_back: { tab: 'rules', text: _('The current rule sets could not be read, so the previous ones were restored.') }
+	lists_rolled_back: { tab: 'rules', text: _('The current rule sets could not be read, so the previous ones were restored.') },
+	// Исправляется не на вкладке, а установкой пакета; на «Журнале» — та же причина строкой службы.
+	ip_full_missing: { tab: 'log', text: _('The full ip utility (package ip-full) is missing: the router\'s own subnets are not excluded from routing, and device zones and the uplink to Truba are not detected. Reinstall ip-full.') }
 };
 
 // Почему «Проверка NAT» не дала результата (поле error итога).

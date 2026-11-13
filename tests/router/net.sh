@@ -37,6 +37,41 @@ check "cron: каждый час, следующий запуск — начал
 check "geosite: узкие Категории раньше широких (category-cdn-ru раньше category-ru)" eval 'applied "@.geosite_order[*]" | xargs | grep -q "category-cdn-ru=direct.* category-ru=direct"'
 check "lists: контрольные суммы есть, а в status их нет (опрос раз в 5 с)" eval 'truba lists | jsonfilter -e "@.geoip.sha256" | grep -qE "^[0-9a-f]{64}$" && [ -z "$(truba status | jsonfilter -e "@.lists.geoip.sha256")" ]'
 
+section "команда ip — BusyBox"
+# Так выглядит Роутер после переустановки busybox: ip-full установлен, а ссылка /sbin/ip ведёт на BusyBox.
+# Его ip не знает ни -j, ни «rule … oif», ни «route get … mark». До возврата ссылки стенд сам «ip» не
+# вызывает: проверки смотрят на ядро через ipf — сам файл ip-full.
+IP_FULL=/usr/libexec/ip-full
+IP_LINK="$(readlink /sbin/ip)"
+ipf() { "$IP_FULL" "$@"; }
+lan_sets() { in_set local4 192.168.1.0/24 && in_set bypass4 192.168.1.0/24; }
+check "до: подсеть сети — в local4 и bypass4, предупреждения нет" eval 'lan_sets && ! grep -q ip_full_missing "$APPLIED"'
+if [ -n "$IP_LINK" ] && [ -x "$IP_FULL" ]; then
+	ln -sf ../bin/busybox /sbin/ip
+	check "ip теперь BusyBox: -j не понимает" eval '! ip -j link show dev lo'
+	# Наборы и правило oif — заново: применение должно собрать их и с такой командой ip.
+	nft flush set inet truba local4; nft flush set inet truba bypass4
+	ipf rule del priority 1001
+	reload "ip — BusyBox, ip-full на месте"
+	check "без ошибки и без предупреждения, служба вызывает ip-full — и пишет об этом в журнал" eval \
+		'no_error && ! grep -q ip_full_missing "$APPLIED" && [ "$(applied "@.ip_cmd")" = "$IP_FULL" ] && logread -e truba | grep -q "служба вызывает $IP_FULL"'
+	check "подсеть сети снова в local4 и bypass4" lan_sets
+	check "ip rule oif awg0 → 77 добавлено, таблица 77 в status" eval \
+		'ipf rule show | grep -q "oif awg0 lookup 77" && truba status | jsonfilter -e "@.table" | grep -q "default dev awg0"'
+	# Полноценного ip нет вовсе: служба не молчит.
+	mv "$IP_FULL" "$IP_FULL.off"
+	reload "ip — BusyBox, ip-full нет"
+	check "без ip-full: предупреждение для «Обзора» и строка в журнале" eval \
+		'grep -q ip_full_missing "$APPLIED" && logread -e truba | grep -q "нет полноценной команды ip"'
+	mv "$IP_FULL.off" "$IP_FULL"
+	ln -sf "$IP_LINK" /sbin/ip
+	reload "ip — снова ip-full"
+	check "ссылка возвращена: предупреждения нет, наборы и правила ip на месте" eval \
+		'no_error && ! grep -q ip_full_missing "$APPLIED" && [ "$(applied "@.ip_cmd")" = ip ] && lan_sets && ip rule show | grep -q "fwmark 0x1000000/0xf000000 lookup 77" && ip rule show | grep -q "oif awg0 lookup 77"'
+else
+	fail "стенд: /sbin/ip — не ссылка или нет $IP_FULL — подмена ip на BusyBox не проверена"
+fi
+
 section "входящие через Туннель"
 # Обычный проброс порта из зоны truba, как его создаёт вкладка «Входящие».
 uci -q batch <<-'EOF'

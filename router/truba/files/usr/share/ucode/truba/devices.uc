@@ -105,15 +105,12 @@ function leases() {
 // Соседи IPv4 с известным MAC.
 function neighbours() {
 	let out = [];
-	try {
-		for (let n in json(U.run('ip -4 -j neigh show').out) ?? []) {
-			let st = join(',', n.state ?? []);
-			if (!U.is_ipv4(n.dst) || !n.lladdr || index(st, 'FAILED') >= 0 || index(st, 'INCOMPLETE') >= 0)
-				continue;
-			push(out, { ip: n.dst, mac: lc(n.lladdr), dev: n.dev });
-		}
+	for (let n in U.ip_json('-4 neigh show') ?? []) {
+		let st = join(',', n?.state ?? []);
+		if (!U.is_ipv4(n?.dst) || type(n.lladdr) != 'string' || index(st, 'FAILED') >= 0 || index(st, 'INCOMPLETE') >= 0)
+			continue;
+		push(out, { ip: n.dst, mac: lc(n.lladdr), dev: n.dev });
 	}
-	catch (e) { }
 	return out;
 }
 
@@ -156,12 +153,7 @@ export function list(lite) {
 	let table = null;
 	let zone_of = (ip, dev) => {
 		if (dev == null) {
-			try {
-				table ??= route_table(json(U.run('ip -4 -j route show table all').out));
-			}
-			catch (e) {
-				table = [];
-			}
+			table ??= route_table(U.ip_json('-4 route show table all'));
 			dev = route_dev(table, ip);
 		}
 		return zones[dev];

@@ -621,8 +621,9 @@ if (cdev) {
 		IT('rule.x') === 'rules' && IT('main.iface') === 'tunnel' && IT('dns.port') === 'dns' && IT('device.mac') === 'devices' && cdev.invalidTab([]) === 'rules',
 		'common.invalidTab: Режим, Зоны, Маршрутизация, Наборы правил и правила — «Правила»');
 	check(cdev.TABS.rules && cdev.TABS.dns === 'DNS' &&
-		[ 'lists_missing', 'zones_without_devices', 'lists_rolled_back' ].every((w) => cdev.WARNINGS[w].tab === 'rules') && cdev.WARNINGS.tunnel_not_configured.tab === 'tunnel',
-		'common.TABS и WARNINGS: Наборы правил и Зоны — на «Правилах», Туннель — на «Туннеле»');
+		[ 'lists_missing', 'zones_without_devices', 'lists_rolled_back' ].every((w) => cdev.WARNINGS[w].tab === 'rules') && cdev.WARNINGS.tunnel_not_configured.tab === 'tunnel' &&
+		cdev.WARNINGS.ip_full_missing?.tab === 'log' && isText(cdev.WARNINGS.ip_full_missing.text),
+		'common.TABS и WARNINGS: Наборы правил и Зоны — на «Правилах», Туннель — на «Туннеле», нет ip-full — на «Журнале»');
 	check(isText(cdev.CHECK_ERRORS?.busy), 'common.CHECK_ERRORS.busy');
 	// Категории перечитываются с опросом lists: распаковка или нет списка, обновление или применение на прошлом
 	// опросе, сменились файлы Наборов (обновление по расписанию, откат).

@@ -268,6 +268,15 @@ export function refresh_bypass(b4, l4, known, members, cfg, clear_dns, geoip) {
 // res.loaded — новая таблица уже в ядре.
 function apply_config(res, prev) {
 	let cfg = F.load();
+	// Команда ip — до первого вызова: без полноценной подсети Роутера в наборы не попадут, и молчать об этом нельзя.
+	res.ip_cmd = U.ip_full();
+	if (res.ip_cmd == null) {
+		U.warn_log('нет полноценной команды ip (пакет ip-full): подсети Роутера не попадают в bypass4 и local4, ' +
+			'зоны устройств и канал до Трубы не определяются — переустановите ip-full');
+		push(res.warnings, 'ip_full_missing');
+	}
+	else if (res.ip_cmd == C.IP_FULL && prev.ip_cmd != res.ip_cmd)
+		U.info('команда ip на Роутере — не из ip-full (ссылку /sbin/ip занял BusyBox): служба вызывает ' + C.IP_FULL);
 	let ub = connect();
 	let tinfo = F.tunnel_info(cfg.iface, ub);
 	let lan_if = F.zone_devices(cfg.zones, ub);

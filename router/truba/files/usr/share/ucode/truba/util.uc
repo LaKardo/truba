@@ -1,4 +1,4 @@
-// Общие помощники: журнал, файлы, JSON, команды, IPv4.
+// Общие помощники: журнал, файлы, JSON, команды, команда ip, IPv4.
 'use strict';
 
 import { readfile, rename, mkdir, stat, popen, unlink, open } from 'fs';
@@ -20,6 +20,68 @@ export function run(cmd) {
 	let code = m ? int(m[1]) : -1;
 	out = replace(out, /@@rc=[0-9]+\n?$/, '');
 	return { code, out };
+};
+
+// ---- Команда ip ----
+
+// Службе нужен полноценный ip (iproute2, пакет ip-full): вывод в JSON (-j), «ip rule … oif»,
+// «ip route get … mark». BusyBox ничего из этого не умеет: на -j отвечает справкой и кодом 1.
+// Команда ip на Роутере — ссылка /sbin/ip, и ставят её оба пакета: после переустановки busybox она
+// ведёт на его ip, хотя ip-full установлен. Поэтому все вызовы ip идут через ip_cmd и ip_json.
+const IP_BINS = [ 'ip', C.IP_FULL ];
+// «Полноценного ip нет» помнится столько секунд: rpcd и truba stats живут долго и не должны
+// перебирать команды на каждый опрос, но установленный позже ip-full обязаны заметить.
+const IP_RETRY = 60;
+let ip_bin = null, ip_checked = null;
+
+// Понимает ли команда -j: интерфейс lo есть всегда, ответ — массив JSON.
+function ip_works(bin) {
+	let r = run(bin + ' -j link show dev lo');
+	return r.code == 0 && substr(ltrim(r.out), 0, 1) == '[';
+}
+
+// Команда полноценного ip — «ip» или путь ip-full; null — такого нет. Ответ помнится на время процесса:
+// найденная команда — пока работает (после сбоя ip_json проверяет заново), «нет» — IP_RETRY секунд.
+// recheck — проверить сейчас.
+export function ip_full(recheck) {
+	let now = time();
+	if (!recheck && (ip_bin != null || (ip_checked != null && now - ip_checked < IP_RETRY)))
+		return ip_bin;
+	ip_bin = null;
+	ip_checked = now;
+	for (let bin in IP_BINS)
+		if (ip_works(bin)) {
+			ip_bin = bin;
+			break;
+		}
+	return ip_bin;
+};
+
+// Команда ip для вызовов службы: полноценная, а без неё — какая есть (простые команды BusyBox умеет).
+export function ip_cmd() {
+	return ip_full() ?? IP_BINS[0];
+};
+
+// «ip -j <args>» разобранным JSON; null — полноценного ip нет или команда не удалась.
+export function ip_json(args) {
+	let known = (ip_bin != null);
+	for (let pass = 0; pass < 2; pass++) {
+		let bin = ip_full(pass > 0);
+		if (bin == null)
+			return null;
+		let r = run(bin + ' -j ' + args);
+		if (r.code == 0) {
+			try {
+				return json(r.out);
+			}
+			catch (e) { }
+		}
+		// Команда найдена раньше, а ссылку с тех пор могли переписать: проверить заново и повторить.
+		if (!known)
+			return null;
+		known = false;
+	}
+	return null;
 };
 
 // Вызов ubus по переданному соединению (ub) или по своему: status опрашивается раз в 5 с,

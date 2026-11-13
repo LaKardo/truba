@@ -7,7 +7,7 @@
 // UPDATE_GOLDEN=1 — записать эталоны заново (tests/run.sh монтирует репозиторий на запись).
 'use strict';
 
-import { readfile, writefile, mkdir, popen, unlink } from 'fs';
+import { readfile, writefile, mkdir, popen, unlink, readlink, symlink, rename, stat } from 'fs';
 import { cursor } from 'uci';
 import * as T from 'tlib';
 import * as C from 'truba.const';
@@ -430,6 +430,37 @@ check('Туннель /30: Роутер .2 — Труба .1', same(peer_of('10.
 check('Туннель /31: второй адрес', peer_of('10.0.0.0/31')[0] == '10.0.0.1');
 check('Туннель /24: Роутер .1 — Труба .2, а не он сам', peer_of('10.0.0.1/24')[0] == '10.0.0.2');
 check('подсети адресов Роутера: из адреса и длины префикса', '127.0.0.0/8' in F.local_subnets(), join(' ', F.local_subnets()));
+
+// ---- Команда ip: ссылку /sbin/ip занял BusyBox ----
+
+// Так выглядит Роутер после переустановки busybox: ip-full установлен, а команда ip — BusyBox, который
+// на -j отвечает справкой и кодом 1. Контейнер проверки одноразовый: ссылка меняется на месте и возвращается.
+{
+	const LINK = '/sbin/ip', OFF = C.IP_FULL + '.off';
+	let orig = readlink(LINK);
+	let ready = check('ip: в образе /sbin/ip — ссылка, ip-full на месте, полноценная команда — «ip»',
+		orig != null && stat(C.IP_FULL) != null && U.ip_full(true) == 'ip', sprintf('%J, %J', orig, U.ip_full()));
+	if (ready) {
+		let l4 = F.local_subnets(), b4 = F.connected_subnets();
+		unlink(LINK);
+		symlink('../bin/busybox', LINK);
+		// Без перепроверки: команда «ip» запомнена рабочей, после сбоя ip_json сам переходит на ip-full.
+		let l4b = F.local_subnets(), b4b = F.connected_subnets();
+		check('ip — BusyBox, ip-full на месте: подсети адресов Роутера и подключённые подсети те же',
+			'127.0.0.0/8' in l4b && same(l4b, l4) && same(b4b, b4) && U.ip_full() == C.IP_FULL && U.ip_cmd() == C.IP_FULL,
+			sprintf('%J %J, команда %J', l4b, b4b, U.ip_full()));
+		rename(C.IP_FULL, OFF);
+		check('ip — BusyBox, ip-full нет: полноценной команды нет, подсети пусты, прочие вызовы — простым ip',
+			U.ip_full(true) == null && U.ip_cmd() == 'ip' && U.ip_json('-4 addr show') == null &&
+			same(F.local_subnets(), []) && same(F.connected_subnets(), []), sprintf('%J', U.ip_full()));
+		rename(OFF, C.IP_FULL);
+		// «Нет» помнится: rpcd и truba stats не перебирают команды на каждый опрос; перепроверка находит сразу.
+		check('ip-full вернулся: без перепроверки — прежнее «нет», с ней — найден', U.ip_full() == null && U.ip_full(true) == C.IP_FULL);
+		unlink(LINK);
+		symlink(orig, LINK);
+		check('ссылка возвращена: снова «ip»', U.ip_full(true) == 'ip' && same(F.local_subnets(), l4), sprintf('%J', U.ip_full()));
+	}
+}
 
 // ---- Межсетевой экран зон Маршрутизации: перенаправления в truba (ADR 0014), IPv6-интернет (ADR 0016) ----
 

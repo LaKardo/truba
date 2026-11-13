@@ -276,7 +276,7 @@ export function status(allow_cached, part) {
 		// иначе каждый опрос ждал бы DNS (а когда служба остановлена, DNS мог и не работать).
 		vps_ip: applied?.vps ?? (U.is_ipv4(tinfo.endpoint) ? tinfo.endpoint : null),
 		health: health_state(),
-		table: U.run('ip -4 route show table ' + C.RT_TABLE).out,
+		table: U.run(U.ip_cmd() + ' -4 route show table ' + C.RT_TABLE).out,
 		// counters — сырые счётчики (connections: tunnel/direct/inbound — новые соединения,
 		// block — отброшенные пакеты), traffic — байты трафика устройств; отсчёт с applied.counters_since.
 		counters: counters(raw),

@@ -19,9 +19,11 @@ export function iface_up(iface, ub) {
 // сбоя между удалением и добавлением правило могло задвоиться. Предел — чтобы цикл не шёл вечно.
 const RULE_DUPS_MAX = 8;
 
+// Все вызовы ip — командой U.ip_cmd(): «ip rule … oif» и «ip route get … mark» BusyBox не умеет.
 function del_rule_prio(prio) {
+	let ip = U.ip_cmd();
 	for (let i = 0; i < RULE_DUPS_MAX; i++)
-		if (system(sprintf('ip -4 rule del priority %d 2>/dev/null', prio)) != 0)
+		if (system(sprintf('%s -4 rule del priority %d 2>/dev/null', ip, prio)) != 0)
 			break;
 }
 
@@ -36,24 +38,25 @@ function rule_present(lines, prio, text) {
 }
 
 export function ensure_rules(dev) {
-	let r = U.run('ip -4 rule show');
+	let ip = U.ip_cmd();
+	let r = U.run(ip + ' -4 rule show');
 	let lines = r.code == 0 ? split(r.out, '\n') : [];
 	let mark = 'fwmark ' + sprintf('0x%x/0x%x', C.MARK_TUNNEL, C.MARK_MASK) + ' lookup ' + T;
 	let oif = 'oif ' + dev + ' lookup ' + T;
 	if (!rule_present(lines, C.PRIO_RULE_MARK, mark)) {
 		del_rule_prio(C.PRIO_RULE_MARK);
-		system([ 'ip', '-4', 'rule', 'add', ...split(mark, ' '), 'priority', '' + C.PRIO_RULE_MARK ]);
+		system([ ip, '-4', 'rule', 'add', ...split(mark, ' '), 'priority', '' + C.PRIO_RULE_MARK ]);
 	}
 	if (!rule_present(lines, C.PRIO_RULE_OIF, oif)) {
 		del_rule_prio(C.PRIO_RULE_OIF);
-		system([ 'ip', '-4', 'rule', 'add', ...split(oif, ' '), 'priority', '' + C.PRIO_RULE_OIF ]);
+		system([ ip, '-4', 'rule', 'add', ...split(oif, ' '), 'priority', '' + C.PRIO_RULE_OIF ]);
 	}
 };
 
 export function remove_rules() {
 	del_rule_prio(C.PRIO_RULE_MARK);
 	del_rule_prio(C.PRIO_RULE_OIF);
-	system([ 'ip', '-4', 'route', 'flush', 'table', T ]);
+	system([ U.ip_cmd(), '-4', 'route', 'flush', 'table', T ]);
 };
 
 // state: 'healthy' | 'down'. Таблица 77:
@@ -62,20 +65,20 @@ export function remove_rules() {
 //   down без неё            → без default: трафик проваливается в main (Напрямую)
 // Подсеть Туннеля держится в таблице всегда, пока интерфейс поднят: по ней ходит проверка Туннеля.
 function set_table(state, tinfo, killswitch) {
-	let dev = tinfo.device;
+	let dev = tinfo.device, ip = U.ip_cmd();
 
 	if (tinfo.up && tinfo.subnet)
-		system([ 'ip', '-4', 'route', 'replace', tinfo.subnet, 'dev', dev, 'table', T ]);
+		system([ ip, '-4', 'route', 'replace', tinfo.subnet, 'dev', dev, 'table', T ]);
 
 	if (tinfo.up && state == 'healthy') {
-		system([ 'ip', '-4', 'route', 'replace', 'default', 'dev', dev, 'table', T ]);
+		system([ ip, '-4', 'route', 'replace', 'default', 'dev', dev, 'table', T ]);
 		return 'healthy';
 	}
 	if (killswitch) {
-		system([ 'ip', '-4', 'route', 'replace', 'blackhole', 'default', 'table', T ]);
+		system([ ip, '-4', 'route', 'replace', 'blackhole', 'default', 'table', T ]);
 		return 'blocked';
 	}
-	system('ip -4 route del default table ' + T + ' 2>/dev/null');
+	system(ip + ' -4 route del default table ' + T + ' 2>/dev/null');
 	return 'fallback';
 }
 
@@ -134,16 +137,18 @@ export function routes(cfg, tinfo) {
 
 // Через что уходят внешние пакеты Туннеля: устройство, его IPv4, шлюз по умолчанию на нём и шлюз маршрута
 // до Трубы, который netifd держит для Туннеля (host dependency). null — до Трубы маршрута нет.
+// «route get … mark» есть только у полноценного ip: с BusyBox канал не определяется (null).
 export function uplink(vps) {
-	let r = U.run('ip -4 route get ' + U.shq(vps) + ' mark ' + sprintf('0x%x', C.MARK_DIRECT));
+	let ip = U.ip_cmd();
+	let r = U.run(ip + ' -4 route get ' + U.shq(vps) + ' mark ' + sprintf('0x%x', C.MARK_DIRECT));
 	let dev = (r.code == 0) ? match(r.out, /\sdev ([^ \n]+)/)?.[1] : null;
 	if (!dev)
 		return null;
-	let host = match(U.run('ip -4 route show exact ' + U.shq(vps + '/32')).out, /via ([0-9.]+) dev ([^ \n]+)/);
+	let host = match(U.run(ip + ' -4 route show exact ' + U.shq(vps + '/32')).out, /via ([0-9.]+) dev ([^ \n]+)/);
 	return {
 		dev,
-		addr: match(U.run('ip -4 -o addr show dev ' + U.shq(dev)).out, /inet ([0-9.]+)/)?.[1],
-		gw: match(U.run('ip -4 route show default dev ' + U.shq(dev)).out, /via ([0-9.]+)/)?.[1],
+		addr: match(U.run(ip + ' -4 -o addr show dev ' + U.shq(dev)).out, /inet ([0-9.]+)/)?.[1],
+		gw: match(U.run(ip + ' -4 route show default dev ' + U.shq(dev)).out, /via ([0-9.]+)/)?.[1],
 		host_via: (host && host[2] == dev) ? host[1] : null,
 	};
 };
