@@ -726,6 +726,18 @@ if (awg) {
 		`awg.applyConf: прежний пир удалён, новый — с адресом IPv6, интерфейс — в зоне Туннеля (${JSON.stringify(peers)})`);
 	check(awg.configured('awg0') === true && awg.configured('nope') === false && awg.peerSection('awg0') === peers[0]['.name'] && awg.peerSection('nope') === null,
 		'awg.configured и awg.peerSection');
+	// Порт SSH Трубы — строка-комментарий router.conf: в настройки службы; без неё прежний порт снимается.
+	const sshConf = (head) => { try { return awg.parseConf(head + '[Interface]\nPrivateKey = k\n[Peer]\nPublicKey = p\n'); } catch (e) { return null; } };
+	check(conf && conf.sshPort === undefined && sshConf('# TrubaSSHPort = 40022\r\n')?.sshPort === '40022' && sshConf('#trubasshport=00022\n')?.sshPort === '22' &&
+		[ '# TrubaSSHPort = 0\n', '# TrubaSSHPort = 65536\n', '# TrubaSSHPort = 22; x\n', '# SSH port 22\n', 'TrubaSSHPort = 22\n' ].every((h) => sshConf(h) && sshConf(h).sshPort === undefined),
+		'awg.parseConf: порт SSH Трубы — только строка «# TrubaSSHPort = N» с портом 1–65535');
+	const sshSet = () => uciCalls.filter((c) => c[1] == 'truba' && c[2] == 'main' && c[3] == 'vps_ssh_port').map((c) => c[0] + (c[4] != null ? ':' + c[4] : '')).join(' ');
+	const before = sshSet();
+	// Свой интерфейс: настройки awg0 нужны проверкам ниже.
+	awg.applyConf('awgssh', sshConf('# TrubaSSHPort = 40022\n'), 'tun');
+	awg.applyConf('awgssh', sshConf(''), 'tun');
+	check(before === 'unset' && sshSet() === 'unset set:40022 unset' && net.main?.vps_ssh_port === undefined,
+		`awg.applyConf: порт SSH Трубы — в truba.main.vps_ssh_port, без него в router.conf — снимается (${sshSet()})`);
 	check([ '575', '1501', 'abc' ].every((v) => txt(awg.mtuError(v))) && [ '', '576', '1500' ].every((v) => awg.mtuError(v) === null), 'awg.mtuError: 576–1500');
 	check(awg.rangeError('15-25', 65535) === null && awg.rangeError('4294967295', 4294967295) === null && txt(awg.rangeError('25-15', 65535)) &&
 		txt(awg.rangeError('65536', 65535)), 'awg.rangeError: число или «от-до» в пределах');

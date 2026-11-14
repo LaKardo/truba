@@ -60,6 +60,7 @@ stop_service() {
 
 service_triggers() {
 	eval "$($PROG env)"
-	procd_add_reload_trigger "truba" "network"
+	# firewall — пробросы из зоны Туннеля: по ним служба строит цепочку hairpin.
+	procd_add_reload_trigger "truba" "network" "firewall"
 	procd_add_interface_trigger "interface.*" "$TRUBA_IFACE" "$TRUBA_INIT" reload
 }

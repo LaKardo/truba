@@ -684,7 +684,8 @@ install_packages() {
 	# Конфиг unbound — до пакета: служба сразу стартует с ним, а не на 127.0.0.1.
 	write_unbound_conf
 	# shellcheck disable=SC2086 # списки пакетов
-	apt_get install -y -qq nftables fail2ban unattended-upgrades curl unbound $hdr $metas >/dev/null
+	# conntrack — ради счётчиков потерь таблицы соединений в diag (conntrack -S).
+	apt_get install -y -qq nftables fail2ban unattended-upgrades curl unbound conntrack $hdr $metas >/dev/null
 	# Заголовки этого ядра больше не нужны, когда VPS перейдёт на новое: метапакет приносит
 	# заголовки новых ядер, а эти пусть убирает apt autoremove (работающее ядро apt не трогает).
 	if [ -n "$hdr" ] && [ -n "$metas" ]; then apt-mark auto "$hdr" >/dev/null; fi
@@ -989,6 +990,10 @@ awg_conf() {
 
 router_conf() {
 	echo "# Труба: конфиг для импорта в Роутер (Службы → Труба → Туннель → Импорт)"
+	# Порт SSH Трубы — для Роутера: этот порт Труба оставляет себе, и Роутер по нему не отдаёт устройству
+	# обращения из домашней сети к пробросам по IP Трубы. Строка-комментарий: AmneziaWG её не читает, а
+	# импорт на Роутере — читает (awg.js:parseConf). Смена порта SSH меняет router.conf — install об этом скажет.
+	[ -z "${SSH_PORT:-}" ] || echo "# TrubaSSHPort = $SSH_PORT"
 	echo "[Interface]"
 	echo "PrivateKey = $RTR_PRIV"
 	echo "Address = $RTR_TUN/30"
@@ -2119,7 +2124,15 @@ diag_snapshot() {
 	# cpu — сумма, cpuN — каждое ядро: всего, простой (idle + iowait), softirq, steal.
 	awk '/^cpu/ { t = 0; for (i = 2; i <= 9; i++) t += $i
 		print $1 ".total", t; print $1 ".idle", $5 + $6; print $1 ".softirq", $8; print $1 ".steal", $9 }' "$PROC/stat"
-	# Столбцы conntrack по заголовку: набор столбцов зависит от версии ядра.
+	# Потери conntrack. Файла /proc/net/stat/nf_conntrack в ядре Ubuntu 24.04 нет: там те же счётчики отдаёт
+	# conntrack -S (пакет conntrack ставит install), по строке на CPU — «cpu=0 found=0 … drop=0 early_drop=0».
+	# Нет ни файла, ни команды — строк conntrack.* нет, и отчёт прямо говорит, что эти потери не видны.
+	# Столбцы файла — по заголовку: их набор зависит от версии ядра.
+	if [ ! -r "$PROC/net/stat/nf_conntrack" ] && command -v conntrack >/dev/null; then
+		{ conntrack -S 2>/dev/null || true; } | awk '
+			{ for (i = 1; i <= NF; i++) if (split($i, kv, "=") == 2 && kv[1] ~ /^(insert_failed|drop|early_drop)$/) { s[kv[1]] += kv[2]; n++ } }
+			END { if (n) { print "conntrack.insert_failed", s["insert_failed"] + 0; print "conntrack.drop", s["drop"] + 0; print "conntrack.early_drop", s["early_drop"] + 0 } }'
+	fi
 	if [ -r "$PROC/net/stat/nf_conntrack" ]; then
 		{
 			read -ra hdr
@@ -2176,6 +2189,8 @@ diag_report() {
 			printf "  разбор входящих: отброшено %d, не хватило бюджета %d раз\n", v["softnet.dropped"], v["softnet.squeeze"]
 			if ("conntrack.drop" in v)
 				printf "  conntrack: отброшено %d, не вставлено %d, вытеснено %d\n", v["conntrack.drop"], v["conntrack.insert_failed"], v["conntrack.early_drop"]
+			else
+				print "  conntrack: счётчиков потерь нет — нет команды conntrack (её ставит install-vps.sh install); переполнение таблицы здесь не видно"
 			steal = pct(v["cpu.steal"], v["cpu.total"]); si = pct(v["cpu.softirq"], v["cpu.total"])
 			for (k in v) if (k ~ /^cpu[0-9]+\.total$/) {
 				c = k; sub(/\.total$/, "", c)

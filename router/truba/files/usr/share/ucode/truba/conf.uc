@@ -54,6 +54,10 @@ export const SCHEMA = {
 		upnp:       { type: 'bool', def: false },
 		// STUN-серверы «Проверки NAT» («host:port»); пусто — стандартные из truba.nattest.
 		stun:       { type: 'list', def: [] },
+		// Порт SSH Трубы, 1–65535: его пишет импорт router.conf (строка «# TrubaSSHPort»). Этот порт Труба
+		// оставляет себе, и цепочка hairpin исключает его: проброс диапазона с ним не уведёт SSH до Трубы к
+		// устройству. Пусто — порт неизвестен, и пробросы в домашнюю сеть не отражаются (render.uc).
+		vps_ssh_port: { type: 'pattern', re: '^([1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5])$', def: '' },
 	},
 	dns: {
 		// DNS-сервер на Трубе (install-vps.sh, ADR 0013) и запасной DoH: резерв после 100 мс. Без сервера
@@ -235,6 +239,9 @@ export function load() {
 		},
 		invalid: bad,
 	};
+	// Порт SSH Трубы числом; 0 — неизвестен.
+	let sp = v('main', 'vps_ssh_port');
+	cfg.vps_ssh_port = (sp === '') ? 0 : int(sp);
 	// HTTP API mosdns (счётчики кэша для «Обзора») — на соседнем с DNS порту, на адресе mosdns.
 	let p = cfg.dns.port;
 	cfg.dns.api = sprintf('%s:%d', C.MOSDNS_ADDR, (p < 65535) ? p + 1 : p - 1);

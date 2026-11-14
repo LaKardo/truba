@@ -131,6 +131,10 @@ function ctx_of() {
 		gs_tunnel4: [ { ip: '198.51.100.1', expires: 100 }, { ip: '198.51.100.2', expires: 999999 }, { ip: '198.51.100.3', expires: 0 } ],
 		gs_direct4: [ '198.51.100.4', { ip: '198.51.100.5', expires: null } ],
 		dev_tunnel: [ 'aa:bb:cc:dd:ee:ff' ], dev_direct: [],
+		// Пробросы из Туннеля: порт с заменой и диапазон без неё (net.uc:forwards_of).
+		forwards: [ { proto: 'tcp', port: '8080', to: '192.168.1.20:8081' }, { proto: 'udp', port: '27000-27015', to: '192.168.1.21' } ],
+		// Порты, которые Труба оставляет себе: SSH (настройка vps_ssh_port) и Туннель.
+		ssh_port: 40022, awg_port: 51820,
 	};
 }
 let full = R.nft_full(mk(), plan, ctx_of());
@@ -178,6 +182,86 @@ let stats_bad = filter(stats_rules, (l) => {
 });
 check('stats: в каждом правиле учёта счётчик, затем update своего набора, ключ — адрес устройства',
 	length(stats_rules) == 6 && !length(stats_bad), join(' | ', stats_bad));
+
+// persist: первый пакет соединения «Туннель», уходящий не в Туннель (Туннель не отвечает, Аварийная
+// блокировка выключена), записывается как «Напрямую» — и раньше правила, которое пишет «Туннель».
+let persist = match(full, /chain persist \{([^}]*)\}/)?.[1] ?? '';
+let p_first = index(persist, '== 0x01000000 oifname != "awg0" ct status and confirmed == 0 ct mark set ct mark and 0xf0ffffff or 0x02000000 return');
+check('persist: первый пакет «Туннеля» мимо Туннеля — «Напрямую», раньше записи «Туннель»',
+	p_first >= 0 && p_first < index(persist, '== 0x01000000 ct mark set'), persist);
+check('persist: то же правило в минимальной таблице', index(minimal, 'oifname != "awg0" ct status and confirmed == 0') >= 0);
+
+// Пробросы из Туннеля: обращение к ним из зон по IP Трубы — hairpin и подмена источника.
+let hairpin = match(full, /chain hairpin \{([^}]*)\}/)?.[1] ?? '';
+check('hairpin: проброс — DNAT пакетам зон к IP Трубы, раньше dstnat fw4',
+	index(hairpin, 'priority dstnat - 5') >= 0 &&
+	index(hairpin, 'iifname @lan_if ip daddr 203.0.113.10 tcp dport 8080 dnat ip to 192.168.1.20:8081\n') >= 0 &&
+	index(hairpin, 'iifname @lan_if ip daddr 203.0.113.10 udp dport 27000-27015 dnat ip to 192.168.1.21\n') >= 0, hairpin);
+check('hairpin: источник подменяется только соединениям зон к IP Трубы, раньше srcnat fw4',
+	index(full, 'priority srcnat - 5') >= 0 &&
+	index(full, 'iifname @lan_if oifname @lan_if ct status dnat ct original ip daddr 203.0.113.10 masquerade') >= 0);
+check('hairpin: есть и в минимальной таблице (пробросы работают без Маршрутизации)', index(minimal, 'chain hairpin {') >= 0 && index(minimal, 'chain hairpin_snat {') >= 0);
+check('hairpin: без пробросов и без IP Трубы цепочек нет',
+	!match(R.nft_full(mk(), plan, { ...ctx_of(), forwards: [] }), /hairpin/) && !match(R.nft_full(mk(), plan, { ...ctx_of(), vps: null }), /hairpin/));
+// Порты самой Трубы — первыми правилами, раньше любого проброса: проброс диапазона с портом SSH не уводит
+// к устройству SSH до Трубы. Порт SSH неизвестен — не отражается ничего.
+let h_ssh = index(hairpin, 'ip daddr 203.0.113.10 tcp dport 40022 return\n'), h_awg = index(hairpin, 'ip daddr 203.0.113.10 udp dport 51820 return\n');
+check('hairpin: порты SSH Трубы и Туннеля исключены раньше пробросов',
+	h_ssh >= 0 && h_awg > h_ssh && h_awg < index(hairpin, 'dnat ip to'), hairpin);
+check('hairpin: порт SSH Трубы неизвестен — цепочек нет; порт Туннеля неизвестен — исключается только SSH',
+	!match(R.nft_full(mk(), plan, { ...ctx_of(), ssh_port: 0 }), /hairpin/) && !match(R.nft_minimal(mk(), { ...ctx_of(), ssh_port: 0 }), /hairpin/) &&
+	index(R.nft_full(mk(), plan, { ...ctx_of(), awg_port: 0 }), 'tcp dport 40022 return') >= 0 &&
+	index(R.nft_full(mk(), plan, { ...ctx_of(), awg_port: 0 }), 'udp dport 51820 return') < 0);
+nft_ok('таблицу с портом SSH внутри проброшенного диапазона',
+	R.nft_full(mk(), plan, { ...ctx_of(), forwards: [ { proto: 'tcp', port: '40000-41000', to: '192.168.1.20' } ] }));
+
+// Какие секции redirect межсетевого экрана становятся правилами hairpin.
+let redirects = [
+	{ src: 'truba', dest_ip: '192.168.1.20', src_dport: '8080', dest_port: '8081', proto: 'tcp' },
+	{ src: 'truba', target: 'DNAT', dest_ip: '192.168.1.21', src_dport: '27000:27015' },                // протокол по умолчанию — оба
+	{ src: 'truba', dest_ip: '192.168.1.22', src_dport: '8080', proto: [ 'tcp' ] },                     // порт занят первым пробросом
+	{ src: 'truba', dest_ip: '192.168.1.23', src_dport: '443', dest_port: '443', proto: 'tcpudp' },     // порт тот же — без «:порт»
+	{ src: 'wan', dest_ip: '192.168.1.30', src_dport: '80' },                                           // не из Туннеля
+	{ src: 'truba', target: 'SNAT', dest_ip: '192.168.1.31', src_dport: '81' },
+	{ src: 'truba', dest_ip: '192.168.1.32', src_dport: '82', enabled: '0' },
+	{ src: 'truba', dest_ip: '192.168.1.33', src_dport: '83', reflection: '0' },
+	{ src: 'truba', dest_ip: '192.168.1.34' },                                                          // без внешнего порта
+	{ src: 'truba', dest_ip: 'fd00::1', src_dport: '84' },
+	{ src: 'truba', dest_ip: '192.168.1.35', src_dport: '85', family: 'ipv6' },
+	{ src: 'truba', dest_ip: '192.168.1.36', src_dport: '86', src_dip: '10.0.0.1' },
+	{ src: 'truba', dest_ip: '192.168.1.37', src_dport: '87; drop', proto: 'tcp' },                     // в правила — только проверенное
+	{ src: 'truba', dest_ip: '192.168.1.38', src_dport: '88', dest_port: '70000', proto: 'tcp' },
+	{ src: 'truba', dest_ip: '192.168.1.39', src_dport: '90-89', proto: 'tcp' },
+	{ src: 'truba', dest_ip: '192.168.1.40', src_dport: '91', proto: 'icmp' },
+];
+let fwds = N.forwards_of(redirects);
+check('пробросы: включённый DNAT IPv4 из зоны Туннеля с внешним портом; остальное пропускается',
+	same(map(fwds, f => f.proto + ' ' + f.port + ' ' + f.to), [ 'tcp 8080 192.168.1.20:8081', 'tcp 27000-27015 192.168.1.21',
+		'udp 27000-27015 192.168.1.21', 'tcp 443 192.168.1.23', 'udp 443 192.168.1.23' ]), sprintf('%J', fwds));
+nft_ok('таблицу с пробросами из настроек', R.nft_full(mk(), plan, { ...ctx_of(), forwards: fwds }));
+
+// Порт SSH Трубы в схеме настроек: 1–65535 без ведущих нулей; пусто — неизвестен; неверное — пропускается.
+let ssh_val = (v) => { let bad = []; return [ F.check_value('main', 'vps_ssh_port', v, bad), length(bad) ]; };
+check('схема: порт SSH Трубы — 1–65535, пусто и отсутствие — неизвестен',
+	same(ssh_val('40022'), [ '40022', 0 ]) && same(ssh_val('1'), [ '1', 0 ]) && same(ssh_val('65535'), [ '65535', 0 ]) &&
+	same(ssh_val(''), [ '', 0 ]) && same(ssh_val(null), [ '', 0 ]), sprintf('%J %J', ssh_val('40022'), ssh_val(null)));
+check('схема: неверный порт SSH Трубы — неизвестен и попадает в пропущенное',
+	length(filter([ '0', '65536', '70000', '022', '22; drop', '-1', '4o022' ], v => !same(ssh_val(v), [ '', 1 ]))) == 0,
+	sprintf('%J %J %J', ssh_val('0'), ssh_val('65536'), ssh_val('022')));
+
+// Правила ip: метка «Туннель», сокеты на устройстве Туннеля и свои пакеты Роутера с адреса Туннеля.
+let rw = N.rules_wanted('awg0', '10.77.77.2');
+check('ip rule: метка, устройство и адрес Туннеля → таблица 77',
+	same(map(rw, r => r.prio + ' ' + r.text), [ '1000 fwmark 0x1000000/0xf000000 lookup 77', '1001 oif awg0 lookup 77', '1002 from 10.77.77.2 lookup 77' ]),
+	sprintf('%J', rw));
+check('ip rule: без адреса Туннеля правила источника нет', same(map(N.rules_wanted('awg0', null), r => r.text == null), [ false, false, true ]));
+let rshow = [ '0:\tfrom all lookup local', '1000:\tfrom all fwmark 0x1000000/0xf000000 lookup 77', '1001:\tfrom all oif awg0 lookup 77',
+              '1002:\tfrom 10.77.77.2 lookup 77 ', '32766:\tfrom all lookup main' ];
+check('ip rule: свои правила узнаются в выводе «ip rule show»', !length(filter(rw, r => !N.rule_present(rshow, r.prio, r.text))));
+check('ip rule: другой адрес, отключённое устройство и дубль — не то правило',
+	!N.rule_present(rshow, 1002, 'from 10.77.77.6 lookup 77') &&
+	!N.rule_present([ '1001:\tfrom all oif awg0 [detached] lookup 77' ], 1001, rw[1].text) &&
+	!N.rule_present([ ...rshow, rshow[1] ], 1000, rw[0].text));
 
 golden('mosdns.json', sprintf('%.J\n', DNS.mosdns(mk(), plan, [ 'ntp.example' ])));
 // Соседние Категории с одним Действием — один domain_set в том же порядке; несоседние — раздельно.
@@ -280,6 +364,13 @@ check('настройки: верный MAC — в нижнем регистре
 check('настройки: API mosdns — на соседнем порту', cfg.dns.port == 5335 && cfg.dns.api == '127.0.0.1:5336');
 config("config dns 'dns'\n\toption set_timeout '0'\n");
 check('настройки: срок 0 — без срока', F.load().dns.set_timeout == 0);
+check('настройки: порта SSH Трубы нет — 0', F.load().vps_ssh_port === 0);
+config("config main 'main'\n\toption vps_ssh_port '40022'\n");
+check('настройки: порт SSH Трубы — числом', F.load().vps_ssh_port === 40022 && !length(F.load().invalid));
+config("config main 'main'\n\toption vps_ssh_port '65536'\n");
+cfg = F.load();
+check('настройки: неверный порт SSH Трубы — 0 и в пропущенном', cfg.vps_ssh_port === 0 && same(map(cfg.invalid, x => x.key), [ 'main.vps_ssh_port' ]),
+	sprintf('%J', cfg.invalid));
 
 // ---- Схема настроек (ADR 0015): умолчания и пределы — только в ней ----
 

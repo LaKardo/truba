@@ -26,7 +26,7 @@ OpenWrt-пакет `truba` (ImmortalWrt 25.12, `PKGARCH:=all`) — служба 
 
 ### Настройки UCI — `files/etc/config/truba`
 
-- `main`: `routing` (по умолчанию `0`, ADR 0019), `mode` (`all`|`selective`), `killswitch`, `iface` (`awg0`), `zone` (список), `dns_hijack`, `upnp`, `stun` (список STUN-серверов; пусто — встроенный список `nattest.uc:DEFAULT_SERVERS`; в поставляемом конфиге — закомментированный пример)
+- `main`: `routing` (по умолчанию `0`, ADR 0019), `mode` (`all`|`selective`), `killswitch`, `iface` (`awg0`), `zone` (список), `dns_hijack`, `upnp`, `vps_ssh_port` (порт SSH Трубы из `router.conf`; пусто — неизвестен, цепочек `hairpin` нет), `stun` (список STUN-серверов; пусто — встроенный список `nattest.uc:DEFAULT_SERVERS`; в поставляемом конфиге — закомментированный пример)
 - `dns`: `tunnel_upstream`, `direct_upstream`, `port` (5335), `ttl_max`, `cache_size`, `lazy_cache_ttl`, `set_timeout`
 - `lists`: `geoip_url`, `geoip_mirror`, `geosite_url`, `geosite_mirror`, `via_tunnel`, `auto_update`
 - `watchdog`: `enabled`, `interval`, `handshake_max`, `fails`, `probe`
@@ -36,13 +36,13 @@ OpenWrt-пакет `truba` (ImmortalWrt 25.12, `PKGARCH:=all`) — служба 
 
 | Модуль | Экспорт |
 |---|---|
-| `const.uc` | Биты меток `MARK_TUNNEL/DIRECT/INBOUND/MASK`, `RT_TABLE=77`, `PRIO_RULE_MARK=1000`, `PRIO_RULE_OIF=1001`, `NFT_TABLE`, `FW_ZONE`, `FW_FWD_SUFFIX`, `FW_NO6_SUFFIX`, `LOG_TAG`, `WATCHDOG_TAG`, `CLI`, `INIT`, `IP_FULL`, `MOSDNS_ADDR`, все пути (`CONF_DIR`, `RUN_DIR`, `GOOD_DIR`…), `HISTORY`, `DEV_*`, `CONN_TOP`, `PROBE_WINDOW`, `LOCK_APPLY`, `LOCK_LISTS`, `DAT_FILES`, `ACTIONS`, `CRON_BEGIN`, `CRON_END` |
+| `const.uc` | Биты меток `MARK_TUNNEL/DIRECT/INBOUND/MASK`, `RT_TABLE=77`, `PRIO_RULE_MARK=1000`, `PRIO_RULE_OIF=1001`, `PRIO_RULE_SRC=1002`, `NFT_TABLE`, `FW_ZONE`, `FW_FWD_SUFFIX`, `FW_NO6_SUFFIX`, `LOG_TAG`, `WATCHDOG_TAG`, `CLI`, `INIT`, `IP_FULL`, `MOSDNS_ADDR`, все пути (`CONF_DIR`, `RUN_DIR`, `GOOD_DIR`…), `HISTORY`, `DEV_*`, `CONN_TOP`, `PROBE_WINDOW`, `LOCK_APPLY`, `LOCK_LISTS`, `DAT_FILES`, `ACTIONS`, `CRON_BEGIN`, `CRON_END` |
 | `conf.uc` | `SCHEMA`, `UPSTREAM_SCHEMES`, `UPSTREAM_RE`, `schema`, `load`, `check_value`, `parse_upstream`, `upstream_ok`, `device_sections`, `env_lines`, `tunnel_info`, `vps_ip`, `zone_devices`, `dev_zones`, `connected_subnets`, `local_subnets`, `router_hosts` |
 | `util.uc` | `log`, `info`, `warn_log`, `err`, `errmsg`, `run`, `shq`, `ip_full`, `ip_cmd`, `ip_json`, `ubus_call`, `now_ms`, `mkdirp`, `write_atomic`, `write_json`, `write_if_changed`, `read_json`, `move_file`, `sha256_file`, `sha_from_sumfile`, `lock`, `lock_busy`, `nslookup`, `fnv1a`, `is_ipv4`, `to_list`, `ip2int`, `int2ip`, `cidr_range`, `cidr_contains` |
 | `plan.uc` | `PRIORITY`, `STARTING`, `compute`, `geosite_key` |
 | `render.uc` | `geoip_data`, `nft_full`, `nft_minimal` |
 | `core.uc` | `apply`, `teardown`, `hotplug`, `refresh_bypass`, `update_lists`, `rollback_lists`, `reset_rules`, `categories` |
-| `net.uc` | `iface_up`, `ensure_rules`, `remove_rules`, `routes`, `set_rp_filter`, `sync`, `zones_firewall`, `cron_next`, `cron_set`, `upnp_set` |
+| `net.uc` | `iface_up`, `rule_present`, `rules_wanted`, `ensure_rules`, `remove_rules`, `forwards_of`, `tunnel_forwards`, `routes`, `set_rp_filter`, `sync`, `zones_firewall`, `cron_next`, `cron_set`, `upnp_set` |
 | `dns.uc` | `mosdns`, `apply`, `cache_dump`, `prune_cache_dumps`, `dnsmasq_enable`, `dnsmasq_restore`, `dns_heal`, `dns_unbound`, `api_port_taken`, `is_router_host` |
 | `dat.uc` | `parse_geosite`, `parse_geoip`, `validate`, `unpack`, `ensure`, `cached`, `geoip_cidrs`, `geosite_file`, `geosite_entries` |
 | `dnsnames.uc` | `parse`, `lookup` |
@@ -63,9 +63,9 @@ OpenWrt-пакет `truba` (ImmortalWrt 25.12, `PKGARCH:=all`) — служба 
 - Режим `all` → по умолчанию `tunnel`, `selective` → `direct`; действуют только секции `rule` с текущим Режимом [plan.uc:compute]
 - Неверное значение UCI заменяется значением по умолчанию; для типов `int`, `pattern`, `ipv4`, `upstreams` оно попадает в `cfg.invalid` (неверные `bool`, `enum`, `list` заменяются молча); первая секция `device` на MAC побеждает [conf.uc:check_value, conf.uc:device_sections]
 - `apply` целиком под замком `LOCK_APPLY`; результат всегда пишется в `applied.json`. Конфиг mosdns пишется только после успешного `nft -f` [core.uc:apply, core.uc:apply_config]
-- При ошибке применения (ADR 0006): если таблица в ядре — `kept`; иначе загрузка последней удачной копии из `/etc/truba/good` — `last_good`; иначе `none` с восстановлением dnsmasq. Служба при этом не останавливается, а procd-экземпляры открываются [core.uc:keep_running, core.uc:load_good, init.d/truba:start_service]
-- Таблица не перезагружается целиком, если не изменился `nft_key` (routing, mode, iface, vps, socket_mark, dns_hijack, set_timeout) — обновляются только наборы; при полной перезагрузке счётчики переносятся из ядра всегда, элементы `gs_*4` — только при неизменном `gkey` [core.uc:nft_table_key, core.uc:apply_config]
-- Маршрутизация только IPv4 (ADR 0005): правила `ip -4` priority 1000 (fwmark) и 1001 (oif) в таблицу 77; mosdns отвечает пустым ответом на AAAA и HTTPS; IPv6-CIDR из geoip считаются, но не попадают в наборы [net.uc:ensure_rules, dns.uc:mosdns, dat.uc:parse_geoip]
+- При ошибке применения (ADR 0006): если таблица в ядре — `kept`; иначе загрузка последней удачной копии из `/etc/truba/good` — `last_good`; иначе `none` с восстановлением dnsmasq. Если Маршрутизация включена, а таблицы в ядре нет (загрузка Роутера, перезапуск службы), применение до распаковки списков загружает таблицу этой копии, правила ip и таблицу 77 (`core.uc:preload_good`); при ошибке после этого итог — `last_good`. Служба при этом не останавливается, а procd-экземпляры открываются [core.uc:keep_running, core.uc:load_good, init.d/truba:start_service]
+- Таблица не перезагружается целиком, если не изменился `nft_key` (routing, mode, iface, vps, socket_mark, dns_hijack, set_timeout, пробросы из Туннеля и порты самой Трубы — SSH и Туннеля — для цепочки `hairpin`) — обновляются только наборы; при полной перезагрузке счётчики переносятся из ядра всегда, элементы `gs_*4` — только при неизменном `gkey` [core.uc:nft_table_key, core.uc:apply_config]
+- Маршрутизация только IPv4 (ADR 0005): правила `ip -4` priority 1000 (fwmark), 1001 (oif) и 1002 (источник — адрес Роутера в Туннеле: его ответы на входящие из Туннеля и отказы межсетевого экрана) в таблицу 77; mosdns отвечает пустым ответом на AAAA и HTTPS; IPv6-CIDR из geoip считаются, но не попадают в наборы [net.uc:ensure_rules, dns.uc:mosdns, dat.uc:parse_geoip]
 - Команду `ip` модули вызывают только через `util.uc`: `ip_json` — вывод `-j`, `ip_cmd` — остальные вызовы. Полноценной считается команда, понимающая `-j`: сначала `ip`, затем `/usr/libexec/ip-full` (ссылку `/sbin/ip` после переустановки busybox занимает BusyBox). Найденная команда помнится на время процесса и перепроверяется после сбоя, «нет» — 60 с. Без полноценного `ip` списки подсетей, соседей и маршрутов пусты, а применение пишет `warn` в журнал и `ip_full_missing` в `applied.warnings`; найденная команда — в `applied.ip_cmd` [util.uc:ip_full, util.uc:ip_cmd, util.uc:ip_json, core.uc:apply_config]
 - Таблица 77: Туннель здоров — `default dev <iface>`; упал и включена Аварийная блокировка — `blackhole default`; иначе маршрут по умолчанию удаляется [net.uc:set_table, net.uc:routes]
 - Маршрутизация выключена — служба не трогает IPv4-трафик и DNS сети; применение с `routing=0` после включённой или первое после старта пишет `info` «Маршрутизация выключена…» (ADR 0019) [core.uc:apply_config]
@@ -84,7 +84,7 @@ OpenWrt-пакет `truba` (ImmortalWrt 25.12, `PKGARCH:=all`) — служба 
 ## Side Effects
 
 - nftables: атомарная замена `table inet truba` из `/var/etc/truba/truba.nft`; дозаполнение наборов через `/var/run/truba/bypass.nft`; `nft delete table inet truba` в `teardown` [core.uc:apply_config, core.uc:refresh_bypass, core.uc:teardown]
-- Маршрутизация: `ip -4 rule add/del` priority 1000/1001, `ip -4 route replace|del … table 77` (командой `util.uc:ip_cmd`), `sysctl net.ipv4.conf.<dev>.rp_filter=0` [net.uc:ensure_rules, net.uc:set_table, net.uc:set_rp_filter]
+- Маршрутизация: `ip -4 rule add/del` priority 1000/1001/1002, `ip -4 route replace|del … table 77` (командой `util.uc:ip_cmd`), `sysctl net.ipv4.conf.<dev>.rp_filter=0` [net.uc:ensure_rules, net.uc:set_table, net.uc:set_rp_filter]
 - UCI: `dhcp` (dnsmasq `noresolv`, `cachesize=0`, `server=127.0.0.1#port`, с копией в `/etc/truba/state/dnsmasq.json`), `firewall` (зона `truba`, перенаправления, правила IPv6, `fullcone=1`, `flow_offloading_hw=0`), `upnpd` (с копией `upnpd.json`), секции `rule` в `truba` [dns.uc:dnsmasq_enable, net.uc:zones_firewall, net.uc:upnp_set, uci-defaults/90-truba, core.uc:reset_rules]
 - Перезапуски: `dnsmasq restart`, `firewall reload`, `cron restart`, `miniupnpd restart`, `/etc/init.d/truba reload`, `killall -HUP rpcd` в postinst/postrm [dns.uc, net.uc, core.uc:reload_service, Makefile:postinst]
 - Файлы на флеше: `/etc/truba/lists/` (+`prev/`), `/etc/truba/state/`, `/etc/truba/good/` (последняя удачная копия), `/etc/crontabs/root` (блок `# truba-begin`…`# truba-end`), `/etc/rc.local` (строка `reinstall.sh`) [core.uc:update_lists, core.uc:save_good, net.uc:cron_set, uci-defaults/90-truba]

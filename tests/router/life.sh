@@ -101,6 +101,24 @@ reload "ошибка устранена"
 check "без ошибки, mosdns работает, копия снова есть" eval 'no_error && wait_for 10 mosdns_up && [ -s /etc/truba/good/meta.json ]'
 mv "$NFT.real" "$NFT"
 
+section "загрузка без ошибок: копия правил до распаковки списков"
+# Загрузка Роутера: таблицы в ядре нет, /var пуст. Распаковка Наборов правил идёт десятки секунд, и всё это
+# время трафик зон шёл бы мимо Туннеля: применение сначала загружает последнюю удачную копию, потом заменяет её.
+/etc/init.d/truba stop
+rm -rf /var/run/truba /var/etc/truba /var/lib/truba
+PRE0="$(logread -e truba | grep -c 'до применения настроек действует последняя удачная копия')"
+check "старт завершился" finished /etc/init.d/truba start
+check "копия загружена до применения — строка в журнале" eval \
+	'[ "$(logread -e truba | grep -c "до применения настроек действует последняя удачная копия")" -gt "$PRE0" ]'
+check "применение удалось: новая таблица вместо копии, без отметки об откате" eval \
+	'no_error && [ -z "$(applied "@.fallback")" ] && ! grep -q preloaded "$APPLIED" && in_set gi_direct4 "[[:space:]{,]5\.[0-9]"'
+check "mosdns работает" wait_for 10 mosdns_up
+# Правила уже в ядре — копия не нужна: reload её не загружает.
+PRE1="$(logread -e truba | grep -c 'до применения настроек действует последняя удачная копия')"
+reload "правила в ядре"
+check "reload при загруженной таблице копию не трогает" eval \
+	'[ "$(logread -e truba | grep -c "до применения настроек действует последняя удачная копия")" = "$PRE1" ]'
+
 section "sysupgrade: reinstall.sh возвращает DNS сети до ожидания интернета (ADR 0004)"
 # После sysupgrade /etc/config/dhcp и бэкап Трубы (/etc/truba в keep.d) на месте, а пакетов нет:
 # dnsmasq шлёт запросы в mosdns, которого нет. Имитация: служба снята без teardown (procd

@@ -44,15 +44,29 @@ function ct_in(marks) {
 // Решение для соединения держится в meta mark каждого пакета и в самом конце
 // postrouting записывается в ct mark. Так оно переживает чужие цепочки, которые
 // перезаписывают ct mark целиком раньше (например, «ct mark set ip dscp | 0x80»).
-// Для входящих соединений (MARK_INBOUND) не затираем ct mark на ответных пакетах (ct direction reply):
-// иначе ct mark мигал бы между 0x04000000 и 0x01000000 на каждом пакете.
-function persist_chain() {
+//
+// Входящие из Туннеля: пакет из Туннеля (original) пишет MARK_INBOUND, ответный из сети — MARK_TUNNEL,
+// метку, которую ему дал restore. ct mark такого соединения поэтому чередуется между двумя значениями, и
+// это нужно: чужая цепочка могла стереть ct mark на этом же ответном пакете, и без записи следующий ответ
+// остался бы без решения и ушёл провайдеру. restore и «Куда ходит сейчас» (devices.uc:mark_action)
+// читают оба значения одинаково — в Туннель. На пакетах из Туннеля ответного направления (ответы
+// соединениям «Туннель») метка пакета — MARK_INBOUND, и ct mark не трогается.
+//
+// Первый пакет соединения с меткой «Туннель», уходящий не в Туннель, записывается как «Напрямую». Так бывает,
+// пока Туннель не отвечает, а Аварийная блокировка выключена: в таблице 77 нет default, и пакет идёт по main.
+// Привязка NAT у такого соединения — к адресу канала провайдера; с ct mark «Туннель» оно после возврата
+// Туннеля ушло бы в него с этим адресом в источнике, и Труба его отбросила бы, а ответы с канала
+// провайдера получали бы метку «Туннель» и уходили в Туннель вместо сети. С ct mark «Напрямую» оно остаётся
+// на своём пути до конца. Только первый пакет — соединение ещё не подтверждено (ct status без confirmed):
+// повторы SYN и пакеты соединений, открытых через Туннель, путь не меняют и вернутся в Туннель вместе с ним.
+function persist_chain(iface) {
 	let s = '\n\tchain persist {\n';
 	s += PERSIST_HOOK;
 	s += '\t\tmeta nfproto != ipv4 return\n';
-	// MARK_INBOUND: только на пакетах original direction (входящих из Туннеля), не на reply.
 	s += '\t\tct direction original meta mark and ' + hex(C.MARK_MASK) + ' == ' + hex(C.MARK_INBOUND) +
 		' ct mark set ct mark and ' + KEEP + ' or ' + hex(C.MARK_INBOUND) + ' return\n';
+	s += '\t\tmeta mark and ' + hex(C.MARK_MASK) + ' == ' + hex(C.MARK_TUNNEL) + ' oifname != ' + iface +
+		' ct status and confirmed == 0 ct mark set ct mark and ' + KEEP + ' or ' + hex(C.MARK_DIRECT) + ' return\n';
 	for (let m in [ C.MARK_TUNNEL, C.MARK_DIRECT ])
 		s += '\t\tmeta mark and ' + hex(C.MARK_MASK) + ' == ' + hex(m) +
 			' ct mark set ct mark and ' + KEEP + ' or ' + hex(m) + ' return\n';
@@ -193,6 +207,38 @@ function dns_down_chain() {
 	return s;
 }
 
+// Обращение из зон Трубы к пробросам из Туннеля по IP Трубы. Такой пакет идёт к Трубе через провайдера
+// (её адрес — в bypass4) и возвращался бы по Туннелю с адресом самого Роутера в источнике, а пакет со своим
+// адресом, пришедший снаружи, ядро отбрасывает. Поэтому Роутер сам отправляет его устройству (hairpin), а
+// источник подменяет своим адресом в сети устройства (hairpin_snat): устройство в той же подсети иначе
+// ответило бы клиенту напрямую, мимо Роутера, и клиент не узнал бы в ответе своё соединение.
+// Только пробросы из настроек межсетевого экрана (ctx.forwards, net.uc:tunnel_forwards): отображения UPnP
+// и Full cone меняются на ходу, и к ним из сети по IP Трубы по-прежнему не обратиться.
+//
+// Порты, которые Труба оставляет себе, исключаются первыми правилами — как она сама не отдаёт их на Роутер
+// снаружи: TCP-порт её SSH (ctx.ssh_port — настройка vps_ssh_port, её пишет импорт router.conf) и UDP-порт
+// Туннеля (ctx.awg_port). Иначе проброс диапазона, в который попадает порт SSH, уводил бы к устройству и SSH
+// до самой Трубы из домашней сети. Порт SSH Роутеру больше неоткуда узнать, поэтому без него цепочек нет
+// вовсе: лучше не отражать пробросы, чем перехватить SSH (об этом — строка в журнале, core.uc).
+// Приоритеты — раньше dstnat и srcnat fw4. Без IP Трубы, порта её SSH или пробросов цепочек нет.
+function hairpin_chains(ctx) {
+	if (!ctx.vps || !ctx.ssh_port || !length(ctx.forwards))
+		return '';
+	let s = '\n\tchain hairpin {\n';
+	s += '\t\ttype nat hook prerouting priority dstnat - 5; policy accept;\n';
+	s += sprintf('\t\tip daddr %s tcp dport %d return\n', ctx.vps, ctx.ssh_port);
+	if (ctx.awg_port)
+		s += sprintf('\t\tip daddr %s udp dport %d return\n', ctx.vps, ctx.awg_port);
+	for (let f in ctx.forwards)
+		s += sprintf('\t\tiifname @lan_if ip daddr %s %s dport %s dnat ip to %s\n', ctx.vps, f.proto, f.port, f.to);
+	s += '\t}\n';
+	s += '\n\tchain hairpin_snat {\n';
+	s += '\t\ttype nat hook postrouting priority srcnat - 5; policy accept;\n';
+	s += '\t\tiifname @lan_if oifname @lan_if ct status dnat ct original ip daddr ' + ctx.vps + ' masquerade\n';
+	s += '\t}\n';
+	return s;
+}
+
 // timeout — срок элементов по умолчанию, с (набор с flags timeout).
 function set_decl(name, typ, flags, elems, timeout) {
 	let s = '\tset ' + name + ' {\n\t\ttype ' + typ + ';\n';
@@ -225,7 +271,9 @@ function dns_elems(list, timeout) {
 	return out;
 }
 
-// ctx: { lan_if[], bypass4[], local4[], gs_tunnel4[], gs_direct4[], dev_tunnel[], dev_direct[], socket_mark, counters };
+// ctx: { lan_if[], bypass4[], local4[], gs_tunnel4[], gs_direct4[], dev_tunnel[], dev_direct[], socket_mark, counters,
+//        vps, forwards[], ssh_port, awg_port }; forwards — пробросы из Туннеля (net.uc:tunnel_forwards),
+// ssh_port и awg_port — порты, которые Труба оставляет себе (0 — неизвестен);
 // local4 — подсети адресов Роутера (F.local_subnets), нужен только с перехватом DNS.
 // gs_* — IP из прежней таблицы: строки или { ip, expires } (S.set_elements).
 // Заполняет ctx.set_sizes — число подсетей geoip по Действиям: из ядра огромный набор читать дорого,
@@ -298,10 +346,11 @@ export function nft_full(cfg, plan, ctx) {
 	}
 	s += '\t\t' + set_meta(dflt) + '\n';
 	s += '\t}\n';
-	s += persist_chain();
+	s += persist_chain(iface);
 	s += stats_chain(iface);
 	s += output_chain(ctx);
 	s += dns_down_chain();
+	s += hairpin_chains(ctx);
 	s += dns_chains(cfg);
 
 	s += '}\n';
@@ -323,9 +372,10 @@ export function nft_minimal(cfg, ctx) {
 	// persist пишет ответы как «Туннель», поэтому подходят обе метки.
 	s += '\t\tiifname @lan_if ' + ct_in([ C.MARK_INBOUND, C.MARK_TUNNEL ]) + ' ' + set_meta(C.MARK_TUNNEL) + ' return\n';
 	s += '\t}\n';
-	s += persist_chain();
+	s += persist_chain(iface);
 	s += stats_chain(iface);
 	s += output_chain(ctx);
+	s += hairpin_chains(ctx);
 	s += '}\n';
 	return s;
 };

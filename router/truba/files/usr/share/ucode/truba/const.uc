@@ -11,6 +11,8 @@ export const MARK_MASK    = 0x0f000000;
 export const RT_TABLE       = 77;
 export const PRIO_RULE_MARK = 1000;
 export const PRIO_RULE_OIF  = 1001;
+// Свои пакеты Роутера с адреса Туннеля (ответы на входящие из него, отказы межсетевого экрана).
+export const PRIO_RULE_SRC  = 1002;
 
 export const NFT_TABLE = 'truba';
 // Зона межсетевого экрана Туннеля (её создаёт uci-defaults).

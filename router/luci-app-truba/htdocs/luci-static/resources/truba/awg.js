@@ -27,6 +27,10 @@ function parseConf(text) {
 	let cur = null;
 	for (let raw of String(text || '').split(/\r?\n/)) {
 		const line = raw.trim();
+		// Порт SSH Трубы install-vps.sh пишет строкой-комментарием: AmneziaWG её не читает.
+		const ssh = line.match(/^#\s*TrubaSSHPort\s*=\s*(\d{1,5})\s*$/i);
+		if (ssh && +ssh[1] >= 1 && +ssh[1] <= 65535)
+			res.sshPort = String(+ssh[1]);
 		if (!line || line[0] == '#' || line[0] == ';')
 			continue;
 		const sec = line.match(/^\[(\w+)\]$/);
@@ -54,6 +58,7 @@ function parseConf(text) {
 
 // Настройки network из router.conf — в UCI браузера: прежние опции AWG и пиры снимаются, чтобы от прошлого
 // импорта ничего не осталось. zone — зона Туннеля (consts.fw_zone): интерфейс должен в неё входить.
+// Заодно — порт SSH Трубы в настройки службы (truba.main.vps_ssh_port).
 function applyConf(iface, conf, zone) {
 	if (!uci.get('network', iface))
 		uci.add('network', 'interface', iface);
@@ -98,6 +103,14 @@ function applyConf(iface, conf, zone) {
 		if (!nets.includes(iface))
 			uci.set('firewall', z['.name'], 'network', nets.concat([ iface ]));
 	}
+
+	// Порт SSH Трубы — настройка службы: по нему она не отдаёт устройству обращения из домашней сети к
+	// пробросам по IP Трубы. В router.conf его нет (Труба ставилась прежней версией скрипта) — прежний
+	// снимается: порт этой Трубы неизвестен, а чужой исключал бы не тот порт.
+	if (conf.sshPort)
+		uci.set('truba', 'main', 'vps_ssh_port', conf.sshPort);
+	else
+		uci.unset('truba', 'main', 'vps_ssh_port');
 }
 
 // Пир Трубы — первая секция amneziawg_<iface>; null — пиров нет.

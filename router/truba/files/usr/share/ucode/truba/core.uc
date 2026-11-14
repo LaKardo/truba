@@ -171,8 +171,8 @@ function save_good(cfg, plan, ctx, hosts, res) {
 		                            dns_hijack: res.dns_hijack, zones: res.zones, split_geoip: true });
 }
 
-// Загрузить последнюю удачную копию: метаданные копии или null (копии нет, nft её не принял).
-function load_good() {
+// Загрузить таблицу последней удачной копии: метаданные копии или null (копии нет, nft её не принял).
+function load_good_table() {
 	let meta = U.read_json(C.GOOD_META, null);
 	if (!meta || !stat(C.GOOD_NFT))
 		return null;
@@ -181,9 +181,39 @@ function load_good() {
 		U.err('последняя удачная копия правил не загрузилась: ' + trim(r.out));
 		return null;
 	}
+	return meta;
+}
+
+// Загрузить последнюю удачную копию целиком — таблицу и конфиг mosdns: метаданные копии или null.
+function load_good() {
+	let meta = load_good_table();
+	if (!meta)
+		return null;
 	let m = meta.routing ? readfile(C.GOOD_MOSDNS) : null;
 	meta.mosdns = (m != null) && !!U.write_atomic(C.MOSDNS_CONF, m);
 	return meta;
+}
+
+// Таблицы Трубы в ядре нет — после загрузки Роутера и после перезапуска службы, — а до новой ещё распаковка
+// Наборов правил: в пустой tmpfs это десятки секунд, и всё это время трафик зон шёл бы провайдеру мимо
+// Туннеля и Аварийной блокировки. Поэтому сначала — таблица последней удачной копии (ADR 0006), правила ip
+// и таблица 77; новая таблица потом заменяет её одной транзакцией. Копия отражает настройки прошлого
+// удачного применения — как и при ошибке применения. Только при включённой Маршрутизации и только копия,
+// сохранённая с ней: без Маршрутизации новая таблица готова сразу. DNS сети это не возвращает: mosdns
+// запускает init-скрипт после применения. true — копия загружена.
+function preload_good(cfg, tinfo) {
+	if (!cfg.routing || table_loaded() || !U.read_json(C.GOOD_META, null)?.routing)
+		return false;
+	if (!load_good_table())
+		return false;
+	try {
+		N.sync(cfg, tinfo);
+	}
+	catch (e) {
+		U.err('таблица Туннеля не пересчитана: ' + U.errmsg(e));
+	}
+	U.info('правил в ядре не было: до применения настроек действует последняя удачная копия');
+	return true;
 }
 
 // Отпечаток структуры таблицы inet truba (FNV-1a 32 бита). Элементы наборов имеют
@@ -197,8 +227,13 @@ function nft_table_key(cfg, ctx, vps) {
 		ctx.socket_mark,
 		cfg.dns_hijack,
 		cfg.dns.set_timeout,
-		// Версия набора цепочек: новая цепочка (dns_down) требует перезагрузки таблицы после обновления пакета.
-		2,
+		// Версия набора цепочек: новая цепочка или правило (dns_down; persist — путь первого пакета) требует
+		// перезагрузки таблицы после обновления пакета.
+		3,
+		// Пробросы из Туннеля и порты самой Трубы — правила цепочки hairpin.
+		ctx.forwards,
+		ctx.ssh_port,
+		ctx.awg_port,
 	];
 	// Элементы geoip, geosite и Политик устройств обновляются отдельно.
 	return U.fnv1a(sprintf('%J', parts));
@@ -281,9 +316,24 @@ function apply_config(res, prev) {
 	let tinfo = F.tunnel_info(cfg.iface, ub);
 	let lan_if = F.zone_devices(cfg.zones, ub);
 	ub?.disconnect();
-	let vps = vps_ip(tinfo, prev);
 	// Счётчики прежней таблицы переносятся в новую: учёт идёт с запуска службы, а не с последнего применения.
-	let ctx = { lan_if, bypass4: bypass4(vps, tinfo), socket_mark: socket_mark_ok(), vps, counters: S.counters_raw() };
+	// Читаются до копии правил: её счётчики — нули, а не продолжение прежнего учёта.
+	let counters = S.counters_raw();
+	// Копия — раньше всего долгого: имени endpoint (DNS при загрузке ещё не работает) и распаковки списков.
+	if (preload_good(cfg, tinfo))
+		res.preloaded = true;
+	let vps = vps_ip(tinfo, prev);
+	// Порт Туннеля — из настроек интерфейса; неверный или пустой — 0, как неизвестный.
+	let awg_port = match(tinfo.endpoint_port ?? '', /^[0-9]{1,5}$/) ? int(tinfo.endpoint_port) : 0;
+	let ctx = { lan_if, bypass4: bypass4(vps, tinfo), socket_mark: socket_mark_ok(), vps, counters,
+	            forwards: N.tunnel_forwards(), ssh_port: cfg.vps_ssh_port,
+	            awg_port: (awg_port >= 1 && awg_port <= 65535) ? awg_port : 0 };
+	// Пробросы есть, а порт SSH Трубы неизвестен — в домашнюю сеть они не отражаются (render.uc:hairpin_chains).
+	// В журнал — раз, а не на каждое применение.
+	res.hairpin = (!vps || !length(ctx.forwards)) ? null : (ctx.ssh_port ? 'on' : 'no_ssh_port');
+	if (res.hairpin == 'no_ssh_port' && prev.hairpin != 'no_ssh_port')
+		U.warn_log('пробросы из Туннеля не открываются из домашней сети по IP Трубы: порт SSH Трубы неизвестен — ' +
+			'запустите на Трубе install-vps.sh install и импортируйте router.conf заново');
 	if (!ctx.socket_mark)
 		U.warn_log('nft: нет socket mark (kmod-nft-socket) — свои сокеты Роутера с меткой Туннеля не защищены от чужих цепочек output');
 	if (length(cfg.invalid))
@@ -334,7 +384,8 @@ function apply_config(res, prev) {
 		let nft_key = nft_table_key(cfg, ctx, vps);
 		res.members_key = U.fnv1a(sprintf('%J', [ sort(ctx.lan_if), sort(ctx.dev_tunnel), sort(ctx.dev_direct) ]));
 		res.geoip_key = U.fnv1a(sprintf('%J', [ split(dat.hash ?? '-', ':')[0], plan.geoip ]));
-		let skip_reload = (prev.routing && prev.nft_key == nft_key && table_loaded());
+		// Копия правил, загруженная выше, — не таблица прошлого применения: её заменяет новая целиком.
+		let skip_reload = (!res.preloaded && prev.routing && prev.nft_key == nft_key && table_loaded());
 
 		if (skip_reload) {
 			if (prev.geoip_key != res.geoip_key) {
@@ -412,11 +463,13 @@ function apply_config(res, prev) {
 // Применить не удалось (ADR 0006). Служба не останавливается, DNS сети не пропадает:
 // - таблица Трубы в ядре есть — действует она (nft -f атомарен: если новая не загрузилась,
 //   осталась прежняя), и mosdns работает с конфигом, который ей соответствует;
-// - таблицы нет (загрузка Роутера) — загружается последняя удачная копия с флеша;
+// - таблицы нет (загрузка Роутера) — загружается последняя удачная копия с флеша; если её таблица уже
+//   загружена до применения (preload_good), а новая так и не загрузилась, — этот же случай: mosdns нужен
+//   конфиг копии;
 // - нет и копии — правил Трубы нет, трафик идёт напрямую, и DNS тоже: dnsmasq без mosdns.
 function keep_running(res, prev) {
 	let out = { time: res.time, error: res.error, warnings: res.warnings ?? [], invalid: res.invalid ?? [] };
-	if (table_loaded()) {
+	if (table_loaded() && (res.loaded || !res.preloaded)) {
 		// Поля описывают действующую таблицу: новую, если она успела загрузиться, иначе прежнюю.
 		out = { ...(res.loaded ? res : prev), ...out, fallback: 'kept' };
 		out.mosdns = stat(C.DNSMASQ_BACKUP) != null && stat(C.MOSDNS_CONF) != null;
@@ -507,6 +560,7 @@ export function apply() {
 			res.routing ? (res.nft_gen == res.time ? ', правила перезагружены' : ', правила прежние') : ''));
 	}
 	delete res.loaded;
+	delete res.preloaded;
 
 	U.write_json(C.APPLIED_FILE, res);
 	lk?.close();

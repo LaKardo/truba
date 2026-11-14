@@ -204,7 +204,7 @@ sources_before=$(cat /etc/apt/sources.list.d/ubuntu.sources)
 out=$( (install_packages) 2>&1 ); rc=$?
 want="ppa_add
 apt-get update -qq
-apt-get -o DPkg::Lock::Timeout=600 install -y -qq nftables fail2ban unattended-upgrades curl unbound linux-headers-6.8.0-146-generic linux-headers-generic
+apt-get -o DPkg::Lock::Timeout=600 install -y -qq nftables fail2ban unattended-upgrades curl unbound conntrack linux-headers-6.8.0-146-generic linux-headers-generic
 apt-mark auto linux-headers-6.8.0-146-generic
 apt-get -o DPkg::Lock::Timeout=600 install -y -qq amneziawg"
 [ "$rc" -eq 0 ] && [ "$(cat "$LOG")" = "$want" ] && ok "пакеты: PPA, один apt-get update, заголовки ядра и метапакеты, apt-mark auto" \
@@ -922,6 +922,18 @@ AWG_PORT=51821; write_awg_conf; write_router_conf
 [ "$AWG_CONF_CHANGED $ROUTER_CONF_NEW" = "1 1" ] && ok "смена порта Туннеля: конфиг изменился, router.conf — заново" || fail "смена порта: $AWG_CONF_CHANGED $ROUTER_CONF_NEW"
 rm -f "$ROUTER_CONF"; write_router_conf
 [ "$ROUTER_CONF_NEW" = 0 ] && ok "первый router.conf — без предупреждения о новом" || fail "первый router.conf: $ROUTER_CONF_NEW"
+# Порт SSH Трубы — строкой-комментарием в router.conf: Роутер исключает его из отражения пробросов.
+# Смена порта SSH — новый router.conf; без порта (его ещё нет) строки нет. Файл после проверки — прежний.
+cp -p "$ROUTER_CONF" "$T/router.conf.keep"
+(
+	SSH_PORT=40022; write_router_conf
+	[ "$(grep -c '^# TrubaSSHPort = 40022$' "$ROUTER_CONF")" = 1 ] && [ "$(sed -n 2p "$ROUTER_CONF")" = '# TrubaSSHPort = 40022' ] || exit 1
+	SSH_PORT=40023; write_router_conf
+	[ "$ROUTER_CONF_NEW" = 1 ] && grep -qx '# TrubaSSHPort = 40023' "$ROUTER_CONF" || exit 1
+	unset SSH_PORT; write_router_conf
+	! grep -q TrubaSSHPort "$ROUTER_CONF"
+) && ok "router.conf: порт SSH Трубы — строкой-комментарием, смена порта — новый router.conf" || fail "router.conf: порт SSH: $(head -3 "$ROUTER_CONF")"
+cp -p "$T/router.conf.keep" "$ROUTER_CONF"
 AWG_PORT=51820
 systemctl() { echo "$*" >> "$T/sysd"; case $1 in is-active) [ "${ACTIVE:-1}" = 1 ] ;; *) return 0 ;; esac; }
 AWG_DROPIN="$T/awg-dropin/10-truba.conf"
@@ -1219,6 +1231,22 @@ unset -f unbound-control
 	printf '%s\n' 'PING 10.77.77.2 (10.77.77.2) 56(84) bytes of data.' '' '--- 10.77.77.2 ping statistics ---' \
 		'30 packets transmitted, 29 received, 3.33333% packet loss, time 29040ms' 'rtt min/avg/max/mdev = 30.123/31.456/40.789/1.234 ms' > "$T/pingout"
 	[ "$(ping_summary "$T/pingout")" = '3.33333% 30.123 31.456 40.789' ] && ok "diag: разбор итога ping" || fail "ping_summary: $(ping_summary "$T/pingout")"
+	# Ubuntu 24.04: файла /proc/net/stat/nf_conntrack нет — потери conntrack из conntrack -S, по строке на CPU.
+	rm -f "$PROC/net/stat/nf_conntrack"
+	conntrack() {
+		printf 'cpu=0   \tfound=0 invalid=3 insert=0 insert_failed=1 drop=2 early_drop=0 error=0 search_restart=0\n'
+		printf 'cpu=1   \tfound=0 invalid=0 insert=0 insert_failed=0 drop=3 early_drop=4 error=0 search_restart=0\n'
+	}
+	out=$(diag_snapshot | grep '^conntrack\.' | xargs)
+	[ "$out" = 'conntrack.insert_failed 1 conntrack.drop 5 conntrack.early_drop 4' ] \
+		&& ok "diag: без файла ядра потери conntrack — из conntrack -S, сумма по CPU" || fail "diag conntrack -S: $out"
+	out=$(printf '%s\n' conntrack.insert_failed\ 0 conntrack.drop\ 5 conntrack.early_drop\ 0 | diag_report 60 '' '')
+	grep -q 'conntrack: отброшено 5' <<< "$out" && grep -q '^! conntrack отбрасывает соединения' <<< "$out" \
+		&& ok "diag: потери conntrack — тревога" || fail "diag потери conntrack: $out"
+	unset -f conntrack
+	# Счётчиков нет вовсе — отчёт не молчит: «потерь не найдено» без этой строки читалось бы как «потерь нет».
+	out=$(printf '%s\n' softnet.dropped\ 0 | diag_report 60 '' '')
+	grep -q 'conntrack: счётчиков потерь нет' <<< "$out" && ok "diag: без счётчиков conntrack — строка об этом" || fail "diag без conntrack: $out"
 )
 case "$( (main diag 3) 2>&1 )" in *"от 5 до 600"*) ok "параметры: diag — длительность в пределах";; *) fail "параметры: diag 3";; esac
 

@@ -1,4 +1,4 @@
-// Правила маршрутизации, таблица Туннеля, межсетевой экран зон, cron, UPnP. DNS — в truba.dns.
+// Правила маршрутизации, таблица Туннеля, межсетевой экран зон, пробросы из Туннеля, cron, UPnP. DNS — в truba.dns.
 'use strict';
 
 import { cursor } from 'uci';
@@ -27,35 +27,58 @@ function del_rule_prio(prio) {
 			break;
 }
 
-function rule_present(lines, prio, text) {
+// Строки «ip rule show» с приоритетом prio, пробелы сведены к одному.
+function rules_at(lines, prio) {
 	let found = [];
 	for (let line in lines) {
 		let normalized = replace(trim(line), /[[:space:]]+/g, ' ');
 		if (index(normalized, prio + ':') == 0)
 			push(found, normalized);
 	}
-	return length(found) == 1 && found[0] == prio + ': from all ' + text;
+	return found;
 }
 
-export function ensure_rules(dev) {
+// Правило с приоритетом prio — ровно одно и ровно такое. text — условие и таблица, как их принимает
+// «ip rule add»; «ip rule show» печатает перед ними источник — «from all», если он не задан.
+export function rule_present(lines, prio, text) {
+	let found = rules_at(lines, prio);
+	return length(found) == 1 && found[0] == prio + ': ' + ((index(text, 'from ') == 0) ? '' : 'from all ') + text;
+};
+
+// Правила Трубы по порядку: [ { prio, text } ]; text null — правила быть не должно.
+// addr — адрес Роутера в Туннеле. Правило 1002 — свои пакеты Роутера с этого адреса: ответы на входящие
+// из Туннеля к самому Роутеру и отказы межсетевого экрана (вход зоны truba — REJECT). Метки у них нет
+// (persist стоит в postrouting, а входящий к Роутеру пакет его не проходит), сокет к awg0 не привязан — без
+// правила они уходили бы по main провайдеру с адресом Туннеля в источнике. Транзитных пакетов правило не
+// касается: их источник до NAT — адрес устройства. Без адреса (интерфейс не настроен) правила нет.
+export function rules_wanted(dev, addr) {
+	return [
+		{ prio: C.PRIO_RULE_MARK, text: 'fwmark ' + sprintf('0x%x/0x%x', C.MARK_TUNNEL, C.MARK_MASK) + ' lookup ' + T },
+		{ prio: C.PRIO_RULE_OIF, text: 'oif ' + dev + ' lookup ' + T },
+		{ prio: C.PRIO_RULE_SRC, text: U.is_ipv4(addr) ? 'from ' + addr + ' lookup ' + T : null },
+	];
+};
+
+export function ensure_rules(dev, addr) {
 	let ip = U.ip_cmd();
 	let r = U.run(ip + ' -4 rule show');
 	let lines = r.code == 0 ? split(r.out, '\n') : [];
-	let mark = 'fwmark ' + sprintf('0x%x/0x%x', C.MARK_TUNNEL, C.MARK_MASK) + ' lookup ' + T;
-	let oif = 'oif ' + dev + ' lookup ' + T;
-	if (!rule_present(lines, C.PRIO_RULE_MARK, mark)) {
-		del_rule_prio(C.PRIO_RULE_MARK);
-		system([ ip, '-4', 'rule', 'add', ...split(mark, ' '), 'priority', '' + C.PRIO_RULE_MARK ]);
-	}
-	if (!rule_present(lines, C.PRIO_RULE_OIF, oif)) {
-		del_rule_prio(C.PRIO_RULE_OIF);
-		system([ ip, '-4', 'rule', 'add', ...split(oif, ' '), 'priority', '' + C.PRIO_RULE_OIF ]);
+	for (let w in rules_wanted(dev, addr)) {
+		if (w.text == null) {
+			if (length(rules_at(lines, w.prio)))
+				del_rule_prio(w.prio);
+			continue;
+		}
+		if (rule_present(lines, w.prio, w.text))
+			continue;
+		del_rule_prio(w.prio);
+		system([ ip, '-4', 'rule', 'add', ...split(w.text, ' '), 'priority', '' + w.prio ]);
 	}
 };
 
 export function remove_rules() {
-	del_rule_prio(C.PRIO_RULE_MARK);
-	del_rule_prio(C.PRIO_RULE_OIF);
+	for (let prio in [ C.PRIO_RULE_MARK, C.PRIO_RULE_OIF, C.PRIO_RULE_SRC ])
+		del_rule_prio(prio);
 	system([ U.ip_cmd(), '-4', 'route', 'flush', 'table', T ]);
 };
 
@@ -169,12 +192,13 @@ export function set_rp_filter(dev) {
 	system([ 'sysctl', '-qw', 'net.ipv4.conf.' + replace(dev, '.', '/') + '.rp_filter=0' ]);
 };
 
-// Всё, что зависит от интерфейса Туннеля: правила ip (oif — по его устройству), rp_filter 0 на поднятом
-// устройстве (обратный маршрут к источнику входящих — не через Туннель) и таблица 77. Итог — как у routes.
+// Всё, что зависит от интерфейса Туннеля: правила ip (oif — по его устройству, источник — по его адресу),
+// rp_filter 0 на поднятом устройстве (обратный маршрут к источнику входящих — не через Туннель) и таблица 77.
+// Итог — как у routes.
 export function sync(cfg, tinfo) {
 	cfg ??= F.load();
 	tinfo ??= F.tunnel_info(cfg.iface);
-	ensure_rules(tinfo.device);
+	ensure_rules(tinfo.device, tinfo.address);
 	if (tinfo.up)
 		set_rp_filter(tinfo.device);
 	return routes(cfg, tinfo);
@@ -297,6 +321,59 @@ export function zones_firewall(zones) {
 	c.commit('firewall');
 	system('/etc/init.d/firewall reload >/dev/null 2>&1');
 	return true;
+};
+
+// ---- Пробросы портов из Туннеля ----
+
+// Порт или диапазон из настроек межсетевого экрана («8080», «8000-8100», «8000:8100») — как его пишет
+// nftables; null — пусто или неверно.
+function port_spec(v) {
+	v = replace('' + (v ?? ''), ':', '-');
+	if (!match(v, /^[0-9]{1,5}(-[0-9]{1,5})?$/))
+		return null;
+	let p = map(split(v, '-'), (x) => int(x));
+	if (p[0] < 1 || p[0] > 65535 || (length(p) > 1 && (p[1] < p[0] || p[1] > 65535)))
+		return null;
+	return v;
+}
+
+// Пробросы портов из зоны Туннеля для цепочки hairpin (render.uc): [ { proto, port, to } ] — протокол
+// (tcp или udp), внешний порт или диапазон и куда: «адрес» или «адрес:порт». sections — секции redirect
+// межсетевого экрана. Берутся только те, что fw4 сам отражал бы в домашнюю сеть: включённый DNAT IPv4 из
+// зоны truba с внешним портом и адресом устройства, без «reflection 0». Проброс без внешнего порта (всё на
+// одно устройство) не берётся: он увёл бы к устройству и SSH до самой Трубы. Проброс с src_dip — тоже: он
+// задан для другого адреса назначения. Из двух пробросов одного порта и протокола действует первый, как в fw4.
+// Порты, которые Труба оставляет себе (её SSH и Туннель), исключает сама цепочка (render.uc:hairpin_chains):
+// проброс диапазона с таким портом берётся целиком.
+export function forwards_of(sections) {
+	let out = [], seen = {};
+	for (let s in sections ?? []) {
+		if (s.src != C.FW_ZONE || (s.target ?? 'DNAT') != 'DNAT' || s.enabled == '0' || s.reflection == '0')
+			continue;
+		if (s.family == 'ipv6' || s.src_dip != null || !U.is_ipv4(s.dest_ip))
+			continue;
+		let port = port_spec(s.src_dport), dport = (s.dest_port != null) ? port_spec(s.dest_port) : port;
+		if (port == null || dport == null)
+			continue;
+		let protos = [];
+		for (let p in U.to_list(s.proto ?? 'tcp udp'))
+			for (let w in split(lc(trim(p)), /[[:space:]]+/))
+				push(protos, ...((w == 'tcpudp') ? [ 'tcp', 'udp' ] : [ w ]));
+		for (let proto in uniq(protos)) {
+			if (!(proto in [ 'tcp', 'udp' ]) || seen[proto + ':' + port])
+				continue;
+			seen[proto + ':' + port] = true;
+			push(out, { proto, port, to: s.dest_ip + ((dport != port) ? ':' + dport : '') });
+		}
+	}
+	return out;
+};
+
+export function tunnel_forwards() {
+	let c = cursor(), list = [];
+	c.load('firewall');
+	c.foreach('firewall', 'redirect', (s) => { push(list, s); });
+	return forwards_of(list);
 };
 
 // ---- cron: блок между маркерами ----

@@ -9,6 +9,9 @@ config main 'main'
 	option upnp '0'
 	# Серверы STUN для проверки NAT; пусто — встроенный список (nattest.uc).
 	# list stun 'stun.l.google.com:19302'
+	# Порт SSH Трубы: его пишет импорт router.conf. Без него пробросы из Туннеля
+	# не открываются из домашней сети по IP Трубы.
+	# option vps_ssh_port '40022'
 
 config dns 'dns'
 	list tunnel_upstream 'udp://10.77.77.1'

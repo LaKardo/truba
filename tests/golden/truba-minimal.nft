@@ -67,6 +67,7 @@ table inet truba {
 		type filter hook postrouting priority 300; policy accept;
 		meta nfproto != ipv4 return
 		ct direction original meta mark and 0x0f000000 == 0x04000000 ct mark set ct mark and 0xf0ffffff or 0x04000000 return
+		meta mark and 0x0f000000 == 0x01000000 oifname != "awg0" ct status and confirmed == 0 ct mark set ct mark and 0xf0ffffff or 0x02000000 return
 		meta mark and 0x0f000000 == 0x01000000 ct mark set ct mark and 0xf0ffffff or 0x01000000 return
 		meta mark and 0x0f000000 == 0x02000000 ct mark set ct mark and 0xf0ffffff or 0x02000000 return
 	}
@@ -89,5 +90,18 @@ table inet truba {
 		ip daddr 203.0.113.10 ip dscp != cs0 ip dscp set cs0
 		ip daddr 203.0.113.10 meta mark set meta mark and 0xf0ffffff or 0x02000000 return
 		socket mark and 0x0f000000 == 0x01000000 meta mark set meta mark and 0xf0ffffff or 0x01000000
+	}
+
+	chain hairpin {
+		type nat hook prerouting priority dstnat - 5; policy accept;
+		ip daddr 203.0.113.10 tcp dport 40022 return
+		ip daddr 203.0.113.10 udp dport 51820 return
+		iifname @lan_if ip daddr 203.0.113.10 tcp dport 8080 dnat ip to 192.168.1.20:8081
+		iifname @lan_if ip daddr 203.0.113.10 udp dport 27000-27015 dnat ip to 192.168.1.21
+	}
+
+	chain hairpin_snat {
+		type nat hook postrouting priority srcnat - 5; policy accept;
+		iifname @lan_if oifname @lan_if ct status dnat ct original ip daddr 203.0.113.10 masquerade
 	}
 }

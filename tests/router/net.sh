@@ -27,6 +27,7 @@ check "подсети geoip:ru — в gi_direct4, их число — для «�
 check "bypass4: IP Трубы и подсеть Туннеля" eval 'nft get element inet truba bypass4 "{ 198.51.100.2 }" && in_set bypass4 10.77.77.0/30'
 check "lan_if = br-lan" in_set lan_if br-lan
 check "ip rule: метка Туннеля и oif awg0 → 77" eval 'ip rule show | grep -q "fwmark 0x1000000/0xf000000 lookup 77" && ip rule show | grep -q "oif awg0 lookup 77"'
+check "ip rule: свои пакеты Роутера с адреса Туннеля → 77" eval 'ip rule show | grep -q "from 10.77.77.2 lookup 77"'
 check "table 77: default и подсеть Туннеля через awg0" eval 'ip route show table 77 | grep -q "default dev awg0" && ip route show table 77 | grep -q "10.77.77.0/30 dev awg0"'
 check "dnsmasq → mosdns без кэша, исходные значения сохранены" eval 'uci -q get dhcp.@dnsmasq[0].server | grep -q "127.0.0.1#5335" && [ "$(uci -q get dhcp.@dnsmasq[0].cachesize)" = 0 ] && [ -f /etc/truba/state/dnsmasq.json ]'
 check "status: mosdns — инстанс службы truba" test "$(truba status | jsonfilter -e '@.mosdns')" = true
@@ -92,6 +93,46 @@ ip netns exec vps ucode /repo/tests/lib/tcp_probe.uc server 48081 >/dev/null 2>&
 ucode /repo/tests/lib/udp_probe.uc server 0.0.0.0 40001 local >/dev/null 2>&1 &
 wait_for 10 probe
 check "ответ на входящее уходит обратно в Туннель" probe
+# Вход на сам Роутер из Туннеля закрыт (REJECT), и отказ — пакет самого Роутера с адреса Туннеля. По правилу
+# 1002 он возвращается в Туннель: клиент сразу видит «refused». Без правила отказ уходил по main «в интернет»
+# стенда и терялся, а клиент ждал до тайм-аута.
+refused() { ip netns exec vps ucode /repo/tests/lib/tcp_probe.uc client 203.0.113.77 10.77.77.2 48099 2>&1 | grep -qi refused; }
+check "отказ Роутера на входящее из Туннеля возвращается в Туннель" refused
+# Тот же проброс из домашней сети по IP Трубы. Её адрес — в bypass4: пакет ушёл бы к ней через провайдера и
+# вернулся по Туннелю с адресом самого Роутера в источнике. Роутер сам отдаёт его устройству (цепочки hairpin);
+# правила строит применение по пробросам межсетевого экрана.
+reload "проброс без порта SSH Трубы"
+# Порт SSH Трубы Роутеру неоткуда узнать, кроме router.conf. Пока его нет, пробросы в сеть не отражаются:
+# проброс диапазона с этим портом увёл бы к устройству и SSH до самой Трубы.
+check "hairpin: порт SSH Трубы неизвестен — цепочек нет, в журнале — что сделать" eval \
+	'! nft list chain inet truba hairpin && logread -e truba | grep -q "порт SSH Трубы неизвестен"'
+# Порт приходит импортом router.conf; здесь — прямо в настройки. Второй проброс — диапазон с этим портом внутри.
+uci -q batch <<-'EOF'
+	set truba.main.vps_ssh_port='40022'
+	commit truba
+	set firewall.t_range=redirect
+	set firewall.t_range.src='truba'
+	set firewall.t_range.src_dport='40000-40100'
+	set firewall.t_range.dest='lan'
+	set firewall.t_range.dest_ip='192.168.1.50'
+	set firewall.t_range.dest_port='8080'
+	set firewall.t_range.proto='tcp'
+	set firewall.t_range.target='DNAT'
+	commit firewall
+EOF
+/etc/init.d/firewall reload >/dev/null 2>&1
+reload "проброс: цепочка hairpin"
+hp() { nft list chain inet truba hairpin | grep -q -- "$1"; }
+check "hairpin: порты Трубы (SSH, Туннель) исключены, пробросы и подмена источника — в таблице" eval \
+	'hp "ip daddr 198.51.100.2 tcp dport 40022 return" && hp "ip daddr 198.51.100.2 udp dport 51820 return" && hp "tcp dport 48080 dnat ip to 192.168.1.50:8080" && nft list chain inet truba hairpin_snat | grep -q masquerade'
+check "проброс из домашней сети по IP Трубы — устройство отвечает" lan_tcp 198.51.100.2 48080
+check "проброс диапазона из домашней сети — устройство отвечает" lan_tcp 198.51.100.2 40050
+# Порт SSH Трубы внутри диапазона устройству не отдаётся: пакет идёт к самой Трубе. На стенде путь к ней
+# из домашней сети в этот момент закрыт (ul0 не в зоне wan) — соединения нет; отданный устройству, он бы ответил.
+check "порт SSH Трубы из проброшенного диапазона устройству не отдаётся" eval '! lan_tcp 198.51.100.2 40022'
+uci delete firewall.t_range; uci commit firewall; /etc/init.d/firewall reload >/dev/null 2>&1
+reload "проброс диапазона убран"
+check "после hairpin: входящее из Туннеля по-прежнему получает ответ" probe
 
 # Чужие цепочки (ADR 0011): в postrouting перезаписывают ct mark целиком; в output ставят свою
 # meta mark всему исходящему Роутера, и правило 999 уводит его в свою таблицу — здесь к
@@ -510,6 +551,30 @@ check "Туннель упал: новое имя — ответ mosdns без �
 check "Туннель упал: ping watchdog до Трубы не отклоняется (без метки)" ping -c1 -W2 -I awg0 10.77.77.1
 uci set truba.main.killswitch='0'; uci commit truba; truba routes >/dev/null
 check "Туннель упал, блокировка выкл → без default" eval '! ip route show table 77 | grep -q default'
+# Блокировка выключена, Туннель «не отвечает»: новое соединение «Туннель» идёт провайдеру по main. Его первый
+# пакет записывается в ct mark как «Напрямую»: после возврата Туннеля соединение остаётся на своём пути, а с
+# ct mark «Туннель» ушло бы в Туннель с адресом провайдера в источнике. «Провайдер» стенда — Труба по
+# внешнему адресу через ul0 (на время — в зоне wan), до 1.2.3.4 — через неё. Счётчики — после persist (300).
+uci add_list firewall.@zone[1].device='ul0'; uci commit firewall; /etc/init.d/firewall reload >/dev/null 2>&1
+ip route add 1.2.3.4 via 198.51.100.2 dev ul0
+nft -f - <<-'EOF'
+	table inet t_path {
+		counter direct { }
+		counter tunnel { }
+		chain post {
+			type filter hook postrouting priority 400; policy accept;
+			ip daddr 1.2.3.4 ct mark and 0x0f000000 == 0x02000000 counter name direct
+			ip daddr 1.2.3.4 ct mark and 0x0f000000 == 0x01000000 counter name tunnel
+		}
+	}
+EOF
+path() { nft list counter inet t_path "$1" | awk '/packets/ { print $2 }'; }
+check "блокировка выкл: «Туннель» идёт провайдеру, ответ пришёл" lan_tcp 1.2.3.4 48081
+check "блокировка выкл: соединение записано как «Напрямую», а не «Туннель» (direct $(path direct), tunnel $(path tunnel))" \
+	eval '[ "$(path direct)" -gt 0 ] && [ "$(path tunnel)" = 0 ]'
+nft delete table inet t_path
+ip route del 1.2.3.4 via 198.51.100.2 dev ul0
+uci del_list firewall.@zone[1].device='ul0'; uci commit firewall; /etc/init.d/firewall reload >/dev/null 2>&1
 echo '{"state":"healthy"}' > /var/run/truba/health.json
 uci set truba.main.killswitch='1'; uci set truba.watchdog.enabled='0'; uci commit truba; truba routes >/dev/null
 check "Туннель в порядке → default dev awg0" eval 'ip route show table 77 | grep -q "default dev awg0"'

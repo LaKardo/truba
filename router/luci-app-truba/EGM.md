@@ -67,7 +67,7 @@ OpenWrt-пакет `luci-app-truba` — интерфейс «Службы → Т
 
 - Браузерный UCI: `uci.set/unset/add/remove` в конфигах `truba`, `network`, `firewall`; применение через `uci.save` и `handleSaveApply` LuCI с откатом; сброс — `uci.callLoad` [ui/app.js:setOpt, actions, reset]
 - Изменяющие вызовы ubus: `truba.update_lists`, `truba.rollback_lists`, `truba.nat_test`, `truba.tunnel_test` [common.js; view/truba/rules.js, tunnel.js, inbound.js]
-- Импорт `router.conf`: пересоздаёт интерфейс AmneziaWG и все секции `amneziawg_<iface>`, добавляет интерфейс в зону межсетевого экрана [awg.js:applyConf]
+- Импорт `router.conf`: пересоздаёт интерфейс AmneziaWG и все секции `amneziawg_<iface>`, добавляет интерфейс в зону межсетевого экрана; порт SSH Трубы из строки `# TrubaSSHPort = N` пишет в `truba.main.vps_ssh_port`, а без этой строки опцию снимает [awg.js:parseConf, awg.js:applyConf]
 - `localStorage['truba.span']` — выбранный период графика скорости [view/truba/overview.js:SPAN_KEY]
 - Скачивание журнала как `truba-log-YYYYMMDD-HHMM.txt` [view/truba/log.js:download]
 - DOM: Shadow DOM, `MutationObserver` на `html`/`body`, слушатели `matchMedia` и `transitionend`, `ResizeObserver` графиков, регистрация в `poll` LuCI [ui/app.js:mount, ui/chart.js:usePlot]
