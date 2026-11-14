@@ -290,6 +290,7 @@ function DevicesCard({ devices }) {
 function InfoCard({ st }) {
 	const { html } = app.lib;
 	const l = st.lists || {}, n = st.nat, up = st.upnp || {}, dc = st.dns_cache;
+	const cachePct = common.pctOf(dc?.hit, dc?.query);
 	const wdOn = !!st.watchdog;
 	const auto = common.get('lists', 'auto_update');
 
@@ -314,7 +315,7 @@ function InfoCard({ st }) {
 				<div class="lines mu">
 					<div>${!st.routing ? _('not used: routing is off')
 						: (st.mosdns ? _('mosdns running') : _('mosdns not running'))
-							+ (dc?.query ? ' · ' + _('%d%% from cache').format(Math.round(dc.hit * 100 / dc.query)) : '')}</div>
+							+ (cachePct != null ? ' · ' + _('%d%% from cache').format(cachePct) : '')}</div>
 					<div>${!st.routing ? NBSP : l.updating ? _('update in progress')
 						: !auto ? _('automatic update is off') : _('Next check: %s').format(common.fmtTime(l.next))}</div>
 				</div>

@@ -26,17 +26,17 @@
 - `VPS_TUN=10.77.77.1`, `RTR_TUN=10.77.77.2` (/30) [install-vps.sh:55-56]
 - `MTU_MAX=1380`, `MTU_MIN=1280`, `TUN_HDR=60`, `S4_MAX=27`, `MTU_STEAM=1328` [install-vps.sh:66-76]
 - `CONFIRM_TIMEOUT=120`, `ROLLBACK_DELAY=180`, `APT_WAIT=600` [install-vps.sh:139-146]
-- `PPA_FPR=75C9DD72C799870E310542E24166F2C257290828` — отпечаток ключа PPA `amnezia/ppa` [install-vps.sh:611]
+- `PPA_FPR=75C9DD72C799870E310542E24166F2C257290828` — отпечаток ключа PPA `amnezia/ppa` [install-vps.sh:607]
 - `STATE_KEYS` — белый список ключей `pipe.env`/`owned.env` [install-vps.sh:271-273]
 
 ### Основные функции
 
-- Генерация: `gen_keys`, `gen_params`, `gen_i1`, `refresh_i1`, `awg_conf`, `router_conf`, `write_awg_conf`, `write_router_conf` [install-vps.sh:830-1051]
-- nftables: `write_nft`, `write_pipe_vars_sh`, `snat_ports_off_awg`, `write_pipe_unit` [install-vps.sh:1058-1222]
-- Транзакция: `txn_begin`, `txn_restore`, `txn_recover`, `txn_commit`, `txn_on_exit`, `rollback_timer_start`, `rollback_timer_stop` [install-vps.sh:1597-1722]
-- SSH: `choose_ssh_port`, `ssh_apply`, `ssh_validate_effective`, `confirm_ssh`, `rollback_ssh`, `ssh_restart` [install-vps.sh:1499-1595, 1774]
-- DNS: `unbound_forward_lines`, `write_unbound_conf`, `setup_unbound`, `unbound_status`, `unbound_foreign_forwards` [install-vps.sh:1365-1475]
-- Система: `write_sysctl`, `sysctl_overrides`, `wan_qdisc`, `setup_awg_service`, `awg_apply_live`, `setup_fail2ban`, `setup_unattended`, `setup_journal` [install-vps.sh:1224-1771]
+- Генерация: `gen_keys`, `gen_params`, `gen_i1`, `refresh_i1`, `awg_conf`, `router_conf`, `write_awg_conf`, `write_router_conf` [install-vps.sh:825-1046]
+- nftables: `write_nft`, `write_pipe_vars_sh`, `snat_ports_off_awg`, `write_pipe_unit` [install-vps.sh:1053-1213]
+- Транзакция: `txn_begin`, `txn_restore`, `txn_recover`, `txn_commit`, `txn_on_exit`, `rollback_timer_start`, `rollback_timer_stop` [install-vps.sh:1591-1704]
+- SSH: `choose_ssh_port`, `ssh_apply`, `ssh_validate_effective`, `confirm_ssh`, `rollback_ssh`, `ssh_restart` [install-vps.sh:1490-1575, 1757-1766]
+- DNS: `unbound_forward_lines`, `write_unbound_conf`, `setup_unbound`, `unbound_status`, `unbound_foreign_forwards` [install-vps.sh:1371-1476]
+- Система: `write_sysctl`, `sysctl_overrides`, `wan_qdisc`, `setup_awg_service`, `awg_apply_live`, `setup_fail2ban`, `setup_unattended`, `setup_journal` [install-vps.sh:1233-1748]
 
 ## Invariants
 
@@ -52,7 +52,7 @@
 - Повторный `install` не меняет `AWG_PROTO`, ключи и параметры AWG (кроме дозаполнения `I1`/`I1_SRV` через `refresh_i1`, если `AWG_PROTO ≥ 2` и `I1_SRV` пуст); только `rotate-keys` поднимает протокол до `AWG_PROTO_NOW` [install-vps.sh:cmd_install, refresh_i1, cmd_rotate_keys]
 - Первая установка отказывается перезаписать чужой `awg0.conf` без первой строки `# Труба:` [install-vps.sh:check_foreign_awg_conf]
 - Пока порт SSH не подтверждён (`SSH_CONFIRMED != 1`) и нет `--no-confirm`, требуется `/dev/tty` и реальный файл скрипта (`bash <(curl …)` отвергается); подтверждение — только литерал `yes` за 120 с. Повторный `install` с уже подтверждённым портом этого не требует [install-vps.sh:cmd_install, confirm_ssh]
-- Таймер отката запускается только в окне подтверждения SSH (порт не подтверждён, есть `SSH_FALLBACK`, нет `--no-confirm`): он запускает копию скрипта из `/etc/truba/txn/install-vps.sh` через `systemd-run --on-active=180s`, поэтому откат сработает, даже если установщик убит вместе с SSH-сессией. При `--no-confirm` и в `rotate-keys` защищает только EXIT-trap [install-vps.sh:cmd_install, rollback_timer_start]
+- Таймер отката запускается только в окне подтверждения SSH (порт не подтверждён, есть запасные порты — `SSH_FALLBACK` или те, что sshd слушает сейчас, — и нет `--no-confirm`): он запускает копию скрипта из `/etc/truba/txn/install-vps.sh` через `systemd-run --on-active=180s`, поэтому откат сработает, даже если установщик убит вместе с SSH-сессией. При `--no-confirm` и в `rotate-keys` защищает только EXIT-trap [install-vps.sh:cmd_install, rollback_timer_start]
 - EXIT-trap `txn_on_exit` откатывает транзакцию при `TXN_ACTIVE=1` в главном процессе; HUP/INT/TERM транслируются в exit 129/130/143 [install-vps.sh:txn_on_exit, main]
 - Изменяющие команды (`install`, `rotate-keys`, `random-trailers`, `uninstall`, `repair-module`) берут `flock -n` на `/run/lock/truba-installer.lock` (иначе `die`) и сначала выполняют `txn_recover`, если остался `TXN_DIR`; `txn-rollback` ждёт замок до 60 с и продолжает без него [install-vps.sh:main, txn_recover]
 - `sysctl` и qdisc WAN применяются до `txn_begin` и не откатываются; конфиг unbound пишется в `install_packages` до `txn_begin`, а `setup_unbound`, fail2ban, unattended и journald выполняются после `txn_commit` [install-vps.sh:cmd_install, install_packages]

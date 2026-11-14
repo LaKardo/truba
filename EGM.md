@@ -25,7 +25,7 @@
 ## Global Invariants
 
 - Контракт между сторонами — `router.conf` от Трубы: адреса `10.77.77.1/30` и `10.77.77.2`, порт и параметры AWG на обеих сторонах должны совпадать; `RandomTrailers` и смена протокола требуют повторного импорта [vps/install-vps.sh:router_conf, write_router_conf; router/luci-app-truba awg.js:applyConf]
-- Версии `truba` и `luci-app-truba` движутся парой: `LUCI_EXTRA_DEPENDS:=truba (>=1.2.0-r8)`; оба `PKG_VERSION:=1.2.0`, `PKG_RELEASE:=9` [router/truba/Makefile, router/luci-app-truba/Makefile]
+- Версии `truba` и `luci-app-truba` движутся парой: `LUCI_EXTRA_DEPENDS:=truba (>=1.2.0-r8)`; оба `PKG_VERSION:=1.2.0`, `PKG_RELEASE:=10` [router/truba/Makefile, router/luci-app-truba/Makefile]
 - Версия AmneziaWG в фиде (`router/awg/SOURCES`) должна совпадать с версией из PPA `amnezia/ppa` на Трубе [router/awg/SOURCES; vps/install-vps.sh:awg_version]
 - Пути, имена наборов, метки и схема настроек определяются один раз в `const.uc`/`conf.uc` службы; shell, интерфейс и тесты получают их через `truba env` и `truba.schema` (ADR 0015) [router/truba/files/usr/share/ucode/truba/const.uc, conf.uc]
 - Маршрутизация через Трубу — только IPv4; IPv6 внутри сети не трогается, выход в интернет по IPv6 закрывается только зонам Маршрутизации правилом REJECT (ADR 0005, 0016) [router/truba net.uc:no6_rule, dns.uc:mosdns]

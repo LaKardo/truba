@@ -637,7 +637,7 @@ async function waitApply(page) {
 		await settled(page);
 	}
 
-	// Серверы DNS (kit.UpstreamList): запрос идёт ко всем серверам пути сразу — порядок не важен.
+	// Серверы DNS (kit.UpstreamList): первый — основной, следующий — резерв; новый — в конец, порядок меняет кнопка «вверх».
 	const ups = (card) => page.evaluate((card) => {
 		const r = document.querySelector('.truba-root').shadowRoot, c = r.querySelector(`.card.${card}`);
 		const lis = [ ...(c?.querySelectorAll('.ups li') || []) ];
@@ -701,7 +701,8 @@ async function waitApply(page) {
 	ut = await ups('ups-tunnel');
 	result(/already in the list/.test(ut.err) && ut.rows.length == effUp('tunnel_upstream').length, '«DNS»: повтор адреса — ошибка', JSON.stringify(ut));
 	await typeUp('ups-tunnel', '');
-	// Без списка в настройках — умолчание; удалить сервер и вернуть его (в конец) — ноль изменений.
+	// Без списка в настройках — умолчание. Удалить первый сервер и вернуть его (в конец) — порядок другой, и это
+	// изменение: основным стал прежний резерв. Поднять его обратно — ноль изменений, опция не пишется.
 	// uci commit на стенде сам запускает применение: ждать его, иначе позднее применение засчиталось бы следующему шагу.
 	t0 = await time();
 	await setUp('tunnel_upstream', null);
@@ -713,8 +714,34 @@ async function waitApply(page) {
 	await typeUp('ups-tunnel', ut.rows[0]);
 	await addUp('ups-tunnel');
 	const ut2 = await ups('ups-tunnel');
-	result(ut.def && JSON.stringify(ut.rows) == JSON.stringify(dnsSch.tunnel_upstream.def) && ut2.rows.length == ut.rows.length && !/Unapplied changes/.test(ut2.bar),
-		'«DNS»: умолчание — удалить сервер и вернуть — ноль изменений', JSON.stringify({ ut, ut2 }));
+	// Поднять последнюю строку и дождаться порядка want.
+	const upLast = async (card, want) => {
+		await tap(`.card.${card} .ups li:last-child [data-act="up-upstream"]`);
+		await page.waitForFunction((card, want) => JSON.stringify([ ...document.querySelector('.truba-root').shadowRoot
+			.querySelectorAll(`.card.${card} .ups li code`) ].map((c) => c.textContent)) == want, { timeout: 3000 }, card, JSON.stringify(want)).catch(() => {});
+	};
+	const swapLast = (rows) => [ ...rows.slice(0, -2), rows[rows.length - 1], rows[rows.length - 2] ];
+	await upLast('ups-tunnel', swapLast(ut2.rows));
+	const ut3 = await ups('ups-tunnel');
+	result(ut.def && JSON.stringify(ut.rows) == JSON.stringify(dnsSch.tunnel_upstream.def) && ut.rows.length == 2 &&
+		JSON.stringify(ut2.rows) == JSON.stringify(swapLast(ut.rows)) && /Unapplied changes: 1/.test(ut2.bar) &&
+		JSON.stringify(ut3.rows) == JSON.stringify(ut.rows) && ut3.def && !/Unapplied changes/.test(ut3.bar),
+		'«DNS»: умолчание — сервер, возвращённый в конец, — изменение; поднять его выше — ноль изменений', JSON.stringify({ ut, ut2, ut3 }));
+	// Порядок значим: поднятый резервный сервер становится основным. Это одно изменение, обе строки с точкой
+	// «изменено», и «Применить» записывает список в новом порядке.
+	await upLast('ups-tunnel', swapLast(ut.rows));
+	const ut4 = await ups('ups-tunnel');
+	const roles = await page.evaluate(() => [ ...document.querySelector('.truba-root').shadowRoot
+		.querySelectorAll('.card.ups-tunnel .ups-role') ].map((e) => e.textContent));
+	result(JSON.stringify(ut4.rows) == JSON.stringify(swapLast(ut.rows)) && ut4.warn == 2 && /Unapplied changes: 1/.test(ut4.bar) &&
+		roles[0] == 'primary server' && roles.length == 2 && roles[1] == 'fallback server',
+		'«DNS»: кнопка «вверх» меняет порядок — основной и резерв, одно изменение', JSON.stringify({ ut4, roles }));
+	t0 = await time();
+	await tap('.changes [data-act="apply"]');
+	await waitApply(page);
+	result(await applied(t0, async (st) => st.mosdns && !(st.applied.invalid || []).length &&
+		JSON.stringify([].concat(await uciUp('tunnel_upstream') || [])) == JSON.stringify(swapLast(ut.rows))),
+		'«DNS»: новый порядок серверов Туннеля — «Применить» дошло до службы');
 	t0 = await time();
 	await setUp('tunnel_upstream', prevUp.tunnel_upstream);
 	await applied(t0, () => true);

@@ -310,11 +310,37 @@ function upstreamError(v) {
 	return ok ? null : _('Expected https://…, tls://…, quic://…, h3://…, tcp://… or udp://… (optionally «@IP»)');
 }
 
+// Серверы DNS одного пути служба опрашивает по порядку: первый — основной, следующий — резерв через
+// 100 мс или при ошибке (dns.uc, upstream_group). Поэтому списки равны, только если совпал и порядок.
+function sameOrder(a, b) {
+	return a.length == b.length && a.every((x, i) => x === b[i]);
+}
+
+// Сервер i — на место выше: меняется местами с предыдущим. Первый и номер вне списка — тот же список.
+function moveUp(list, i) {
+	if (!Number.isInteger(i) || i < 1 || i >= list.length)
+		return list;
+	const out = list.slice();
+	out[i - 1] = list[i];
+	out[i] = list[i - 1];
+	return out;
+}
+
+// Доля n от all в целых процентах; null — доли нет: делитель не больше нуля или счётчика нет. Служба отдаёт
+// только те счётчики кэша, чьи строки нашла в метриках mosdns (state.uc, dns_cache): без проверки
+// пропавший счётчик дал бы «NaN%».
+function pctOf(n, all) {
+	return (all > 0 && Number.isFinite(n)) ? Math.round(n * 100 / all) : null;
+}
+
 // Состояние mosdns и плитки кэша для «DNS». Счётчики — с запуска mosdns: hit — ответы из кэша вместе
-// с истёкшими, lazy_hit — истёкшие. Без данных (маршрутизация выкл, mosdns стоит, нет API) — «—».
+// с истёкшими, lazy_hit — истёкшие. Без данных (маршрутизация выкл, mosdns стоит, нет API, нет счётчика) — «—».
 function dnsStats(st) {
 	const dc = (st.routing && st.mosdns) ? st.dns_cache : null;
-	const pct = (n, all) => all ? Math.round(n * 100 / all) + '%' : '—';
+	const pct = (n, all) => {
+		const p = pctOf(n, all);
+		return (p == null) ? '—' : p + '%';
+	};
 	const [ level, text ] = !st.routing ? [ '', _('not used: routing is off') ]
 		: !st.mosdns ? [ 'err', _('mosdns not running') ] : [ 'ok', _('mosdns running') ];
 	return {
@@ -890,7 +916,7 @@ return baseclass.extend({
 	loadSchema, schema, get, savedGet, fieldError, handshakeLevel, callDevices, callDevicesLite, callConnections,
 	devRate, devShare, devActive, deviceIndex, deviceSections, deviceSection, deviceName, devicePolicy, normMac, connLabel,
 	ruleKey, ruleOf, ruleSections, ruleActions, ruleAction, savedRuleActions, catRows, catsDue, listsDue, listsKick, listsSummary, checkErrorText,
-	runNatTest, runTunnelTest, parseLog, logShown, upstreamError, dnsStats, natSummary, upnpState, upnpRows,
+	runNatTest, runTunnelTest, parseLog, logShown, upstreamError, sameOrder, moveUp, pctOf, dnsStats, natSummary, upnpState, upnpRows,
 	forwardRows, fwEnabled, portError, forwardErrors, zoneOfIp, forwardValues, natPick,
 	ACTION_LABELS, REASON_LABELS, VIA_LABELS, WARNINGS, NAT_ERRORS, CHECK_ERRORS, UPNP_MISSING, NBSP, TABS,
 	fmtBytes, fmtRate, fmtAge, fmtTime, fmtDate, fmtNum, missingText,

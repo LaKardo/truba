@@ -362,7 +362,7 @@ if (!existsSync(stylePath)) {
 // Иконки Lucide: у каждой, что берут компоненты, есть разметка.
 const icons = loadModule('truba/ui/icons.js', { baseclass });
 if (icons)
-	for (const n of [ 'circle-check', 'triangle-alert', 'circle-x', 'arrow-right', 'wifi-off', 'pencil', 'file-up', 'download', 'x', 'plus' ])
+	for (const n of [ 'circle-check', 'triangle-alert', 'circle-x', 'arrow-right', 'arrow-up', 'wifi-off', 'pencil', 'file-up', 'download', 'x', 'plus' ])
 		check(typeof icons[n] === 'string' && /<(path|circle|line|polyline|rect)/.test(icons[n]), `icons.js: иконка ${n}`);
 
 // Верх шкалы графика скорости и толщина веток схемы потоков.
@@ -487,6 +487,14 @@ if (cdev) {
 	check([ 'htps://1.1.1.1/dns-query', '1.1.1.1/dns-query', 'udp://a b', 'https://x/y@',
 		'udp://1.1.1.1:70000', 'tls://host:0', 'udp://[:::1]:53', 'tls://host@999.1.1.1' ].every((u) => /Expected https:/.test(UE(u) || '')),
 		'common.upstreamError: опечатка в схеме, путь без схемы, пробел — ошибка');
+	// Порядок серверов значим (первый — основной): тот же набор в другом порядке — другой список.
+	const SO = (a, b) => cdev.sameOrder?.(a, b), MU = (l, i) => JSON.stringify(cdev.moveUp?.(l, i));
+	check(SO([ 'a', 'b' ], [ 'a', 'b' ]) === true && SO([ 'a', 'b' ], [ 'b', 'a' ]) === false && SO([ 'a' ], [ 'a', 'b' ]) === false && SO([], []) === true,
+		'common.sameOrder: равны только списки с тем же порядком');
+	const abc = [ 'a', 'b', 'c' ];
+	check(MU(abc, 1) === '["b","a","c"]' && MU(abc, 2) === '["a","c","b"]' && MU(abc, 0) === '["a","b","c"]' && MU(abc, 3) === '["a","b","c"]' &&
+		JSON.stringify(abc) === '["a","b","c"]' && SO(cdev.moveUp?.(cdev.moveUp?.([ 'a', 'b' ], 1) || [], 1) || [], [ 'a', 'b' ]) === true,
+		'common.moveUp: строка меняется местами с предыдущей, исходный список цел, два нажатия на второй из двух возвращают порядок');
 	// Плитки состояния mosdns: без данных — «—», а не NaN% или 0%.
 	const DS = (st) => cdev.dnsStats?.(st) || { tiles: [] }, vals = (s) => s.tiles.map((t) => t[1]).join(' ');
 	check(DS({ routing: false }).level === '' && vals(DS({ routing: false })) === '— — — —', 'common.dnsStats: маршрутизация выкл — «—»');
@@ -496,6 +504,12 @@ if (cdev) {
 	check(vals(dz) === '— — 0% 0' && dz.note === 'no queries yet', `common.dnsStats: запросов ещё нет (${vals(dz)})`);
 	const dn = DS({ routing: true, mosdns: true, dns_cache: { query: 200, hit: 150, lazy_hit: 10, size: 70000, max: 65536 } });
 	check(dn.level === 'ok' && vals(dn) === '75% 5% 100% 200' && dn.note === null, `common.dnsStats: доли, заполнение не больше 100 % (${vals(dn)})`);
+	// Служба отдаёт только счётчики, найденные в метриках mosdns: без счётчика — «—», остальные плитки целы.
+	const dm = DS({ routing: true, mosdns: true, dns_cache: { query: 100, hit: 70, max: 1024 } });
+	check(vals(dm) === '70% — — 100' && dm.note === null, `common.dnsStats: нет lazy_hit и size — «—», а не NaN% (${vals(dm)})`);
+	const PO = (n, all) => cdev.pctOf?.(n, all);
+	check(PO(1, 3) === 33 && PO(0, 5) === 0 && PO(5, 0) === null && PO(undefined, 5) === null && PO(null, 5) === null && PO(NaN, 5) === null,
+		'common.pctOf: целые проценты; делитель ноль или нет числа — null');
 
 	// «Входящие»: итог «Проверки NAT» — без проверки и при ошибке «—», а не undefined:NaN.
 	const NS = (n, w) => cdev.natSummary?.(n, w) || { rows: [], servers: [] };

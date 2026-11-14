@@ -225,9 +225,11 @@ function Fold({ title, open, children }) {
 	return html`<details class="fold" open=${!!open}><summary>${title}</summary><div class="fold-b">${children}</div></details>`;
 }
 
-// Список DNS-серверов опции truba.sec.name: добавить, удалить, проверка адреса как у службы.
-// Запрос идёт ко всем серверам пути сразу — порядка нет. Без списка в настройках действует умолчание схемы.
-// Список, равный сохранённому (без учёта порядка), — не изменение; равный умолчанию при пустых настройках —
+// Список DNS-серверов опции truba.sec.name: добавить, удалить, поднять выше, проверка адреса как у службы.
+// Запрос идёт к первому серверу, следующий — резерв через 100 мс или при ошибке (dns.uc, upstream_group):
+// порядок значим. Новый сервер встаёт в конец, кнопка «вверх» меняет строку местами с предыдущей; у верных
+// адресов подпись — основной или резерв. Без списка в настройках действует умолчание схемы.
+// Список, равный сохранённому вместе с порядком, — не изменение; равный умолчанию при пустых настройках —
 // снова без опции. Последний верный сервер не удаляется: без верных служба молча взяла бы умолчание.
 // Адрес добавляется по Enter и «Add server», а набранный верный и не добавленный — при сохранении (app.flush):
 // «Сохранить и применить» сразу после набора его не теряет. При уходе из поля страница не меняется — иначе
@@ -253,9 +255,8 @@ function UpstreamList({ sec, name, label }) {
 	const err = !tried ? null : vErr || (dup ? _('This server is already in the list') : null);
 	useEffect(() => { app.invalid(key, !!vErr); }, [ key, !!vErr ]);
 	useEffect(() => () => app.invalid(key, false), [ key ]);
-	const sameSet = (a, b) => a.length == b.length && a.every((x) => b.includes(x));
-	// Набор, равный сохранённому, пишется самим сохранённым значением — app.set сравнит его как есть и снимет правку.
-	const write = (arr) => app.set('truba', sec, name, sameSet(arr, base) ? (saved.length ? savedRaw : null) : arr);
+	// Список, равный сохранённому, пишется самим сохранённым значением — app.set сравнит его как есть и снимет правку.
+	const write = (arr) => app.set('truba', sec, name, common.sameOrder(arr, base) ? (saved.length ? savedRaw : null) : arr);
 	// quiet — при сохранении: неверное там не показывается (его держит проверка «Применить»), повтор просто убирается.
 	const add = (quiet) => {
 		if (!v)
@@ -292,16 +293,32 @@ function UpstreamList({ sec, name, label }) {
 				(bs[Math.min(i, bs.length - 1)] || inp.current)?.focus();
 			});
 	};
+	// Строка i — на место выше. Фокус — на кнопку «вверх» той же строки на новом месте; у первой строки кнопки
+	// нет — тогда на кнопку строки, которую она сместила: повторное нажатие возвращает прежний порядок.
+	const up = (i, ev) => {
+		const had = ev.currentTarget == ev.currentTarget.getRootNode().activeElement;
+		write(common.moveUp(rows, i));
+		if (had)
+			requestAnimationFrame(() => {
+				const bs = [ ...(ul.current?.querySelectorAll('[data-act="up-upstream"]') || []) ];
+				(bs[Math.max(0, i - 2)] || inp.current)?.focus();
+			});
+	};
 	const lone = _('At least one valid server is needed');
+	// Основной — первый верный адрес: неверные служба пропускает. С одним сервером подпись не нужна.
+	const first = rows.findIndex((x) => !common.upstreamError(x));
 	// Ключ строки — адрес и номер его повтора: удаление не переносит фокус и точки на соседнюю строку.
 	const seen = {};
 	return html`<div class="ups">
 		<ul aria-label=${label} ref=${ul}>${rows.map((u, i) => {
-			const n = seen[u] = (seen[u] || 0) + 1, off = !keeps(i);
+			const n = seen[u] = (seen[u] || 0) + 1, off = !keeps(i), bad = common.upstreamError(u);
 			return html`<li key=${u + '#' + n}>
-				<span class="ups-a"><code>${u}</code>${common.upstreamError(u)
-					? html`<em class="err"><${Dot} level="err" />${_('invalid address, not used')}</em>` : ''}</span>
-				${!common.upstreamError(u) && !base.includes(u) ? html`<${Dot} level="warn" label=${_('changed, not applied yet')} />` : ''}
+				<span class="ups-a"><code>${u}</code>${bad
+					? html`<em class="err"><${Dot} level="err" />${_('invalid address, not used')}</em>`
+					: rows.length > 1 ? html`<small class="ups-role">${i == first ? _('primary server') : _('fallback server')}</small>` : ''}</span>
+				${!bad && base[i] !== u ? html`<${Dot} level="warn" label=${_('changed, not applied yet')} />` : ''}
+				${i > 0 ? html`<button type="button" class="btn ic" data-act="up-upstream" title=${_('Move up', 'truba')}
+					aria-label=${_('Move %s up').format(u)} onClick=${(ev) => up(i, ev)}><${Icon} name="arrow-up" /></button>` : ''}
 				<button type="button" class="btn ic" data-act="remove-upstream" disabled=${off} title=${off ? lone : _('Remove', 'truba')}
 					aria-label=${off ? '%s — %s'.format(_('Remove %s').format(u), lone) : _('Remove %s').format(u)}
 					onClick=${(ev) => remove(i, ev)}><${Icon} name="x" /></button>
