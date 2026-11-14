@@ -69,7 +69,12 @@ wait_for 20 wan_up
 
 sh /etc/uci-defaults/90-truba
 sh /etc/uci-defaults/luci-truba
-uci set truba.main.routing='1'; uci set truba.watchdog.enabled='0'; uci commit truba
+uci set truba.main.routing='1'; uci set truba.watchdog.enabled='0'
+# Без проверки Наборов правил по расписанию: прогон, попавший на начало часа, получал от cron update-lists,
+# тот скачивал свежие списки поверх списков стенда, и «Откатить» находил предыдущую версию, которой на
+# стенде быть не должно (browser.js ждёт «No previous version»). «Обновить сейчас» проверяется кнопкой.
+uci set truba.lists.auto_update='0'
+uci commit truba
 # Argon в образе стенда — для снимков в другой теме; при установке он делает себя темой по умолчанию.
 # Проверки идут в Bootstrap, другие темы browser.js включает сам.
 uci set luci.main.mediaurlbase='/luci-static/bootstrap'; uci commit luci

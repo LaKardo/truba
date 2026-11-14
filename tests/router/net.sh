@@ -559,16 +559,16 @@ uci add_list firewall.@zone[1].device='ul0'; uci commit firewall; /etc/init.d/fi
 ip route add 1.2.3.4 via 198.51.100.2 dev ul0
 nft -f - <<-'EOF'
 	table inet t_path {
-		counter direct { }
-		counter tunnel { }
+		counter p_direct { }
+		counter p_tunnel { }
 		chain post {
 			type filter hook postrouting priority 400; policy accept;
-			ip daddr 1.2.3.4 ct mark and 0x0f000000 == 0x02000000 counter name direct
-			ip daddr 1.2.3.4 ct mark and 0x0f000000 == 0x01000000 counter name tunnel
+			ip daddr 1.2.3.4 ct mark and 0x0f000000 == 0x02000000 counter name p_direct
+			ip daddr 1.2.3.4 ct mark and 0x0f000000 == 0x01000000 counter name p_tunnel
 		}
 	}
 EOF
-path() { nft list counter inet t_path "$1" | awk '/packets/ { print $2 }'; }
+path() { nft list counter inet t_path "p_$1" | awk '/packets/ { print $2 }'; }
 check "блокировка выкл: «Туннель» идёт провайдеру, ответ пришёл" lan_tcp 1.2.3.4 48081
 check "блокировка выкл: соединение записано как «Напрямую», а не «Туннель» (direct $(path direct), tunnel $(path tunnel))" \
 	eval '[ "$(path direct)" -gt 0 ] && [ "$(path tunnel)" = 0 ]'
