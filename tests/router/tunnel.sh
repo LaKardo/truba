@@ -107,6 +107,12 @@ echo '{"state":"healthy","since":1000,"last_check":1000,"interval":10,"probes":[
 kill "$(pgrep -f 'truba watchdo[g]')"   # procd перезапустит через 5 с
 fresh() { [ "$(health '@.since')" != 1000 ]; }
 check "устаревшая запись: «в порядке с» заново, окно проверок не взято" eval 'wait_for 20 fresh && [ "$(health "@.probes[*]" | wc -l)" -le 1 ]'
+# Гонка при загрузке: применение построило таблицу Туннеля до его подъёма (Аварийная блокировка), а watchdog
+# стартует с «в порядке» — смены состояния нет. Таблицу он сверяет первым же циклом.
+ip route replace blackhole default table 77
+kill "$(pgrep -f 'truba watchdo[g]')"   # procd перезапустит через 5 с
+t77_tunnel() { ip route show table 77 | grep -q '^default dev awg0'; }
+check "запуск watchdog: таблица Туннеля, построенная до его подъёма, пересчитана первым циклом" wait_for 20 t77_tunnel
 
 section "журнал: watchdog и интерфейс Туннеля"
 # Источники «Журнала» различаются по тегу строки: события watchdog — со своим тегом, строки

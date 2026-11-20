@@ -445,7 +445,10 @@ function apply_config(res, prev) {
 		DNS.dnsmasq_restore();
 	res.mosdns = cfg.routing;
 
-	res.table = N.sync(cfg, tinfo);
+	// Состояние Туннеля — заново: tinfo прочитан в начале, а применение после загрузки Роутера идёт десятки
+	// секунд. Туннель, поднявшийся за это время, остался бы под Аварийной блокировкой: его событие hotplug
+	// прошло, пока applied.json ещё не было.
+	res.table = N.sync(cfg);
 	N.cron_set(cfg.routing && cfg.lists.auto_update);
 	N.upnp_set(cfg.upnp, cfg.iface, vps);
 	// И при выключенной Маршрутизации: перенаправления и правила IPv6 следуют за выбранными зонами.
