@@ -7,7 +7,7 @@
 Две стороны и Туннель между ними:
 
 - **Труба** (VPS, Ubuntu 24.04) — `vps/install-vps.sh`. nftables `ip truba_nat` пробрасывает весь публичный IP (кроме порта SSH и порта AWG) на адрес Роутера в Туннеле `10.77.77.2`; `inet truba_filter` закрывает всё остальное. На `10.77.77.1` работает unbound (DoT к Cloudflare, адреса 1.1.1.1 и 1.0.0.1) как первый DNS-сервер «Туннеля» для Роутера (ADR 0013). Состояние — в `/etc/truba/pipe.env`, для Роутера генерируется `/root/truba/router.conf`.
-- **Роутер** (ImmortalWrt) — пакет `router/truba`. Служба строит таблицу nftables `inet truba`: метки `0x01000000` (Туннель), `0x02000000` (Напрямую), `0x04000000` (входящие) в маске `0x0f000000` (ADR 0011), правила `ip -4 rule` priority 1000/1001/1002 ведут в таблицу 77, где маршрут по умолчанию — Туннель, blackhole или ничего (`net.uc:set_table`); подъём и падение Туннеля — полное применение настроек через `truba hotplug` (ADR 0009). mosdns на `127.0.0.1:5335` классифицирует домены по Категориям geosite и наполняет наборы `gs_tunnel4`/`gs_direct4` (ADR 0003, 0007); dnsmasq перенаправляется на него. Контроль Туннеля, статистика скорости и устройств живут в RAM (ADR 0010, 0018). Всё доступно через ubus `truba` (ADR 0008).
+- **Роутер** (ImmortalWrt или OpenWrt) — пакет `router/truba`. Служба строит таблицу nftables `inet truba`: метки `0x01000000` (Туннель), `0x02000000` (Напрямую), `0x04000000` (входящие) в маске `0x0f000000` (ADR 0011), правила `ip -4 rule` priority 1000/1001/1002 ведут в таблицу 77, где маршрут по умолчанию — Туннель, blackhole или ничего (`net.uc:set_table`); подъём и падение Туннеля — полное применение настроек через `truba hotplug` (ADR 0009). mosdns на `127.0.0.1:5335` классифицирует домены по Категориям geosite и наполняет наборы `gs_tunnel4`/`gs_direct4` (ADR 0003, 0007); dnsmasq перенаправляется на него. Контроль Туннеля, статистика скорости и устройств живут в RAM (ADR 0010, 0018). Всё доступно через ubus `truba` (ADR 0008).
 - **Интерфейс** — пакет `router/luci-app-truba`. Семь вкладок LuCI на Preact в Shadow DOM (ADR 0017), читают только ubus `truba.*`, схему берут из `truba.schema` (ADR 0015), правят UCI и применяют через LuCI с откатом.
 
 Синхронные границы: LuCI → rpcd → `truba-api.uc` → `S.status()`/CLI `truba …`; `truba apply` → `nft -f`, `ip`, UCI `dhcp`/`firewall`. Асинхронные: `nat_test`, `tunnel_test`, `update_lists` стартуют фоновый CLI и опрашиваются через `*_result`/`lists`; procd-экземпляры `stats` (всегда), `mosdns` и `watchdog` (по настройкам); cron `truba update-lists` ежечасно; на Трубе — таймер отката `truba-rollback` в окне подтверждения SSH и `truba-pipe.service` перед юнитом AWG.
@@ -20,7 +20,7 @@
   - router/luci-app-truba: [./router/luci-app-truba/EGM.md](./router/luci-app-truba/EGM.md) — интерфейс LuCI
 - tests: [./tests/README.md](./tests/README.md) — проверки в Docker на настоящей ImmortalWrt (ADR 0012): `units`, `dat`, `luci`, `vps`, `router-*`, `ui`; эталоны в `tests/golden/`
 - docs: [./docs/architecture.md](./docs/architecture.md), [./docs/adr/README.md](./docs/adr/README.md), [./docs/roadmap.md](./docs/roadmap.md) — устройство, решения, план
-- .github/workflows: `build.yml` (фид apk в GitHub Pages), `tests.yml`, `watch-releases.yml` (новые ImmortalWrt 25.12.x), `upstream-lists.yml`
+- .github/workflows: `build.yml` (фид apk в GitHub Pages), `tests.yml`, `watch-releases.yml` (новые ImmortalWrt и OpenWrt 25.12.x), `upstream-lists.yml`
 
 ## Global Invariants
 

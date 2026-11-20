@@ -17,6 +17,10 @@ export const PRIO_RULE_SRC  = 1002;
 export const NFT_TABLE = 'truba';
 // Зона межсетевого экрана Туннеля (её создаёт uci-defaults).
 export const FW_ZONE = 'truba';
+// Full cone NAT (ADR 0001) делает fw4 с опцией fullcone и модулем ядра nft_fullcone — оба есть
+// в ImmortalWrt, в OpenWrt нет ни опции, ни модуля (U.fullcone_ok).
+export const FW4_UC = '/usr/share/ucode/fw4.uc';
+export const FULLCONE_KO = '/lib/modules/*/nft_fullcone.ko';
 // Свои секции межсетевого экрана у зон Маршрутизации: <зона>_truba — перенаправление в зону Туннеля
 // (ADR 0014), <зона>_truba_no_ipv6 — правило, закрывающее зоне IPv6-интернет (ADR 0016).
 export const FW_FWD_SUFFIX = '_' + FW_ZONE;

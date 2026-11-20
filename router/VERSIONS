@@ -1,1 +1,4 @@
-25.12.2
+# Прошивки, под которые собирается фид: «<дистрибутив> <версия>», по одной в строке.
+# Дистрибутивы: immortalwrt, openwrt (.github/workflows/build.yml).
+immortalwrt 25.12.2
+openwrt 25.12.6

@@ -2,7 +2,7 @@
 
 ## Overview
 
-OpenWrt-пакет `truba` (ImmortalWrt 25.12, `PKGARCH:=all`) — служба Роутера на ucode. Она распаковывает `geoip.dat`/`geosite.dat` в Категории, собирает из настроек UCI план (Режим, Действия, Приоритет), генерирует таблицу nftables `inet truba` и конфиг mosdns, ведёт policy routing в таблицу 77 через Туннель AmneziaWG, следит за Туннелем, считает трафик и скорость в оперативной памяти и отдаёт всё это через ubus-объект `truba` (плагин rpcd) интерфейсу [luci-app-truba](../luci-app-truba/EGM.md). Исходники лежат в `files/` в виде будущей файловой системы Роутера; `Makefile` копирует их как есть (`Build/Compile` пуст).
+OpenWrt-пакет `truba` (ImmortalWrt и OpenWrt 25.12, `PKGARCH:=all`) — служба Роутера на ucode. Она распаковывает `geoip.dat`/`geosite.dat` в Категории, собирает из настроек UCI план (Режим, Действия, Приоритет), генерирует таблицу nftables `inet truba` и конфиг mosdns, ведёт policy routing в таблицу 77 через Туннель AmneziaWG, следит за Туннелем, считает трафик и скорость в оперативной памяти и отдаёт всё это через ubus-объект `truba` (плагин rpcd) интерфейсу [luci-app-truba](../luci-app-truba/EGM.md). Исходники лежат в `files/` в виде будущей файловой системы Роутера; `Makefile` копирует их как есть (`Build/Compile` пуст).
 
 ## Interface
 
@@ -19,7 +19,7 @@ OpenWrt-пакет `truba` (ImmortalWrt 25.12, `PKGARCH:=all`) — служба 
 
 - `files/etc/init.d/truba` — `START=99`, `USE_PROCD=1`; `start_service` выполняет `truba apply` и открывает procd-экземпляры: `stats` всегда, `mosdns` при `applied.mosdns == true` и непустом конфиге, `watchdog` при `TRUBA_WATCHDOG=1`; `stop_service` — `truba teardown`; `service_triggers` — reload по UCI `truba`/`network` и событиям интерфейса Туннеля [init.d/truba:start_service, stop_service, service_triggers]
 - `files/etc/hotplug.d/iface/50-truba` — `truba hotplug` на каждое событие интерфейса
-- `files/etc/uci-defaults/90-truba` — первая установка: зона `truba`, fullcone, Стартовые настройки, `routing '0'` (и при оставшемся конфиге), строка переустановки в `rc.local`; обновление без строки `routing` — `routing '1'` (ADR 0019)
+- `files/etc/uci-defaults/90-truba` — первая установка: зона `truba`, fullcone (только если `truba env` даёт `TRUBA_FULLCONE=1`: опция в `fw4` и модуль ядра есть — ImmortalWrt), Стартовые настройки, `routing '0'` (и при оставшемся конфиге), строка переустановки в `rc.local`; обновление без строки `routing` — `routing '1'` (ADR 0019)
 - `files/etc/truba/reinstall.sh` — переустановка пакетов после sysupgrade; на время `apk add` `routing '0'`, прежнее значение возвращается, только если установился `kmod-amneziawg` (ADR 0019)
 - `files/usr/share/truba/uninstall.sh` — откат при удалении (prerm)
 - `files/lib/upgrade/keep.d/truba` — что сохраняет sysupgrade
@@ -85,7 +85,7 @@ OpenWrt-пакет `truba` (ImmortalWrt 25.12, `PKGARCH:=all`) — служба 
 
 - nftables: атомарная замена `table inet truba` из `/var/etc/truba/truba.nft`; дозаполнение наборов через `/var/run/truba/bypass.nft`; `nft delete table inet truba` в `teardown` [core.uc:apply_config, core.uc:refresh_bypass, core.uc:teardown]
 - Маршрутизация: `ip -4 rule add/del` priority 1000/1001/1002, `ip -4 route replace|del … table 77` (командой `util.uc:ip_cmd`), `sysctl net.ipv4.conf.<dev>.rp_filter=0` [net.uc:ensure_rules, net.uc:set_table, net.uc:set_rp_filter]
-- UCI: `dhcp` (dnsmasq `noresolv`, `cachesize=0`, `server=127.0.0.1#port`, с копией в `/etc/truba/state/dnsmasq.json`), `firewall` (зона `truba`, перенаправления, правила IPv6, `fullcone=1`, `flow_offloading_hw=0`), `upnpd` (с копией `upnpd.json`), секции `rule` в `truba` [dns.uc:dnsmasq_enable, net.uc:zones_firewall, net.uc:upnp_set, uci-defaults/90-truba, core.uc:reset_rules]
+- UCI: `dhcp` (dnsmasq `noresolv`, `cachesize=0`, `server=127.0.0.1#port`, с копией в `/etc/truba/state/dnsmasq.json`), `firewall` (зона `truba`, перенаправления, правила IPv6, `fullcone=1` — где прошивка его умеет, `flow_offloading_hw=0`), `upnpd` (с копией `upnpd.json`), секции `rule` в `truba` [dns.uc:dnsmasq_enable, net.uc:zones_firewall, net.uc:upnp_set, uci-defaults/90-truba, core.uc:reset_rules]
 - Перезапуски: `dnsmasq restart`, `firewall reload`, `cron restart`, `miniupnpd restart`, `/etc/init.d/truba reload`, `killall -HUP rpcd` в postinst/postrm [dns.uc, net.uc, core.uc:reload_service, Makefile:postinst]
 - Файлы на флеше: `/etc/truba/lists/` (+`prev/`), `/etc/truba/state/`, `/etc/truba/good/` (последняя удачная копия), `/etc/crontabs/root` (блок `# truba-begin`…`# truba-end`), `/etc/rc.local` (строка `reinstall.sh`) [core.uc:update_lists, core.uc:save_good, net.uc:cron_set, uci-defaults/90-truba]
 - Файлы в RAM: `/var/run/truba/{applied,health,counters,rates,rates-min,devices,dnsnames,nat,tunnel-test,set-sizes,dns-heal}.json`, `/var/etc/truba/mosdns.json`, `/var/lib/truba/` (распакованные Категории, `categories.json`, дампы кэша mosdns) [const.uc, dat.uc:unpack, stats.uc:save, devstats.uc:save]

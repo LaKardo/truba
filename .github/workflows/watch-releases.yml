@@ -1,6 +1,6 @@
 name: watch-releases
 
-# Раз в сутки: появилась ли новая ImmortalWrt 25.12.x, под которую в фиде ещё нет сборки?
+# Раз в сутки: появилась ли новая ImmortalWrt или OpenWrt 25.12.x, под которую в фиде ещё нет сборки?
 # Если да — запускает build. Обновлять Роутер стоит только после этого (ADR 0004).
 
 on:
@@ -20,20 +20,31 @@ jobs:
       - id: c
         run: |
           set -euo pipefail
-          releases=$(curl -fsSL https://downloads.immortalwrt.org/releases/ \
-            | grep -oE 'href="25\.12\.[0-9]+/"' | grep -oE '25\.12\.[0-9]+' | sort -uV)
           site="https://${GITHUB_REPOSITORY_OWNER}.github.io/${GITHUB_REPOSITORY#*/}"
-          # Только выпуски новее последнего опубликованного фида: каталог прежней версии
-          # из фида убирают намеренно, заново его не собираем (вернуть — router/VERSIONS).
-          newest=$(curl -fsSL "$site/versions.txt" 2>/dev/null | grep -E '^25\.12\.[0-9]+$' | sort -V | tail -1 || true)
+          published=$(curl -fsSL "$site/versions.txt" 2>/dev/null || true)
           missing=""
-          for v in $releases; do
-            if [ -n "$newest" ] && printf '%s\n' "$v" "$newest" | sort -VC; then
-              continue
-            fi
-            if ! curl -fsI "$site/$v/mediatek/filogic/packages.adb" >/dev/null 2>&1; then
-              missing="${missing:+$missing,}$v"
-            fi
+          # Каталог фида и строка versions.txt: ImmortalWrt — «<версия>», OpenWrt — «openwrt/<версия>».
+          for dist in immortalwrt openwrt; do
+            case "$dist" in
+              immortalwrt) dl=https://downloads.immortalwrt.org; pre= ;;
+              openwrt)     dl=https://downloads.openwrt.org;     pre=openwrt/ ;;
+            esac
+            # Только выпуски новее последнего опубликованного фида: каталог прежней версии
+            # из фида убирают намеренно, заново его не собираем (вернуть — router/VERSIONS).
+            newest=$(grep -E "^${pre}25\.12\.[0-9]+\$" <<<"$published" | sed "s#^$pre##" | sort -V | tail -1 || true)
+            # Дистрибутив без опубликованного фида не отслеживается: его первую версию задаёт
+            # router/VERSIONS, иначе собрались бы сразу все его выпуски 25.12.x.
+            [ -n "$newest" ] || { echo "$dist: фида ещё нет — пропущен"; continue; }
+            releases=$(curl -fsSL "$dl/releases/" \
+              | grep -oE 'href="25\.12\.[0-9]+/"' | grep -oE '25\.12\.[0-9]+' | sort -uV)
+            for v in $releases; do
+              if printf '%s\n' "$v" "$newest" | sort -VC; then
+                continue
+              fi
+              if ! curl -fsI "$site/$pre$v/mediatek/filogic/packages.adb" >/dev/null 2>&1; then
+                missing="${missing:+$missing,}$dist/$v"
+              fi
+            done
           done
           echo "Нет сборки для: ${missing:-—}"
           echo "missing=$missing" >> "$GITHUB_OUTPUT"

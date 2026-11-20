@@ -985,6 +985,10 @@ msgid "More options: Network → Firewall"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/truba/inbound.js
+msgid "All ports of the Truba IP %s (except the VPS SSH and tunnel ports) reach the router. This firmware has no Full cone NAT: a device is reachable only by the hosts it has contacted itself; ports for home devices are opened manually or via UPnP."
+msgstr ""
+
+#: htdocs/luci-static/resources/view/truba/inbound.js
 msgid "All ports of the Truba IP %s (except the VPS SSH and tunnel ports) reach the router. Full cone NAT keeps mappings open for any remote host; ports for home devices are opened manually or via UPnP."
 msgstr ""
 

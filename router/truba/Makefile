@@ -2,10 +2,17 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=truba
 PKG_VERSION:=1.2.0
-PKG_RELEASE:=11
+PKG_RELEASE:=12
 PKG_LICENSE:=Apache-2.0
 
 include $(INCLUDE_DIR)/package.mk
+
+# Full cone NAT есть не во всякой прошивке: модуль kmod-nft-fullcone и опция fullcone в fw4 — из
+# ImmortalWrt, в фидах OpenWrt их нет. Зависимость от модуля попадает в пакет, только если сборку
+# запустили с TRUBA_FULLCONE=1 в окружении: CI ставит флаг, когда нашёл модуль в фиде прошивки,
+# под которую собирает (build.yml), и сверяет зависимости готового пакета. Без модуля пакет
+# ставится и работает без Full cone (uci-defaults/90-truba).
+TRUBA_FULLCONE ?= 0
 
 define Package/truba
   SECTION:=net
@@ -15,14 +22,14 @@ define Package/truba
   PKGARCH:=all
   # Зависимости — только в метаданных пакета (EXTRA_DEPENDS), а не в DEPENDS: иначе
   # SDK перед упаковкой компилирует их все из исходников (mosdns вместе с Go, curl,
-  # openssl…) и выбрасывает — роутер берёт их из фида ImmortalWrt. Сборка apk требует
+  # openssl…) и выбрасывает — роутер берёт их из фидов прошивки и фида Трубы. Сборка apk требует
   # у EXTRA_DEPENDS ограничение версии; «>=0» выполняется для любой. CI сверяет итог.
   EXTRA_DEPENDS:= \
 	amneziawg-tools (>=0), \
 	mosdns (>=0), \
 	curl (>=0), \
 	ip-full (>=0), \
-	kmod-nft-fullcone (>=0), \
+	$(if $(filter 1,$(TRUBA_FULLCONE)),kmod-nft-fullcone (>=0)$(comma)) \
 	kmod-nft-socket (>=0), \
 	ucode (>=0), \
 	ucode-mod-fs (>=0), \
@@ -36,7 +43,7 @@ endef
 
 define Package/truba/description
   Routes the home network through an AmneziaWG tunnel to your own VPS, which
-  forwards its whole public IP to the router (full cone NAT is done by ImmortalWrt).
+  forwards its whole public IP to the router (full cone NAT where the firmware has it).
   Traffic is classified by geoip.dat/geosite.dat from kirilllavrov/*-builder,
   used unchanged, via mosdns + nftables sets and policy routing.
 endef

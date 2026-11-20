@@ -1,7 +1,7 @@
 // Общие помощники: журнал, файлы, JSON, команды, команда ip, IPv4.
 'use strict';
 
-import { readfile, rename, mkdir, stat, popen, unlink, open } from 'fs';
+import { readfile, rename, mkdir, stat, popen, unlink, open, glob } from 'fs';
 import { connect } from 'ubus';
 import * as C from 'truba.const';
 
@@ -20,6 +20,13 @@ export function run(cmd) {
 	let code = m ? int(m[1]) : -1;
 	out = replace(out, /@@rc=[0-9]+\n?$/, '');
 	return { code, out };
+};
+
+// Может ли прошивка делать Full cone NAT: fw4 знает опцию fullcone и модуль ядра установлен.
+// Проверяются возможности, а не имя дистрибутива: без модуля опцию включать нельзя, а fw4 без
+// этой опции пишет о ней предупреждение при каждой перезагрузке правил.
+export function fullcone_ok(fw4, ko) {
+	return index(readfile(fw4 ?? C.FW4_UC) ?? '', 'fullcone') >= 0 && length(glob(ko ?? C.FULLCONE_KO) ?? []) > 0;
 };
 
 // ---- Команда ip ----

@@ -3,6 +3,7 @@
 # транзакции, как на Роутере. Только в CI (build.yml): нужны собранные .apk. Один случай — один
 # контейнер под procd без сети; зависимости уже в образе, пакеты — из смонтированных каталогов:
 #   /new — новые truba и luci-app-truba, /old — прежняя truba из опубликованного фида.
+# Образ — ImmortalWrt или OpenWrt, под которую собран фид; EXPECT_FULLCONE=1|0 — есть ли в её фидах Full cone.
 #   sh upgrade.sh 1 — чистая установка; 2 — обновление изменённого конфига;
 #   3 — обновление конфига без правок (только вывод); 4 — удаление и повторная установка.
 . /repo/tests/lib/check.sh
@@ -41,6 +42,16 @@ untouched() {
 		eval '! uci -q get dhcp.@dnsmasq[0].server | grep -q "127.0.0.1#5335" && up_ok'
 }
 
+# Full cone NAT — только там, где прошивка его умеет (ImmortalWrt: опция fullcone в fw4 и модуль ядра;
+# в OpenWrt нет ни того, ни другого). EXPECT_FULLCONE — что CI нашёл в фидах прошивки (build.yml):
+# служба должна видеть то же самое, а установка — включить опцию или не трогать её.
+fullcone_matches() {
+	FC="$(eval "$(truba env)"; echo "$TRUBA_FULLCONE")"
+	[ -z "${EXPECT_FULLCONE:-}" ] || check "$1: Full cone служба видит так же, как фиды прошивки ($EXPECT_FULLCONE)" test "$FC" = "$EXPECT_FULLCONE"
+	check "$1: опция fullcone включена, только если прошивка её умеет ($FC)" test "$(uci -q get firewall.@defaults[0].fullcone)" = "${FC#0}"
+	check "$1: fw4 не встречает неизвестной опции fullcone" eval '! fw4 check 2>&1 | grep -q "unknown option .fullcone"'
+}
+
 # Прежняя версия с включённой Маршрутизацией, как у владельца с настроенным Туннелем.
 old() {
 	check "прежняя версия установлена" add "$OLD_TRUBA"
@@ -55,6 +66,7 @@ case "$CASE" in
 	check "apk add truba luci-app-truba одной командой" add "$NEW_TRUBA" "$NEW_LUCI"
 	check "оба пакета установлены" eval '[ -n "$(ver truba)" ] && [ -n "$(ver luci-app-truba)" ]'
 	untouched "чистая установка"
+	fullcone_matches "чистая установка"
 	;;
 2)
 	section "обновление изменённого конфига (CUJ 4)"

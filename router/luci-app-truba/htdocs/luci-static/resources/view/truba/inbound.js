@@ -169,7 +169,9 @@ function Page({ store, view, devices }) {
 	const st = status || {};
 	return html`
 		<${kit.PageHead} title=${_('Inbound')} offline=${offline}
-			text=${html`${_('All ports of the Truba IP %s (except the VPS SSH and tunnel ports) reach the router. Full cone NAT keeps mappings open for any remote host; ports for home devices are opened manually or via UPnP.').format(st.vps_ip || '—')}
+			text=${html`${(st.fullcone === false
+					? _('All ports of the Truba IP %s (except the VPS SSH and tunnel ports) reach the router. This firmware has no Full cone NAT: a device is reachable only by the hosts it has contacted itself; ports for home devices are opened manually or via UPnP.')
+					: _('All ports of the Truba IP %s (except the VPS SSH and tunnel ports) reach the router. Full cone NAT keeps mappings open for any remote host; ports for home devices are opened manually or via UPnP.')).format(st.vps_ip || '—')}
 				${' '}${_('Replies always go back through the tunnel, even to Russian clients.')}
 				${' '}<${kit.Go} tab="overview" label=${_('Inbound traffic is on the Overview.')} />`} />
 		<div class="grid g2">

@@ -272,7 +272,7 @@ export function env_lines() {
 		LISTS_DIR: C.LISTS_DIR, STATE_DIR: C.STATE_DIR, GOOD_DIR: C.GOOD_DIR, DL_DIR: C.DL_DIR,
 		APPLIED: C.APPLIED_FILE, MOSDNS_CONF: C.MOSDNS_CONF, STAMP: C.STAMP_FILE,
 		INIT: C.INIT, REINSTALL: C.REINSTALL, FW_ZONE: C.FW_ZONE, NO6_SUFFIX: C.FW_NO6_SUFFIX,
-		IFACE: cfg.iface, WATCHDOG: cfg.watchdog.enabled ? '1' : '0',
+		IFACE: cfg.iface, WATCHDOG: cfg.watchdog.enabled ? '1' : '0', FULLCONE: U.fullcone_ok() ? '1' : '0',
 	};
 	let s = '';
 	for (let k, v in vars)

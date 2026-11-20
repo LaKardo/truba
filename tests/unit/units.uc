@@ -450,6 +450,27 @@ eo = sh_env('printf %s \"$TRUBA_IFACE\"');
 check('env: неверное имя интерфейса — умолчание, в shell не исполняется', eo == 'awg0' && system('test -e /tmp/pwned') != 0, eo);
 eo = sh_env('printf %s \"$TRUBA_NO6_SUFFIX\"');
 check('env: окончание имени своих правил IPv6 — как у службы', eo == C.FW_NO6_SUFFIX && length(eo), eo);
+// Full cone — по возможностям прошивки, а не по её имени: опция fullcone в fw4 и модуль ядра.
+{
+	system('rm -rf /tmp/fc && mkdir -p /tmp/fc/mod/6.12.0 /tmp/fc/empty/6.12.0');
+	writefile('/tmp/fc/fw4-immortalwrt.uc', 'defaults: { fullcone: [ "bool", "0" ], flow_offloading: [ "bool", "0" ] }\n');
+	writefile('/tmp/fc/fw4-openwrt.uc', 'defaults: { flow_offloading: [ "bool", "0" ] }\n');
+	writefile('/tmp/fc/mod/6.12.0/nft_fullcone.ko', '');
+	const ko = '/tmp/fc/mod/*/nft_fullcone.ko', none = '/tmp/fc/empty/*/nft_fullcone.ko';
+	check('fullcone: fw4 знает опцию и модуль есть — да', U.fullcone_ok?.('/tmp/fc/fw4-immortalwrt.uc', ko) === true);
+	check('fullcone: fw4 без опции (OpenWrt) — нет, даже с модулем', U.fullcone_ok?.('/tmp/fc/fw4-openwrt.uc', ko) === false);
+	check('fullcone: опция есть, модуля нет — нет', U.fullcone_ok?.('/tmp/fc/fw4-immortalwrt.uc', none) === false);
+	check('fullcone: fw4 не найден — нет', U.fullcone_ok?.('/tmp/fc/absent.uc', ko) === false);
+	eo = sh_env('printf %s \"$TRUBA_FULLCONE\"');
+	check('env: TRUBA_FULLCONE — что видит служба', eo == (U.fullcone_ok?.() ? '1' : '0'), eo);
+	let ud = readfile('/repo/router/truba/files/etc/uci-defaults/90-truba');
+	check('90-truba: fullcone включается только под TRUBA_FULLCONE',
+		length(match(ud, /fullcone='1'/g)) == 1 && index(ud, "if [ \"$TRUBA_FULLCONE\" = 1 ]; then\n\tuci -q set firewall.@defaults[0].fullcone='1'") >= 0);
+	let mk = readfile('/repo/router/truba/Makefile');
+	check('Makefile: kmod-nft-fullcone — зависимость только с TRUBA_FULLCONE=1',
+		length(match(mk, /kmod-nft-fullcone \(>=0\)/g)) == 1 && index(mk, '$(if $(filter 1,$(TRUBA_FULLCONE)),kmod-nft-fullcone (>=0)$(comma))') >= 0);
+	system('rm -rf /tmp/fc');
+}
 let un = readfile('/repo/router/truba/files/usr/share/truba/uninstall.sh');
 check('uninstall.sh: свои правила IPv6 — по окончанию из env, без литерала',
 	index(un, '$TRUBA_NO6_SUFFIX') >= 0 && index(un, 'no_ipv6') < 0);
@@ -457,6 +478,8 @@ check('90-truba: правило IPv6 заводит не установка, а 
 	index(readfile('/repo/router/truba/files/etc/uci-defaults/90-truba'), 'ipv6') < 0);
 // reinstall.sh работает без пакета (после sysupgrade его ещё нет) — свои литералы, сверка здесь.
 let ri = readfile('/repo/router/truba/files/etc/truba/reinstall.sh');
+check('reinstall.sh: без привязки к дистрибутиву — ждёт имя своего фида, каталог фида по ID из os-release',
+	index(ri, 'immortalwrt.org') < 0 && index(ri, 'nslookup "${FEED_HOST:-') >= 0 && index(ri, '[ "${ID:-}" = openwrt ] && FEED_DIST=/openwrt') >= 0);
 check('reinstall.sh: путь бэкапа dnsmasq и адрес mosdns — как у службы',
 	index(ri, C.DNSMASQ_BACKUP) >= 0 && index(ri, C.MOSDNS_ADDR + '#${port:-' + F.SCHEMA.dns.port.def + '}') >= 0);
 

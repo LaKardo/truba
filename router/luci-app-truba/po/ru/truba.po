@@ -159,6 +159,9 @@ msgstr "Перехватывать DNS (порт 53)"
 msgid "IPv4 DNS requests of devices to any server are redirected to the router, so domain categories work for them too. Encrypted DNS in browsers (DoH) is not affected."
 msgstr "DNS-запросы устройств по IPv4 к любому серверу перенаправляются на Роутер, и доменные Категории работают и для них. Шифрованный DNS в браузерах (DoH) это не затрагивает."
 
+msgid "All ports of the Truba IP %s (except the VPS SSH and tunnel ports) reach the router. This firmware has no Full cone NAT: a device is reachable only by the hosts it has contacted itself; ports for home devices are opened manually or via UPnP."
+msgstr "Все порты IP Трубы %s (кроме SSH VPS и порта Туннеля) приходят на Роутер. Full cone NAT в этой прошивке нет: устройству отвечают только те узлы, к которым оно обратилось само; порты для домашних устройств открываются вручную или через UPnP."
+
 msgid "All ports of the Truba IP %s (except the VPS SSH and tunnel ports) reach the router. Full cone NAT keeps mappings open for any remote host; ports for home devices are opened manually or via UPnP."
 msgstr "Все порты IP Трубы %s (кроме SSH VPS и порта Туннеля) приходят на Роутер. Full cone NAT держит отображения открытыми для любого внешнего узла; порты для домашних устройств открываются вручную или через UPnP."
 

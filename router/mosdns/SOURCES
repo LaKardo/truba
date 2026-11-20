@@ -1,0 +1,9 @@
+# Рецепт пакета mosdns для фида Трубы — только для прошивок, в чьих фидах mosdns нет (OpenWrt).
+# В ImmortalWrt он есть, и Роутер берёт его оттуда; в индексах OpenWrt 25.12.6 пакета нет,
+# а truba без него не ставится. Собирать или нет, CI решает по индексам фидов прошивки (build.yml).
+# Каталог net/mosdns (Makefile и files/config.yaml, mosdns 5.3.3) берётся из фида пакетов
+# ImmortalWrt, ветка openwrt-25.12, на зафиксированном коммите; исходники mosdns и модули Go
+# скачивает сборка, компилятор Go — из фида packages того SDK, под который идёт сборка.
+MOSDNS_PKG_REPO=https://github.com/immortalwrt/packages.git
+MOSDNS_PKG_COMMIT=fa25995d74a720c1c98bf6265d3dd8b4eb620d1f
+MOSDNS_PKG_PATH=net/mosdns

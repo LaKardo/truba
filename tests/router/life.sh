@@ -25,6 +25,25 @@ sh /etc/uci-defaults/90-truba
 check "повторная установка: Маршрутизация выключена и при оставшемся конфиге" test "$(rt)" = 0
 cp /tmp/firewall.orig.bak "$FWO"
 uci set truba.main.routing='1'; uci commit truba
+# Прошивка без Full cone (как OpenWrt): без модуля ядра служба его не видит, установка опцию не
+# включает, а включённую Трубой прежде — снимает. Исходная настройка на время случая — «опции не было»
+# (в ImmortalWrt она включена с завода, и тогда установка её не трогает).
+KO="$(ls /lib/modules/*/nft_fullcone.ko 2>/dev/null | head -n 1)"
+if [ -n "$KO" ]; then
+	cp "$FWO" /tmp/firewall.orig.bak
+	printf 'fullcone=\nflow_offloading_hw=\n' > "$FWO"
+	mv "$KO" /tmp/nft_fullcone.ko.bak
+	check "без модуля ядра: служба не видит Full cone" eval '[ "$(eval "$(truba env)"; echo "$TRUBA_FULLCONE")" = 0 ]'
+	sh /etc/uci-defaults/90-truba
+	check "без Full cone: опция fullcone снята, остальное на месте" eval '[ -z "$(uci -q get firewall.@defaults[0].fullcone)" ] && [ "$(uci -q get firewall.@defaults[0].flow_offloading_hw)" = 0 ] && [ "$(uci -q get firewall.truba.masq)" = 1 ]'
+	check "без Full cone: status.fullcone — false" eval '[ "$(ubus call truba status | jsonfilter -e @.fullcone)" = false ]'
+	mv /tmp/nft_fullcone.ko.bak "$KO"
+	sh /etc/uci-defaults/90-truba
+	check "модуль на месте: опция fullcone снова включена" test "$(uci -q get firewall.@defaults[0].fullcone)" = 1
+	cp /tmp/firewall.orig.bak "$FWO"
+else
+	echo "skip  стенд без модуля nft_fullcone: случай «прошивка без Full cone» пропущен"
+fi
 
 section "последняя удачная копия правил (ADR 0006)"
 [ -s /etc/truba/good/meta.json ] || logread -e 'последняя удачная копия'

@@ -10,7 +10,14 @@ no6_chain() { nft list chain inet fw4 "forward_$1" 2>/dev/null | grep -q 'ip6 da
 
 section "установка (uci-defaults)"
 check "зона truba (установка) и перенаправление lan → truba (применение)" eval '[ "$(uci -q get firewall.truba.name)" = truba ] && [ "$(uci -q get firewall.lan_truba.dest)" = truba ]'
-check "fullcone включён, аппаратное ускорение выключено" eval '[ "$(uci -q get firewall.@defaults[0].fullcone)" = 1 ] && [ "$(uci -q get firewall.@defaults[0].flow_offloading_hw)" = 0 ]'
+# Full cone — только где прошивка его умеет (опция fullcone в fw4 и модуль ядра: ImmortalWrt). Стенд —
+# ImmortalWrt с модулем в образе (tests/images.env), поэтому здесь он должен быть виден и включён.
+FC="$(eval "$(truba env)"; echo "$TRUBA_FULLCONE")"
+if [ "$(. /etc/os-release; echo "$ID")" = immortalwrt ]; then
+	check "ImmortalWrt: служба видит Full cone (опция fw4 и модуль ядра)" test "$FC" = 1
+fi
+check "fullcone включён там, где прошивка его умеет ($FC); аппаратное ускорение выключено" eval '[ "$(uci -q get firewall.@defaults[0].fullcone)" = "${FC#0}" ] && [ "$(uci -q get firewall.@defaults[0].flow_offloading_hw)" = 0 ]'
+check "status: fullcone — как в настройках межсетевого экрана" eval '[ "$(ubus call truba status | jsonfilter -e @.fullcone)" = "$([ "$FC" = 1 ] && echo true || echo false)" ]'
 check "программное ускорение не тронуто" cmp -s /tmp/offload.before /tmp/offload.after
 check "IPv6-интернет зоне lan закрыт (применение), IPv6 сети не тронут" eval 'no6_chain lan && [ "$(uci -q get dhcp.lan.ra)" != disabled ]'
 check "Стартовые настройки: 8 правил" test "$(uci -q show truba | grep -c '=rule$')" -eq 8

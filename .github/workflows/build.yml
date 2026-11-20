@@ -1,16 +1,26 @@
 name: build
 
-# Сборка пакетов Трубы и AmneziaWG под ImmortalWrt (mediatek/filogic) и публикация
-# подписанного apk-фида в GitHub Pages: /<версия>/mediatek/filogic/packages.adb (ADR 0004).
+# Сборка пакетов Трубы, AmneziaWG и (где его нет в прошивке) mosdns под ImmortalWrt и OpenWrt
+# (mediatek/filogic) и публикация подписанного apk-фида в GitHub Pages (ADR 0004):
+#   ImmortalWrt — /<версия>/mediatek/filogic/packages.adb
+#   OpenWrt     — /openwrt/<версия>/mediatek/filogic/packages.adb
+# Каталоги раздельные: ядра у дистрибутивов разные (модуль AmneziaWG — под своё), а номера
+# выпусков могут совпасть.
+#
+# Чем прошивки отличаются для сборки, решают не их имена, а индексы их фидов (шаг «Прошивка»):
+# - есть kmod-nft-fullcone — truba получает зависимость от него (TRUBA_FULLCONE=1), нет — не получает;
+# - нет mosdns — он собирается в фид Трубы из закреплённого рецепта (router/mosdns/SOURCES).
+# После сборки каждая зависимость truba и luci-app-truba сверяется с этими индексами и фидом Трубы.
 #
 # Секреты репозитория:
 #   APK_SIGN_KEY  — закрытый ключ EC P-256 (PEM):  openssl ecparam -name prime256v1 -genkey -noout -out truba-feed.pem
 #   APK_SIGN_PUB  — открытый ключ (PEM):           openssl ec -in truba-feed.pem -pubout > truba-feed.pub.pem
 #
 # Как сокращено время:
-# - пакеты AmneziaWG пересобираются, только если изменились их источники (router/awg)
-#   или AWG_BUILD_REV, либо это новая версия ImmortalWrt; иначе берутся из опубликованного
-#   фида той же версии (awg.json хранит отпечаток), а индекс подписывается заново;
+# - пакеты AmneziaWG и mosdns пересобираются, только если изменились их источники (router/awg,
+#   router/mosdns) или AWG_BUILD_REV / MOSDNS_BUILD_REV, либо это новая версия прошивки; иначе
+#   берутся из опубликованного фида той же версии (awg.json и mosdns.json хранят отпечатки),
+#   а индекс подписывается заново;
 # - зависимости truba и luci-app-truba — только в метаданных (EXTRA_DEPENDS), SDK их не собирает;
 # - тесты идут параллельно со сборкой, публикацию держит deploy;
 # - обновляются только нужные фиды.
@@ -27,11 +37,11 @@ on:
   workflow_dispatch:
     inputs:
       versions:
-        description: 'Версии ImmortalWrt через запятую (пусто — из router/VERSIONS)'
+        description: 'Прошивки через запятую: openwrt/25.12.6, immortalwrt/25.12.2; версия без имени — ImmortalWrt (пусто — из router/VERSIONS)'
         required: false
         type: string
       full:
-        description: 'Пересобрать и AmneziaWG, даже если его источники не менялись'
+        description: 'Пересобрать и AmneziaWG с mosdns, даже если их источники не менялись'
         type: boolean
         default: false
       publish:
@@ -60,6 +70,8 @@ env:
   SUBTARGET: filogic
   # Поднимите, если меняются шаги сборки AmneziaWG ниже: тогда его пакеты пересоберутся.
   AWG_BUILD_REV: '1'
+  # То же для mosdns.
+  MOSDNS_BUILD_REV: '1'
 
 jobs:
   # Те же части tests/run.sh, что на PR (tests.yml); публикацию фида держит deploy.
@@ -70,7 +82,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     outputs:
-      versions: ${{ steps.v.outputs.versions }}
+      targets: ${{ steps.v.outputs.targets }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - id: v
@@ -80,55 +92,118 @@ jobs:
         run: |
           set -euo pipefail
           list="$VERSIONS"
-          [ -n "$list" ] || list=$(grep -E '^[0-9]' router/VERSIONS | paste -sd, -)
-          echo "versions=$(echo "$list" | tr -d ' ' | jq -R -c 'split(",") | map(select(length > 0))')" >> "$GITHUB_OUTPUT"
+          # router/VERSIONS: «<дистрибутив> <версия>» в строке.
+          [ -n "$list" ] || list=$(awk '/^[a-z]/ { print $1 "/" $2 }' router/VERSIONS | paste -sd, -)
+          # «25.12.2» без имени — ImmortalWrt: так список задавали до появления OpenWrt.
+          targets=$(echo "$list" | tr -d ' ' | jq -R -c 'split(",") | map(select(length > 0))
+            | map(if contains("/") then . else "immortalwrt/" + . end)
+            | map(split("/") | { dist: .[0], version: .[1] })')
+          # Имя и версия попадают в адреса и пути: только известные дистрибутивы и номер выпуска.
+          jq -e 'length > 0 and all(.[]; (.dist == "immortalwrt" or .dist == "openwrt")
+            and (.version | test("^[0-9]+\\.[0-9]+\\.[0-9]+(-rc[0-9]+)?$")))' <<<"$targets" >/dev/null \
+            || { echo "::error::неверный список прошивок: $list"; exit 1; }
+          echo "targets=$targets" >> "$GITHUB_OUTPUT"
+          echo "$targets"
 
   build:
     # Тесты не ждём: тот же код проверен на PR. Без них фид не опубликует deploy.
     needs: [ matrix ]
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    # Полная сборка под OpenWrt собирает ещё и компилятор Go для mosdns.
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
-        version: ${{ fromJson(needs.matrix.outputs.versions) }}
-    # Версия и имя файла SDK попадают в скрипты через окружение, а не подстановкой в их текст:
-    # так они остаются данными, даже если в списке выпусков окажется что-то чужое.
+        include: ${{ fromJson(needs.matrix.outputs.targets) }}
+    # Дистрибутив, версия и имя файла SDK попадают в скрипты через окружение, а не подстановкой
+    # в их текст: так они остаются данными, даже если в списке выпусков окажется что-то чужое.
     env:
-      IWRT_VERSION: ${{ matrix.version }}
+      DIST: ${{ matrix.dist }}
+      FW_VERSION: ${{ matrix.version }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      # Всё, что зависит от дистрибутива: откуда качать и куда класть фид — по имени, а чего в
+      # прошивке нет — по индексам её фидов (те же, из которых пакеты ставит apk на Роутере).
+      - name: Прошивка ${{ matrix.dist }} ${{ matrix.version }} — адреса и состав фидов
+        run: |
+          set -euo pipefail
+          case "$DIST" in
+            immortalwrt) dl=https://downloads.immortalwrt.org; feed_dir="$FW_VERSION/$TARGET/$SUBTARGET" ;;
+            openwrt)     dl=https://downloads.openwrt.org;     feed_dir="openwrt/$FW_VERSION/$TARGET/$SUBTARGET" ;;
+            *) echo "::error::неизвестный дистрибутив: $DIST"; exit 1 ;;
+          esac
+          rel="$dl/releases/$FW_VERSION"
+          base="$rel/targets/$TARGET/$SUBTARGET"
+          mkdir fw
+          get() { wget -q --tries=3 --timeout=60 -O "fw/$2" "$1"; }
+          get "$base/sha256sums" sha256sums
+          get "$base/profiles.json" profiles.json
+          arch=$(jq -r '.arch_packages // empty' fw/profiles.json)
+          kmods=$(grep -oE '\*kmods/[^/ ]+/index\.json$' fw/sha256sums | head -1 | tr -d '*' || true)
+          [ -n "$arch" ] && [ -n "$kmods" ] || { echo "::error::в $base не найдены архитектура пакетов или каталог модулей ядра"; exit 1; }
+          get "$base/packages/index.json" i-target.json
+          get "$base/$kmods" i-kmods.json
+          # Фиды, из которых берутся зависимости Трубы. routing, telephony и video не скачиваются:
+          # оттуда ничего не нужно, а зеркало ImmortalWrt бывает медленным. Понадобится пакет
+          # оттуда — проверка зависимостей в шаге «Сборка» назовёт его, тогда фид добавить сюда.
+          for f in base luci packages; do get "$rel/packages/$arch/$f/index.json" "i-$f.json"; done
+          jq -r '.packages | keys[]' fw/i-*.json | sort -u > fw/packages.txt
+          [ "$(wc -l < fw/packages.txt)" -gt 1000 ] || { echo "::error::индексы фидов $DIST $FW_VERSION подозрительно малы"; exit 1; }
+          has() { grep -qxF "$1" fw/packages.txt; }
+          fullcone=0
+          if has kmod-nft-fullcone; then fullcone=1; fi
+          build_mosdns=true
+          if has mosdns; then build_mosdns=false; fi
+          {
+            echo "DL_BASE=$base"
+            echo "FEED_DIR=$feed_dir"
+            echo "TRUBA_FULLCONE=$fullcone"
+            echo "BUILD_MOSDNS=$build_mosdns"
+          } >> "$GITHUB_ENV"
+          echo "$DIST $FW_VERSION ($arch, $(wc -l < fw/packages.txt) пакетов в фидах): kmod-nft-fullcone — $([ "$fullcone" = 1 ] && echo есть || echo 'нет, truba без Full cone'); mosdns — $([ "$build_mosdns" = true ] && echo 'нет, собирается в фид Трубы' || echo есть)"
+
       # Пакеты AmneziaWG меняются, только когда меняются их источники, шаги сборки (AWG_BUILD_REV)
-      # или версия ImmortalWrt (а с ней ядро). Иначе берём их из опубликованного фида этой же
-      # версии: модуль ядра там собран под то же ядро.
-      - name: Собирать ли AmneziaWG
+      # или версия прошивки (а с ней ядро). Иначе берём их из опубликованного фида этой же
+      # версии: модуль ядра там собран под то же ядро. С mosdns — так же (MOSDNS_BUILD_REV).
+      - name: Собирать ли AmneziaWG и mosdns
         id: plan
         env:
           FULL: ${{ inputs.full }}
         run: |
           set -euo pipefail
-          dir="$IWRT_VERSION/$TARGET/$SUBTARGET"
-          fp=$( { echo "$AWG_BUILD_REV"; git ls-files -s router/awg; } | sha256sum | cut -c1-16)
-          echo "fingerprint=$fp" >> "$GITHUB_OUTPUT"
-          reuse=false
-          if [ "$FULL" != true ] && git fetch -q --depth=1 origin gh-pages 2>/dev/null \
-             && prev=$(git show "FETCH_HEAD:$dir/awg.json" 2>/dev/null) \
-             && [ "$(jq -r .fingerprint <<<"$prev")" = "$fp" ]; then
-            mkdir -p prebuilt
-            reuse=true
-            for f in $(jq -r '.files[]' <<<"$prev"); do
-              git show "FETCH_HEAD:$dir/$f" > "prebuilt/$f" 2>/dev/null || { reuse=false; break; }
+          have_pages=false
+          if git fetch -q --depth=1 origin gh-pages 2>/dev/null; then have_pages=true; fi
+          mkdir -p prebuilt
+          # reuse ИМЯ ОТПЕЧАТОК — пакеты из опубликованного фида, если отпечаток в <ИМЯ>.json тот же.
+          reuse() {
+            local prev f files
+            [ "$FULL" != true ] && [ "$have_pages" = true ] || return 1
+            prev=$(git show "FETCH_HEAD:$FEED_DIR/$1.json" 2>/dev/null) || return 1
+            [ "$(jq -r .fingerprint <<<"$prev")" = "$2" ] || return 1
+            files=$(jq -r '.files[]' <<<"$prev")
+            [ -n "$files" ] || return 1
+            for f in $files; do
+              git show "FETCH_HEAD:$FEED_DIR/$f" > "prebuilt/$f" 2>/dev/null || { (cd prebuilt && rm -f $files); return 1; }
             done
-            [ -n "$(ls prebuilt)" ] || reuse=false
+          }
+          awg_fp=$( { echo "$AWG_BUILD_REV"; git ls-files -s router/awg; } | sha256sum | cut -c1-16)
+          mosdns_fp=$( { echo "$MOSDNS_BUILD_REV"; git ls-files -s router/mosdns; } | sha256sum | cut -c1-16)
+          reuse_awg=false
+          if reuse awg "$awg_fp"; then reuse_awg=true; fi
+          reuse_mosdns=false
+          if [ "$BUILD_MOSDNS" = true ] && reuse mosdns "$mosdns_fp"; then reuse_mosdns=true; fi
+          echo "AmneziaWG (отпечаток $awg_fp): $([ "$reuse_awg" = true ] && echo 'не менялся — берём из фида' || echo собирается)"
+          if [ "$BUILD_MOSDNS" = true ]; then
+            echo "mosdns (отпечаток $mosdns_fp): $([ "$reuse_mosdns" = true ] && echo 'не менялся — берём из фида' || echo собирается)"
           fi
-          if [ "$reuse" = true ]; then
-            echo "AmneziaWG не менялся (отпечаток $fp) — берём из фида: $(ls prebuilt | tr '\n' ' ')"
-          else
-            rm -rf prebuilt
-            echo "AmneziaWG собирается (отпечаток $fp)"
-          fi
-          echo "reuse_awg=$reuse" >> "$GITHUB_OUTPUT"
+          ls prebuilt
+          {
+            echo "awg_fingerprint=$awg_fp"
+            echo "mosdns_fingerprint=$mosdns_fp"
+            echo "reuse_awg=$reuse_awg"
+            echo "reuse_mosdns=$reuse_mosdns"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Зависимости сборки
         run: |
@@ -136,17 +211,16 @@ jobs:
           sudo apt-get install -y -qq build-essential clang flex bison g++ gawk gcc-multilib gettext git \
             libncurses-dev libssl-dev python3-setuptools rsync swig unzip zlib1g-dev file wget zstd
 
-      - name: ImmortalWrt SDK ${{ matrix.version }} — какой файл
+      - name: SDK ${{ matrix.dist }} ${{ matrix.version }} — какой файл
         id: sdk
         run: |
           set -euo pipefail
-          base="https://downloads.immortalwrt.org/releases/$IWRT_VERSION/targets/$TARGET/$SUBTARGET"
-          wget -q --tries=3 --timeout=60 "$base/sha256sums"
-          sdk=$(grep -oE 'immortalwrt-sdk-[^ ]+\.tar\.zst' sha256sums | head -1)
-          [ -n "$sdk" ] || { echo "SDK не найден в $base"; exit 1; }
-          sum=$(grep " \*$sdk\$" sha256sums | cut -d' ' -f1)
+          # Файл SDK назван по дистрибутиву: immortalwrt-sdk-… или openwrt-sdk-….
+          sdk=$(grep -oE "${DIST}-sdk-[^ ]+\.tar\.zst" fw/sha256sums | head -1)
+          [ -n "$sdk" ] || { echo "SDK не найден в $DL_BASE"; exit 1; }
+          sum=$(grep " \*$sdk\$" fw/sha256sums | cut -d' ' -f1)
           [ "${#sum}" = 64 ] || { echo "нет контрольной суммы для $sdk"; exit 1; }
-          { echo "file=$sdk"; echo "sha256=$sum"; echo "url=$base/$sdk"; } >> "$GITHUB_OUTPUT"
+          { echo "file=$sdk"; echo "sha256=$sum"; echo "url=$DL_BASE/$sdk"; } >> "$GITHUB_OUTPUT"
 
       # Архив SDK одной версии не меняется — храним его в кэше по контрольной сумме:
       # downloads.immortalwrt.org бывает медленным (однажды 18 мин вместо 12 с).
@@ -155,7 +229,7 @@ jobs:
         uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: ${{ steps.sdk.outputs.file }}
-          key: sdk-${{ matrix.version }}-${{ steps.sdk.outputs.sha256 }}
+          key: sdk-${{ matrix.dist }}-${{ matrix.version }}-${{ steps.sdk.outputs.sha256 }}
 
       - name: Скачать SDK
         if: steps.sdk-cache.outputs.cache-hit != 'true'
@@ -178,7 +252,7 @@ jobs:
         uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: ${{ steps.sdk.outputs.file }}
-          key: sdk-${{ matrix.version }}-${{ steps.sdk.outputs.sha256 }}
+          key: sdk-${{ matrix.dist }}-${{ matrix.version }}-${{ steps.sdk.outputs.sha256 }}
 
       - name: Кэш исходников и компилятора SDK
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
@@ -186,9 +260,9 @@ jobs:
           path: |
             sdk/dl
             sdk/.ccache
-          key: sdk-inputs-${{ steps.sdk.outputs.sha256 }}-${{ hashFiles('router/awg/SOURCES') }}-${{ github.sha }}
+          key: sdk-inputs-${{ steps.sdk.outputs.sha256 }}-${{ hashFiles('router/awg/SOURCES', 'router/mosdns/SOURCES') }}-${{ github.sha }}
           restore-keys: |
-            sdk-inputs-${{ steps.sdk.outputs.sha256 }}-${{ hashFiles('router/awg/SOURCES') }}-
+            sdk-inputs-${{ steps.sdk.outputs.sha256 }}-${{ hashFiles('router/awg/SOURCES', 'router/mosdns/SOURCES') }}-
 
       - name: Кэш фидов SDK
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
@@ -197,18 +271,21 @@ jobs:
             sdk/feeds/base
             sdk/feeds/luci
             sdk/feeds/packages
-          key: sdk-feeds-${{ steps.sdk.outputs.sha256 }}-${{ steps.plan.outputs.reuse_awg }}
+          key: sdk-feeds-${{ steps.sdk.outputs.sha256 }}-${{ steps.plan.outputs.reuse_awg }}-${{ env.BUILD_MOSDNS }}-${{ steps.plan.outputs.reuse_mosdns }}
 
       - name: Фиды
         env:
           REUSE_AWG: ${{ steps.plan.outputs.reuse_awg }}
+          REUSE_MOSDNS: ${{ steps.plan.outputs.reuse_mosdns }}
         run: |
           set -euo pipefail
           feed="$PWD/feed-src"
           mkdir -p "$feed"
           # luci — luci.mk и его инструменты (luci-base/host, csstidy), base — lua/host
-          # и зависимости AmneziaWG. packages нужен только для полной сборки AmneziaWG.
+          # и зависимости AmneziaWG. packages нужен только для полной сборки AmneziaWG
+          # и для mosdns (компилятор Go).
           feeds="base|luci"
+          need_packages=false
           if [ "$REUSE_AWG" != true ]; then
             . router/awg/SOURCES
             git clone -q "$AWG_OPENWRT_REPO" awg-src
@@ -222,8 +299,25 @@ jobs:
             sed -i 's|^include $(TOPDIR)/feeds/luci/luci.mk|PKG_PO_VERSION=$(PKG_VERSION)-r$(PKG_RELEASE)\n&|' \
               "$feed/luci-proto-amneziawg/Makefile"
             grep -q '^PKG_PO_VERSION=' "$feed/luci-proto-amneziawg/Makefile"
-            feeds="$feeds|packages"
+            need_packages=true
           fi
+          if [ "$BUILD_MOSDNS" = true ] && [ "$REUSE_MOSDNS" != true ]; then
+            # Рецепт mosdns — один каталог из закреплённого коммита фида пакетов ImmortalWrt:
+            # в фидах OpenWrt mosdns нет. Остальной репозиторий не скачивается.
+            . router/mosdns/SOURCES
+            git init -q mosdns-src
+            git -C mosdns-src remote add origin "$MOSDNS_PKG_REPO"
+            git -C mosdns-src sparse-checkout set "$MOSDNS_PKG_PATH"
+            git -C mosdns-src fetch -q --depth=1 --filter=blob:none origin "$MOSDNS_PKG_COMMIT"
+            git -C mosdns-src checkout -q FETCH_HEAD
+            cp -a "mosdns-src/$MOSDNS_PKG_PATH" "$feed/mosdns"
+            # В своём фиде рецепт лежит не рядом с lang/golang: путь к правилам Go — от корня SDK.
+            sed -i 's|^include \.\./\.\./lang/golang/golang-package\.mk$|include $(TOPDIR)/feeds/packages/lang/golang/golang-package.mk|' \
+              "$feed/mosdns/Makefile"
+            grep -q '^include $(TOPDIR)/feeds/packages/lang/golang/golang-package.mk$' "$feed/mosdns/Makefile"
+            need_packages=true
+          fi
+          [ "$need_packages" != true ] || feeds="$feeds|packages"
           cp -a router/truba router/luci-app-truba "$feed/"
 
           cd sdk
@@ -249,14 +343,18 @@ jobs:
           printf '%s\n' "$APK_SIGN_PUB" > sdk/public-key.pem
           chmod 600 sdk/private-key.pem
 
+      # TRUBA_FULLCONE (из шага «Прошивка») make берёт из окружения: router/truba/Makefile.
       - name: Сборка
         env:
           REUSE_AWG: ${{ steps.plan.outputs.reuse_awg }}
-          AWG_FP: ${{ steps.plan.outputs.fingerprint }}
+          REUSE_MOSDNS: ${{ steps.plan.outputs.reuse_mosdns }}
+          AWG_FP: ${{ steps.plan.outputs.awg_fingerprint }}
+          MOSDNS_FP: ${{ steps.plan.outputs.mosdns_fingerprint }}
         run: |
           set -euo pipefail
           awg_pkgs="kmod-amneziawg amneziawg-tools luci-proto-amneziawg"
           pkgs="truba luci-app-truba"
+          if [ "$BUILD_MOSDNS" = true ] && [ "$REUSE_MOSDNS" != true ]; then pkgs="mosdns $pkgs"; fi
           [ "$REUSE_AWG" = true ] || pkgs="$awg_pkgs $pkgs"
           cd sdk
           {
@@ -286,16 +384,18 @@ jobs:
           out="$PWD/bin/truba-feed"
           rm -rf "$out" && mkdir -p "$out"
           find bin -name '*.apk' -newer .config \( -name 'kmod-amneziawg-*' -o -name 'amneziawg-*' \
-            -o -name 'luci-proto-amneziawg-*' -o -name 'luci-i18n-amneziawg-*' -o -name 'truba-*' \
+            -o -name 'luci-proto-amneziawg-*' -o -name 'luci-i18n-amneziawg-*' -o -name 'mosdns-*' -o -name 'truba-*' \
             -o -name 'luci-app-truba-*' -o -name 'luci-i18n-truba-*' \) -not -path "$out/*" -print -exec cp -f {} "$out/" \;
-          if [ "$REUSE_AWG" = true ]; then
+          if ls ../prebuilt/*.apk >/dev/null 2>&1; then
             cp -v ../prebuilt/*.apk "$out/"
           fi
 
+          want="kmod-amneziawg amneziawg-tools luci-proto-amneziawg truba luci-app-truba luci-i18n-truba-ru"
+          [ "$BUILD_MOSDNS" != true ] || want="$want mosdns"
           missing=0
-          for want in kmod-amneziawg amneziawg-tools luci-proto-amneziawg truba luci-app-truba luci-i18n-truba-ru; do
-            if ! ls "$out/$want"-[0-9]*.apk >/dev/null 2>&1; then
-              echo "::error::в фиде нет пакета $want"
+          for w in $want; do
+            if ! ls "$out/$w"-[0-9]*.apk >/dev/null 2>&1; then
+              echo "::error::в фиде нет пакета $w"
               missing=1
             fi
           done
@@ -307,6 +407,7 @@ jobs:
 
           # Зависимости Трубы записаны в EXTRA_DEPENDS: сверяем их в готовых пакетах с Makefile
           # (плюс libc, которую SDK добавляет сам) — упаковка не должна ничего потерять.
+          # kmod-nft-fullcone ожидается, только если он есть в фидах прошивки (TRUBA_FULLCONE).
           deps_of() {
             staging_dir/host/bin/apk adbdump "$out/$1"-[0-9]*.apk \
               | sed -n '/^  depends:/,/^  [a-z-]*:/p' | sed -n 's/^    - \([^<>=~ ]*\).*/\1/p' | sort | xargs
@@ -320,7 +421,10 @@ jobs:
               missing=1
             fi
           }
-          check_deps truba "$(extra_of ../router/truba/Makefile)"
+          truba_deps=$(extra_of ../router/truba/Makefile)
+          grep -qx kmod-nft-fullcone <<<"$truba_deps" || { echo "::error::в router/truba/Makefile не найдена зависимость kmod-nft-fullcone"; exit 1; }
+          [ "$TRUBA_FULLCONE" = 1 ] || truba_deps=$(grep -vx kmod-nft-fullcone <<<"$truba_deps")
+          check_deps truba "$truba_deps"
           check_deps luci-app-truba "$(extra_of ../router/luci-app-truba/Makefile)"
           check_deps luci-i18n-truba-ru luci-app-truba
           [ "$missing" = 0 ] || exit 1
@@ -328,34 +432,61 @@ jobs:
           make package/index V=s PACKAGE_DIR="$out" >logs/index.log 2>&1 || { tail -50 logs/index.log; exit 1; }
           test -s "$out/packages.adb"
 
-          # Отпечаток и состав AmneziaWG — чтобы следующая сборка могла взять его отсюда.
+          # Каждая зависимость Трубы должна ставиться на Роутере: она есть либо в фидах этой
+          # прошивки (fw/packages.txt), либо в только что собранном фиде Трубы. SDK этого не
+          # проверяет — зависимости только в метаданных; без проверки пакет, которого в прошивке
+          # нет (как kmod-nft-fullcone и mosdns в OpenWrt), нашёлся бы только при apk add на Роутере.
+          ours=$(staging_dir/host/bin/apk adbdump "$out/packages.adb" | awk '/^  - name: /{print $3}')
+          [ -n "$ours" ] || { echo "::error::не удалось прочитать индекс фида Трубы"; exit 1; }
+          for p in truba luci-app-truba luci-i18n-truba-ru; do
+            for d in $(deps_of "$p"); do
+              if ! grep -qxF "$d" ../fw/packages.txt && ! grep -qxF "$d" <<<"$ours"; then
+                echo "::error::$p зависит от $d, а его нет ни в фидах $DIST $FW_VERSION, ни в фиде Трубы"
+                missing=1
+              fi
+            done
+          done
+          [ "$missing" = 0 ] || exit 1
+          echo "зависимости truba: $(deps_of truba)"
+
+          # Отпечаток и состав AmneziaWG и mosdns — чтобы следующая сборка могла взять их отсюда.
           find "$out" -maxdepth 1 \( -name 'kmod-amneziawg-*.apk' -o -name 'amneziawg-tools-*.apk' \
             -o -name 'luci-proto-amneziawg-*.apk' -o -name 'luci-i18n-amneziawg-*.apk' \) -printf '%f\n' \
             | sort | jq -R . | jq -sc --arg fp "$AWG_FP" '{fingerprint: $fp, files: .}' > "$out/awg.json"
           cat "$out/awg.json"
+          if [ "$BUILD_MOSDNS" = true ]; then
+            find "$out" -maxdepth 1 -name 'mosdns-*.apk' -printf '%f\n' \
+              | sort | jq -R . | jq -sc --arg fp "$MOSDNS_FP" '{fingerprint: $fp, files: .}' > "$out/mosdns.json"
+            cat "$out/mosdns.json"
+          fi
           ls -la "$out"
 
       - name: Каталог фида
         run: |
           set -euo pipefail
-          dst="publish/$IWRT_VERSION/$TARGET/$SUBTARGET"
+          dst="publish/$FEED_DIR"
           mkdir -p "$dst" publish/keys
           cp -a sdk/bin/truba-feed/. "$dst/"
           cp sdk/public-key.pem publish/keys/truba.pem
-          printf '{"version":"%s","target":"%s","subtarget":"%s","built":"%s"}\n' \
-            "$IWRT_VERSION" "$TARGET" "$SUBTARGET" "$(date -u +%FT%TZ)" > "$dst/feed.json"
+          printf '{"dist":"%s","version":"%s","target":"%s","subtarget":"%s","fullcone":%s,"built":"%s"}\n' \
+            "$DIST" "$FW_VERSION" "$TARGET" "$SUBTARGET" "$([ "$TRUBA_FULLCONE" = 1 ] && echo true || echo false)" \
+            "$(date -u +%FT%TZ)" > "$dst/feed.json"
 
       # Условие выпуска (ADR 0019): пакеты ставятся и обновляются через apk, служба запускается из
-      # postinst и не трогает сеть. Прежняя версия — из опубликованного фида этой же версии
-      # ImmortalWrt (truba собрана с PKGARCH:=all и ставится на x86-64).
+      # postinst и не трогает сеть. Стенд — rootfs того же дистрибутива (x86-64): truba собрана
+      # с PKGARCH:=all и ставится на него. Прежняя версия — из опубликованного фида этой же прошивки.
       - name: Установка и обновление пакета
         run: |
           set -euo pipefail
           . tests/images.env
-          new="$PWD/publish/$IWRT_VERSION/$TARGET/$SUBTARGET"
+          case "$DIST" in
+            openwrt) img="$IMG_OPENWRT"; base_pkgs="$OPENWRT_INSTALL_PKGS" ;;
+            *)       img="$IMG";         base_pkgs="$TEST_PKGS" ;;
+          esac
+          new="$PWD/publish/$FEED_DIR"
           old="$PWD/upgrade-old"
           mkdir -p "$old"
-          base="https://lakardo.github.io/truba/$IWRT_VERSION/$TARGET/$SUBTARGET"
+          base="https://lakardo.github.io/truba/$FEED_DIR"
           prev=
           if curl -fsSL -o "$old/packages.adb" "$base/packages.adb"; then
             prev=$(sdk/staging_dir/host/bin/apk adbdump "$old/packages.adb" \
@@ -366,21 +497,32 @@ jobs:
               || { echo "::error::в фиде есть truba $prev, но файл не скачался"; exit 1; }
             echo "прежняя версия: truba $prev"
           else
-            echo "::warning::в опубликованном фиде $IWRT_VERSION нет truba — случаи обновления пропущены"
+            echo "::warning::в опубликованном фиде $DIST $FW_VERSION нет truba — случаи обновления пропущены"
           fi
           rm -f "$old/packages.adb"
 
-          # Зависимости — в образ заранее: под procd у контейнера нет сети. amneziawg-tools под x86-64
-          # может не быть в фиде образа — тогда пустой пакет с тем же именем.
-          deps=$(grep -oE '[a-z0-9.+_-]+ \(>=[^)]*\)' router/truba/Makefile | cut -d' ' -f1 | grep -vx amneziawg-tools | xargs)
+          # Зависимости — в образ заранее: под procd у контейнера нет сети. Пакеты, собранные в фид
+          # Трубы под архитектуру Роутера (amneziawg-tools, а под OpenWrt и mosdns), для x86-64 могут
+          # не найтись в фидах образа — тогда пустой пакет с тем же именем: стенд проверяет установку
+          # и запуск службы с выключенной Маршрутизацией, mosdns и Туннель при этом не запускаются.
+          # Остальные зависимости ставятся настоящими, иначе шаг падает.
+          stubs="amneziawg-tools"
+          [ "$BUILD_MOSDNS" != true ] || stubs="$stubs mosdns"
+          deps=$(grep -oE '[a-z0-9.+_-]+ \(>=[^)]*\)' router/truba/Makefile | cut -d' ' -f1)
+          [ "$TRUBA_FULLCONE" = 1 ] || deps=$(grep -vx kmod-nft-fullcone <<<"$deps")
+          for s in $stubs; do deps=$(grep -vxF "$s" <<<"$deps"); done
+          deps=$(xargs <<<"$deps")
           # mkpkg есть только у apk из SDK: у apk в образе роутера его нет.
           stub="$PWD/upgrade-stub"
           mkdir -p "$stub/root"
-          sdk/staging_dir/host/bin/apk mkpkg --info name:amneziawg-tools --info version:0-r0 \
-            --info arch:noarch --files "$stub/root" --output "$stub/awg-stub.apk"
-          docker run --name upgrade-base -v "$stub:/stub:ro" "$IMG" sh -c "set -e; apk update >/dev/null; apk add $TEST_PKGS $deps >/dev/null
-            apk add amneziawg-tools >/dev/null 2>&1 || {
-              apk add --allow-untrusted /stub/awg-stub.apk >/dev/null; echo 'amneziawg-tools — пустой пакет'; }"
+          for s in $stubs; do
+            sdk/staging_dir/host/bin/apk mkpkg --info "name:$s" --info version:0-r0 \
+              --info arch:noarch --files "$stub/root" --output "$stub/$s.apk"
+          done
+          docker run --name upgrade-base -v "$stub:/stub:ro" "$img" sh -c "set -e; apk update >/dev/null; apk add $base_pkgs $deps >/dev/null
+            for s in $stubs; do
+              apk add \$s >/dev/null 2>&1 || { apk add --allow-untrusted /stub/\$s.apk >/dev/null; echo \"\$s — пустой пакет\"; }
+            done"
           docker commit upgrade-base truba-upgrade >/dev/null
           docker rm upgrade-base >/dev/null
 
@@ -393,7 +535,8 @@ jobs:
               --entrypoint sh truba-upgrade \
               -c 'mount --bind /dev/null /proc/kmsg && echo "touch /tmp/booted" > /etc/rc.local && exec /sbin/init' >/dev/null
             for _ in $(seq 60); do docker exec "upgrade-$c" test -e /tmp/booted 2>/dev/null && break; sleep 0.5; done
-            docker exec "upgrade-$c" sh /repo/tests/router/upgrade.sh "$c" || failed=1
+            # EXPECT_FULLCONE — что нашлось в фидах прошивки: стенд сверяет с этим то, что видит служба.
+            docker exec -e EXPECT_FULLCONE="$TRUBA_FULLCONE" "upgrade-$c" sh /repo/tests/router/upgrade.sh "$c" || failed=1
             [ "$failed" = 0 ] || docker exec "upgrade-$c" logread | tail -40
             docker rm -f "upgrade-$c" >/dev/null
           done
@@ -401,7 +544,7 @@ jobs:
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: feed-${{ matrix.version }}
+          name: feed-${{ matrix.dist }}-${{ matrix.version }}
           path: publish/
           if-no-files-found: error
 
@@ -409,7 +552,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: build-logs-${{ matrix.version }}
+          name: build-logs-${{ matrix.dist }}-${{ matrix.version }}
           path: sdk/logs/
           if-no-files-found: ignore
 
@@ -437,17 +580,24 @@ jobs:
           pattern: feed-*
           merge-multiple: true
       # Каталог собранной версии заменяется целиком: в нём остаются только пакеты из её индекса,
-      # прежние ревизии не копятся. Каталоги других версий не трогаем.
+      # прежние ревизии не копятся. Каталоги других версий и другого дистрибутива не трогаем.
       - name: Новые фиды вместо прежних
         run: |
           set -euo pipefail
           cd feeds
-          for d in */mediatek/filogic; do rm -rf "../site/$d"; done
+          for d in */mediatek/filogic openwrt/*/mediatek/filogic; do
+            [ -d "$d" ] || continue
+            rm -rf "../site/$d"
+          done
           cp -a . ../site/
+      # ImmortalWrt — номер версии в строке, как и прежде; OpenWrt — «openwrt/<версия>».
       - name: Индекс версий
         run: |
           cd site
-          ls -d */mediatek/filogic 2>/dev/null | cut -d/ -f1 | sort -V > versions.txt
+          {
+            ls -d [0-9]*/mediatek/filogic 2>/dev/null | cut -d/ -f1 | sort -V
+            ls -d openwrt/[0-9]*/mediatek/filogic 2>/dev/null | cut -d/ -f1,2 | sort -V
+          } > versions.txt
           cat versions.txt
       - uses: peaceiris/actions-gh-pages@84c30a85c19949d7eee79c4ff27748b70285e453 # v4.1.0
         with:

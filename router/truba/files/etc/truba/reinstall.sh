@@ -51,26 +51,34 @@ apk list -I truba 2>/dev/null | grep -q '^truba-' && exit 0
 
 restore_dnsmasq
 
-# Ждём интернет до 10 минут (WAIT_TRIES попыток раз в WAIT_STEP с): после прошивки WAN поднимается
-# не сразу, а без интернета пакеты не поставить.
-WAIT_TRIES=60
-WAIT_STEP=10
-i=0
-until nslookup downloads.immortalwrt.org >/dev/null 2>&1; do
-	i=$((i + 1))
-	[ "$i" -ge "$WAIT_TRIES" ] && { log "нет интернета — пакеты Трубы не переустановлены"; exit 1; }
-	sleep "$WAIT_STEP"
-done
-
-. /etc/os-release
 LIST=/etc/apk/repositories.d/truba.list
 if [ ! -f "$LIST" ]; then
 	log "нет $LIST — фид Трубы не настроен"
 	exit 1
 fi
 
-# Каталог фида — под текущую версию ImmortalWrt.
-sed -i -E "s#/[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.]+)?/#/${VERSION}/#" "$LIST"
+# Ждём интернет до 10 минут (WAIT_TRIES попыток раз в WAIT_STEP с): после прошивки WAN поднимается
+# не сразу, а без интернета пакеты не поставить. Проверяется имя самого фида Трубы: оно нужно
+# в любом случае и не зависит от того, чья прошивка стоит (ImmortalWrt или OpenWrt).
+FEED_HOST="$(sed -n -E 's#^https?://([^/:]+).*#\1#p' "$LIST" | head -n 1)"
+WAIT_TRIES=60
+WAIT_STEP=10
+i=0
+until nslookup "${FEED_HOST:-downloads.openwrt.org}" >/dev/null 2>&1; do
+	i=$((i + 1))
+	[ "$i" -ge "$WAIT_TRIES" ] && { log "нет интернета — пакеты Трубы не переустановлены"; exit 1; }
+	sleep "$WAIT_STEP"
+done
+
+# Прошивка — из /etc/os-release: NAME и ID у ImmortalWrt и OpenWrt свои, VERSION — номер выпуска.
+. /etc/os-release
+DIST="${NAME:-OpenWrt}"
+
+# Каталог фида — под текущую прошивку: у ImmortalWrt «/<версия>/», у OpenWrt «/openwrt/<версия>/»
+# (ядра у них разные, и номера выпусков могут совпасть). Меняются и версия, и дистрибутив.
+FEED_DIST=
+[ "${ID:-}" = openwrt ] && FEED_DIST=/openwrt
+sed -i -E "s#(/openwrt)?/[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.]+)?/#${FEED_DIST}/${VERSION}/#" "$LIST"
 
 if ! apk update >/dev/null 2>&1; then
 	log "apk update не прошёл (фид: $(cat "$LIST"))"
@@ -91,10 +99,10 @@ log "Маршрутизация выключена на время устано�
 KMOD=0
 if apk add kmod-amneziawg >/dev/null 2>&1; then
 	KMOD=1
-	log "kmod-amneziawg установлен для ${VERSION}"
+	log "kmod-amneziawg установлен для ${DIST} ${VERSION}"
 else
 	# Остальное всё равно ставим: служба и интерфейс покажут, что Туннеля нет.
-	log "под ImmortalWrt ${VERSION} в фиде ещё нет kmod-amneziawg — Туннель не поднимется, Маршрутизация оставлена выключенной. Когда сборка появится: apk update && apk add kmod-amneziawg && /etc/init.d/network restart && uci set truba.main.routing=$RV && uci commit truba && /etc/init.d/truba reload"
+	log "под ${DIST} ${VERSION} в фиде ещё нет kmod-amneziawg — Туннель не поднимется, Маршрутизация оставлена выключенной. Когда сборка появится: apk update && apk add kmod-amneziawg && /etc/init.d/network restart && uci set truba.main.routing=$RV && uci commit truba && /etc/init.d/truba reload"
 fi
 
 PKGS="amneziawg-tools luci-proto-amneziawg truba luci-app-truba"

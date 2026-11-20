@@ -128,6 +128,17 @@ function neighbours() {
 	return res;
 }
 
+// Действует ли Full cone NAT: прошивка его умеет (U.fullcone_ok) и опция fw4 включена.
+// Там, где его нет (OpenWrt), входящие открывают только пробросы портов и UPnP.
+function fullcone() {
+	let c = cursor(), on = false;
+	if (c.load('firewall'))
+		c.foreach('firewall', 'defaults', (s) => {
+			on ||= (s.fullcone == '1');
+		});
+	return on && U.fullcone_ok();
+}
+
 // Работает ли служба procd (или её инстанс) — по ubus, без pidof. mosdns — инстанс
 // службы truba: чужой mosdns, запущенный отдельно, за Трубу не считается.
 // r — готовый ответ service list, если он уже есть (status спрашивает его один раз на оба экземпляра).
@@ -282,6 +293,7 @@ export function status(allow_cached, part) {
 		counters: counters(raw),
 		traffic: traffic(raw),
 		neighbours: neighbours(),
+		fullcone: fullcone(),
 		upnp: upnp_info(cfg, ub),
 		mosdns: running(ub, 'truba', 'mosdns', svc),
 		// Адрес API — тот, с которым mosdns запущена (его может не быть, если порт занят).
