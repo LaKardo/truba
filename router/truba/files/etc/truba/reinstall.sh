@@ -52,15 +52,12 @@ apk list -I truba 2>/dev/null | grep -q '^truba-' && exit 0
 restore_dnsmasq
 
 LIST=/etc/apk/repositories.d/truba.list
-if [ ! -f "$LIST" ]; then
-	log "нет $LIST — фид Трубы не настроен"
-	exit 1
-fi
 
 # Ждём интернет до 10 минут (WAIT_TRIES попыток раз в WAIT_STEP с): после прошивки WAN поднимается
 # не сразу, а без интернета пакеты не поставить. Проверяется имя самого фида Трубы: оно нужно
-# в любом случае и не зависит от того, чья прошивка стоит (ImmortalWrt или OpenWrt).
-FEED_HOST="$(sed -n -E 's#^https?://([^/:]+).*#\1#p' "$LIST" | head -n 1)"
+# в любом случае и не зависит от того, чья прошивка стоит (ImmortalWrt или OpenWrt). Списка фида
+# может не быть — тогда ждём по запасному имени и сообщаем о списке уже с интернетом, как прежде.
+FEED_HOST="$(sed -n -E 's#^https?://([^/:]+).*#\1#p' "$LIST" 2>/dev/null | head -n 1)"
 WAIT_TRIES=60
 WAIT_STEP=10
 i=0
@@ -69,6 +66,11 @@ until nslookup "${FEED_HOST:-downloads.openwrt.org}" >/dev/null 2>&1; do
 	[ "$i" -ge "$WAIT_TRIES" ] && { log "нет интернета — пакеты Трубы не переустановлены"; exit 1; }
 	sleep "$WAIT_STEP"
 done
+
+if [ ! -f "$LIST" ]; then
+	log "нет $LIST — фид Трубы не настроен"
+	exit 1
+fi
 
 # Прошивка — из /etc/os-release: NAME и ID у ImmortalWrt и OpenWrt свои, VERSION — номер выпуска.
 . /etc/os-release
